@@ -1,0 +1,51 @@
+{
+  "name": "jarvis-dashboard",
+  "private": true,
+  "version": "3.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test:router": "node --test scripts/router.test.mjs",
+    "test:overview": "node --test scripts/overview.test.mjs",
+    "test:dashboard": "node --test",
+    "test:workspace": "node --test scripts/workspace.test.mjs",
+    "test:coding": "node --test scripts/coding.test.mjs",
+    "test:agents": "node --test scripts/agents.test.mjs",
+    "test:tasks": "node --test scripts/tasks.test.mjs",
+    "test:models": "node --test scripts/models.test.mjs",
+    "test:approvals": "node --test scripts/approvals.test.mjs",
+    "test:security": "node --test scripts/security.test.mjs",
+    "test:logs": "node --test scripts/logs.test.mjs",
+    "test:profile": "node --test scripts/profile.test.mjs",
+    "test:knowledge": "node --test scripts/knowledge.test.mjs",
+    "test:skills": "node --test scripts/skills.test.mjs",
+    "test:backend-studio": "node --test scripts/backend-studio.test.mjs",
+    "test:quality-studio": "node --test scripts/quality-studio.test.mjs",
+    "test:design-studio": "node --test scripts/design-studio.test.mjs",
+    "test:hardware-executive-setup": "node --test scripts/hardware-executive-setup.test.mjs",
+    "test:openbot-shell": "node --test scripts/openbot-shell.test.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:report": "playwright show-report"
+  },
+  "dependencies": {
+    "@types/qrcode": "^1.5.6",
+    "lucide-react": "^1.16.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "recharts": "^3.10.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.1",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.1"
+  }
+}

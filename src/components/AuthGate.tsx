@@ -1,0 +1,428 @@
+import React, { FormEvent, useEffect, useState } from 'react';
+import QRCode from 'qrcode';
+import { clearActiveAccountScope, setActiveAccountScope } from '../services/accountScope';
+import { getUserRoleLabel } from '../types';
+
+type LoginMode = 'account' | 'admin' | 'bootstrap';
+
+interface AuthGateProps { children: React.ReactNode; }
+interface SessionInfo { subject_id?: string; user_id?: string; role?: string; }
+interface UserRecord {
+  username: string;
+  display_name: string;
+  role: 'admin' | 'developer' | 'auditor';
+  is_active: boolean;
+  created_at: string;
+}
+
+export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
+  const [status, setStatus] = useState<'checking' | 'anonymous' | 'authenticated'>('checking');
+  const [mode, setMode] = useState<LoginMode>('account');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [token, setToken] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [session, setSession] = useState<SessionInfo | null>(null);
+  const [accessOpen, setAccessOpen] = useState(false);
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [newUser, setNewUser] = useState({ username: '', display_name: '', password: '', role: 'developer' as 'admin' | 'developer' | 'auditor' });
+  const [accessBusy, setAccessBusy] = useState(false);
+  const [accessMessage, setAccessMessage] = useState('');
+  const [resetTarget, setResetTarget] = useState<string | null>(null);
+  const [resetPassword, setResetPassword] = useState('');
+  const [deviceOpen, setDeviceOpen] = useState(false);
+  const [deviceName, setDeviceName] = useState('Meu Android');
+  const [deviceToken, setDeviceToken] = useState('');
+  const [deviceBusy, setDeviceBusy] = useState(false);
+  const [deviceError, setDeviceError] = useState('');
+  const [qrDataUrl, setQrDataUrl] = useState('');
+
+  const verifySession = async () => {
+    try {
+      const response = await fetch('/api/v1/auth/me', { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+      if (!response.ok) {
+        clearActiveAccountScope();
+        setStatus('anonymous');
+        setSession(null);
+        return;
+      }
+      const nextSession = await response.json() as SessionInfo;
+      const accountId = nextSession.user_id || nextSession.subject_id;
+      if (!accountId) throw new Error('A sessão não identificou a conta autenticada.');
+      setActiveAccountScope(accountId);
+      setSession(nextSession);
+      setStatus('authenticated');
+    } catch {
+      clearActiveAccountScope();
+      setStatus('anonymous');
+      setSession(null);
+    }
+  };
+
+  useEffect(() => { void verifySession(); }, []);
+
+  useEffect(() => {
+    const handleOpenAndroid = () => {
+      setDeviceOpen(true);
+      setDeviceToken('');
+      setDeviceError('');
+    };
+    const handleOpenAccess = () => {
+      setAccessOpen(true);
+    };
+    const handleLogout = () => {
+      void logout();
+    };
+    window.addEventListener('jarvis:open-android-pairing', handleOpenAndroid);
+    window.addEventListener('jarvis:open-access-management', handleOpenAccess);
+    window.addEventListener('jarvis:logout', handleLogout);
+    return () => {
+      window.removeEventListener('jarvis:open-android-pairing', handleOpenAndroid);
+      window.removeEventListener('jarvis:open-access-management', handleOpenAccess);
+      window.removeEventListener('jarvis:logout', handleLogout);
+    };
+  }, []);
+
+  const submitLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      const endpoint = mode === 'account' ? '/api/v1/auth/password-login'
+        : mode === 'bootstrap' ? '/api/v1/auth/bootstrap/exchange' : '/api/v1/auth/login';
+      const body = mode === 'account' ? { username: username.trim(), password } : { token: token.trim() };
+      const response = await fetch(endpoint, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'Não foi possível autenticar.');
+      setPassword(''); setToken('');
+      await verifySession();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Falha de comunicação com o servidor.');
+    } finally { setBusy(false); }
+  };
+
+  const logout = async () => {
+    try { await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'same-origin' }); }
+    finally {
+      clearActiveAccountScope();
+      setSession(null);
+      setStatus('anonymous');
+    }
+  };
+
+  const loadUsers = async () => {
+    const response = await fetch('/api/v1/auth/users', { credentials: 'same-origin' });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.detail || 'Não foi possível carregar os utilizadores.');
+    setUsers(payload.users || []);
+  };
+
+  useEffect(() => {
+    if (accessOpen && session?.role === 'admin') {
+      void loadUsers().catch((cause) => setAccessMessage(cause.message));
+    }
+  }, [accessOpen, session?.role]);
+
+  const createUser = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setAccessBusy(true); setAccessMessage('');
+    try {
+      const response = await fetch('/api/v1/auth/users', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newUser),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'Não foi possível criar a conta.');
+      setNewUser({ username: '', display_name: '', password: '', role: 'developer' });
+      setAccessMessage('Conta criada. Partilhe o utilizador e a palavra-passe por um canal seguro.');
+      await loadUsers();
+    } catch (cause) {
+      setAccessMessage(cause instanceof Error ? cause.message : 'Erro ao criar conta.');
+    } finally { setAccessBusy(false); }
+  };
+
+
+  const resetUserPassword = (user: UserRecord) => {
+    setResetTarget(user.username);
+    setResetPassword('');
+    setAccessMessage('');
+  };
+
+  const submitPasswordReset = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!resetTarget || resetPassword.length < 12) {
+      setAccessMessage('A palavra-passe precisa de pelo menos 12 caracteres.');
+      return;
+    }
+    setAccessBusy(true); setAccessMessage('');
+    try {
+      const response = await fetch(`/api/v1/auth/users/${encodeURIComponent(resetTarget)}/password`, {
+        method: 'PUT', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: resetPassword }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'Não foi possível redefinir a palavra-passe.');
+      setAccessMessage(`Palavra-passe de @${resetTarget} atualizada. As sessões anteriores foram encerradas.`);
+      setResetTarget(null);
+      setResetPassword('');
+    } catch (cause) {
+      setAccessMessage(cause instanceof Error ? cause.message : 'Erro ao redefinir palavra-passe.');
+    } finally { setAccessBusy(false); }
+  };
+
+  const pairOwnDevice = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setDeviceBusy(true);
+    setDeviceError('');
+    try {
+      const response = await fetch('/api/v1/mobile/pair', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ device_name: deviceName.trim() }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'Não foi possível emparelhar o dispositivo.');
+      if (!payload.device_token) throw new Error('O servidor não devolveu o token do dispositivo.');
+      setDeviceToken(payload.device_token);
+      try {
+        const qrContent = payload.pairing_payload || JSON.stringify({
+          hub: 'jarvis-hub',
+          v: '3.0.1',
+          url: payload.server_url || window.location.origin,
+          token: payload.device_token,
+          device_name: deviceName.trim(),
+        });
+        const url = await QRCode.toDataURL(qrContent, { width: 200, margin: 2, color: { dark: '#000000', light: '#ffffff' } });
+        setQrDataUrl(url);
+      } catch {}
+    } catch (cause) {
+      setDeviceError(cause instanceof Error ? cause.message : 'Falha ao emparelhar o dispositivo.');
+    } finally {
+      setDeviceBusy(false);
+    }
+  };
+
+  const closeDevicePairing = () => {
+    setDeviceOpen(false);
+    setDeviceToken('');
+    setQrDataUrl('');
+    setDeviceError('');
+  };
+
+  const toggleUser = async (user: UserRecord) => {
+    setAccessBusy(true); setAccessMessage('');
+    try {
+      const response = await fetch(`/api/v1/auth/users/${encodeURIComponent(user.username)}/status`, {
+        method: 'PATCH', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: !user.is_active }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'Não foi possível alterar o acesso.');
+      await loadUsers();
+    } catch (cause) {
+      setAccessMessage(cause instanceof Error ? cause.message : 'Erro ao atualizar conta.');
+    } finally { setAccessBusy(false); }
+  };
+
+  if (status === 'checking') {
+    return <main style={styles.screen}><section style={styles.panel}><div style={styles.mark}>J</div><h1 style={styles.title}>JARVIS AI HUB</h1><p style={styles.muted}>A verificar sessão segura...</p><div style={styles.progress} /></section></main>;
+  }
+
+  if (status === 'anonymous') {
+    return (
+      <main style={styles.screen}>
+        <section style={styles.panel} aria-labelledby="login-title">
+          <div style={styles.brandRow}><div style={styles.mark}>J</div><span style={styles.brand}>JARVIS <b>AI HUB</b></span></div>
+          <p style={styles.eyebrow}>AMBIENTE PRIVADO · ACESSO PROTEGIDO</p>
+          <h1 id="login-title" style={styles.title}>Bem-vindo de volta</h1>
+          <p style={styles.muted}>Entre na sua conta para continuar o trabalho com o Jarvis e a sua equipa de agentes.</p>
+          {mode === 'account' ? (
+            <form onSubmit={submitLogin} style={styles.form}>
+              <label style={styles.label} htmlFor="auth-user">Utilizador</label>
+              <input id="auth-user" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="O seu utilizador" style={styles.input} required />
+              <label style={styles.label} htmlFor="auth-password">Palavra-passe</label>
+              <input id="auth-password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="A sua palavra-passe" style={styles.input} required />
+              {error && <div role="alert" style={styles.error}>{error}</div>}
+              <button type="submit" disabled={busy} style={styles.button}>{busy ? 'A autenticar...' : 'Entrar no Jarvis'}</button>
+            </form>
+          ) : (
+            <>
+            {mode === 'bootstrap' && (
+              <p style={styles.helpText}>
+                Na pasta do projeto, execute <code>python -m apps.api.auth_cli status</code>.
+                Se precisar de um novo token, execute <code>python -m apps.api.auth_cli bootstrap --ttl 600</code>
+                e copie o conteúdo do arquivo indicado pelo terminal. O token é de uso único.
+              </p>
+            )}
+            <form onSubmit={submitLogin} style={styles.form}>
+              <label style={styles.label} htmlFor="auth-token">{mode === 'bootstrap' ? 'Token inicial de ativação' : 'Token de administrador'}</label>
+              <input id="auth-token" type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Cole o token de acesso" style={styles.input} required />
+              {error && <div role="alert" style={styles.error}>{error}</div>}
+              <button type="submit" disabled={busy} style={styles.button}>{busy ? 'A autenticar...' : 'Validar acesso'}</button>
+            </form>
+            </>
+          )}
+          <div className="auth-mode-links" role="group" aria-label="Métodos de acesso">
+            <button className={mode === 'account' ? 'auth-mode-link is-active' : 'auth-mode-link'} type="button" onClick={() => { setMode('account'); setError(''); }}>Conta e palavra-passe</button>
+            <button className={mode === 'bootstrap' ? 'auth-mode-link is-active' : 'auth-mode-link'} type="button" onClick={() => { setMode('bootstrap'); setError(''); }}>Primeiro acesso</button>
+            <button className={mode === 'admin' ? 'auth-mode-link is-active' : 'auth-mode-link'} type="button" onClick={() => { setMode('admin'); setError(''); }}>Token admin</button>
+          </div>
+          <div style={styles.securityNote}><span aria-hidden="true">🔒</span><span>As palavras-passe são armazenadas com hash seguro. A sessão utiliza cookie HttpOnly e o navegador não guarda as credenciais.</span></div>
+          <p style={styles.footer}>JARVIS AI HUB · Orquestração inteligente multiagente</p>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <>
+      {children}
+      {deviceOpen && (session?.role === 'admin' || session?.role === 'developer') && (
+        <div style={styles.overlay} role="presentation" onClick={closeDevicePairing}>
+          <section style={styles.accessPanel} role="dialog" aria-modal="true" aria-labelledby="device-title" onClick={(e) => e.stopPropagation()}>
+            <div style={styles.accessHeader}>
+              <div>
+                <p style={styles.eyebrow}>DISPOSITIVO DA SUA CONTA</p>
+                <h2 id="device-title" style={styles.accessTitle}>Conectar app Android</h2>
+              </div>
+              <button type="button" style={styles.close} onClick={closeDevicePairing}>×</button>
+            </div>
+            {!deviceToken ? (
+              <>
+                <p style={styles.mutedSmall}>
+                  Gere um token pessoal. O dispositivo ficará associado apenas à sua conta e não poderá consultar dados de outros utilizadores.
+                </p>
+                <form onSubmit={pairOwnDevice} style={styles.userForm}>
+                  <label style={styles.label} htmlFor="device-name">Nome do dispositivo</label>
+                  <input id="device-name" value={deviceName} onChange={(e) => setDeviceName(e.target.value)} style={styles.input} maxLength={100} required />
+                  {deviceError && <div role="alert" style={styles.error}>{deviceError}</div>}
+                  <button type="submit" disabled={deviceBusy} style={styles.button}>
+                    {deviceBusy ? 'A emparelhar...' : 'Gerar token do meu dispositivo'}
+                  </button>
+                </form>
+              </>
+            ) : (
+              <div style={{ display: 'grid', gap: 12, textAlign: 'center' }}>
+                <p style={styles.mutedSmall}>
+                  Aponte a câmera do aplicativo mobile para escanear o QR Code abaixo ou copie o token. O pareamento é instantâneo.
+                </p>
+                {qrDataUrl && (
+                  <div style={{ display: 'flex', justifyContent: 'center', margin: '8px 0' }}>
+                    <div style={{ background: '#ffffff', padding: '12px', borderRadius: '12px', display: 'inline-block', boxShadow: '0 4px 12px rgba(0,0,0,0.4)' }}>
+                      <img src={qrDataUrl} alt="QR Code de Pareamento" style={{ width: 180, height: 180, display: 'block' }} />
+                    </div>
+                  </div>
+                )}
+                <input aria-label="Token do dispositivo" readOnly value={deviceToken} style={{ ...styles.input, fontFamily: 'monospace', textAlign: 'center' }} onFocus={(e) => e.currentTarget.select()} />
+                <button type="button" style={styles.button} onClick={() => void navigator.clipboard.writeText(deviceToken)}>
+                  Copiar token
+                </button>
+                <button type="button" style={styles.cancelButton} onClick={closeDevicePairing}>Concluído</button>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+      {accessOpen && session?.role === 'admin' && (
+        <div style={styles.overlay} role="presentation" onClick={() => setAccessOpen(false)}>
+          <section style={styles.accessPanel} role="dialog" aria-modal="true" aria-labelledby="access-title" onClick={(e) => e.stopPropagation()}>
+            <div style={styles.accessHeader}><div><p style={styles.eyebrow}>ADMINISTRAÇÃO</p><h2 id="access-title" style={styles.accessTitle}>Gestão de acessos</h2></div><button type="button" style={styles.close} onClick={() => setAccessOpen(false)}>×</button></div>
+            <p style={styles.mutedSmall}>Crie uma conta individual para cada pessoa. O registo público está desativado.</p>
+            <form onSubmit={createUser} style={styles.userForm}>
+              <label style={styles.label}>Nome de utilizador</label>
+              <input value={newUser.username} onChange={(e) => setNewUser({ ...newUser, username: e.target.value })} style={styles.input} minLength={3} maxLength={48} pattern="[a-zA-Z0-9._-]+" required />
+              <label style={styles.label}>Nome apresentado</label>
+              <input value={newUser.display_name} onChange={(e) => setNewUser({ ...newUser, display_name: e.target.value })} style={styles.input} minLength={2} maxLength={100} required />
+              <label style={styles.label}>Palavra-passe inicial (mínimo 12 caracteres)</label>
+              <input type="password" autoComplete="new-password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} style={styles.input} minLength={12} required />
+              <label style={styles.label}>Perfil de acesso</label>
+              <select value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value as 'admin' | 'developer' | 'auditor' })} style={styles.input}>
+                <option value="admin">Administrador — controlo total</option>
+                <option value="developer">Desenvolvedor — acesso de trabalho</option>
+                <option value="auditor">Auditor — apenas leitura</option>
+              </select>
+              <button type="submit" disabled={accessBusy} style={styles.button}>{accessBusy ? 'A criar...' : 'Criar conta'}</button>
+            </form>
+            {resetTarget && (
+              <form onSubmit={submitPasswordReset} style={styles.resetForm}>
+                <b style={styles.resetHeading}>Nova palavra-passe para @{resetTarget}</b>
+                <input type="password" autoComplete="new-password" value={resetPassword} onChange={(e) => setResetPassword(e.target.value)} style={styles.input} minLength={12} placeholder="Mínimo de 12 caracteres" required />
+                <div style={styles.resetActions}>
+                  <button type="button" onClick={() => { setResetTarget(null); setResetPassword(''); }} style={styles.cancelButton}>Cancelar</button>
+                  <button type="submit" disabled={accessBusy} style={styles.resetConfirmButton}>{accessBusy ? 'A guardar...' : 'Guardar palavra-passe'}</button>
+                </div>
+              </form>
+            )}
+            {accessMessage && <p role="status" style={styles.accessMessage}>{accessMessage}</p>}
+            <h3 style={styles.listTitle}>Contas registadas</h3>
+            <div style={styles.userList}>
+              {users.map((user) => <div key={user.username} style={styles.userRow}>
+                <div><b>{user.display_name}</b><span style={styles.userMeta}>@{user.username} · {getUserRoleLabel(user.role)}</span></div>
+                <div style={styles.userActions}>
+                  <button type="button" disabled={accessBusy} onClick={() => void resetUserPassword(user)} style={styles.resetButton}>Redefinir senha</button>
+                  <button type="button" disabled={accessBusy} onClick={() => void toggleUser(user)} style={user.is_active ? styles.disableButton : styles.enableButton}>{user.is_active ? 'Desativar' : 'Ativar'}</button>
+                </div>
+              </div>)}
+              {users.length === 0 && <p style={styles.mutedSmall}>Ainda não existem contas locais.</p>}
+            </div>
+          </section>
+        </div>
+      )}
+    </>
+  );
+};
+
+const styles: Record<string, React.CSSProperties> = {
+  screen: { minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 'clamp(16px, 4vw, 36px)', background: 'radial-gradient(ellipse at 50% 0%, var(--accent-glow) 0%, var(--bg-primary) 55%, #11100f 100%)', color: 'var(--text-primary)', fontFamily: 'var(--font-sans)' },
+  panel: { width: 'min(100%, 460px)', boxSizing: 'border-box', padding: 'clamp(22px, 5vw, 38px)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-xl)', background: 'var(--bg-secondary)', boxShadow: '0 24px 80px rgba(0,0,0,.38)' },
+  brandRow: { display: 'flex', alignItems: 'center', gap: 13, marginBottom: 26 },
+  brand: { color: 'var(--text-primary)', fontSize: 15, letterSpacing: '.12em', fontWeight: 700 },
+  mark: { width: 48, height: 48, display: 'grid', placeItems: 'center', borderRadius: 'var(--radius-lg)', background: 'linear-gradient(135deg,var(--accent-color),var(--accent-hover))', fontSize: 25, fontWeight: 800, color: '#fff', boxShadow: '0 8px 24px var(--accent-glow)' },
+  eyebrow: { color: 'var(--accent-color)', fontSize: 10, fontWeight: 700, letterSpacing: '.16em', margin: '0 0 9px' },
+  title: { fontSize: 'clamp(24px, 5vw, 29px)', letterSpacing: '-.04em', margin: '0 0 10px', color: 'var(--text-primary)' },
+  muted: { color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.65, margin: '0 0 25px' },
+  mutedSmall: { color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.55, margin: '0 0 18px' },
+  form: { display: 'grid', gap: 10 },
+  helpText: { margin: '0 0 14px', color: 'var(--text-secondary)', fontSize: 11, lineHeight: 1.65 },
+  userForm: { display: 'grid', gap: 8 },
+  label: { color: 'var(--text-secondary)', fontSize: 11, fontWeight: 650, marginTop: 6 },
+  input: { width: '100%', minWidth: 0, boxSizing: 'border-box', padding: '12px 13px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', background: 'var(--bg-primary)', color: 'var(--text-primary)', outline: 'none', fontSize: 13 },
+  button: { marginTop: 10, padding: '13px 16px', border: 0, borderRadius: 'var(--radius-md)', background: 'linear-gradient(135deg,var(--accent-color),var(--accent-hover))', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 22px var(--accent-glow)' },
+  error: { padding: 11, borderRadius: 9, background: 'rgba(127,29,29,.3)', border: '1px solid rgba(248,113,113,.35)', color: '#fecaca', fontSize: 12 },
+  modeLinks: { display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'center', marginTop: 19 },
+  securityNote: { display: 'flex', gap: 9, alignItems: 'flex-start', marginTop: 21, padding: 12, borderRadius: 'var(--radius-md)', background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', fontSize: 10, lineHeight: 1.5 },
+  footer: { textAlign: 'center', color: 'var(--text-muted)', fontSize: 10, margin: '23px 0 0' },
+  progress: { height: 3, borderRadius: 3, background: 'linear-gradient(90deg,var(--accent-color),var(--accent-hover))', marginTop: 24, animation: 'pulse 1.4s infinite' },
+  sessionPill: { position: 'fixed', right: 16, bottom: 14, zIndex: 3000, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, maxWidth: 'calc(100vw - 32px)', padding: '8px 11px', borderRadius: 999, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', fontSize: 11, boxShadow: '0 8px 30px rgba(0,0,0,.25)' },
+  sessionDot: { width: 7, height: 7, borderRadius: '50%', background: '#22c55e' },
+  pillButton: { border: 0, borderLeft: '1px solid var(--border-color)', paddingLeft: 9, background: 'transparent', color: 'var(--accent-color)', cursor: 'pointer', fontSize: 11 },
+  logout: { border: 0, borderLeft: '1px solid var(--border-color)', paddingLeft: 9, background: 'transparent', color: 'var(--danger-color)', cursor: 'pointer', fontSize: 11 },
+  overlay: { position: 'fixed', inset: 0, zIndex: 4000, display: 'grid', placeItems: 'center', padding: 18, background: 'rgba(0,0,0,.72)', backdropFilter: 'blur(8px)' },
+  accessPanel: { width: 'min(100%, 560px)', maxHeight: 'min(90vh, 850px)', overflowY: 'auto', boxSizing: 'border-box', padding: 'clamp(18px, 4vw, 25px)', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', boxShadow: '0 25px 90px rgba(0,0,0,.5)' },
+  accessHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' },
+  accessTitle: { margin: 0, fontSize: 23, color: 'var(--text-primary)' },
+  close: { border: 0, background: 'transparent', color: 'var(--text-secondary)', fontSize: 28, cursor: 'pointer' },
+  accessMessage: { padding: 10, borderRadius: 8, background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', fontSize: 12 },
+  listTitle: { margin: '24px 0 10px', fontSize: 14 },
+  userList: { display: 'grid', gap: 8 },
+  userRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, padding: 11, borderRadius: 9, background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)' },
+  userMeta: { display: 'block', marginTop: 3, color: 'var(--text-secondary)', fontSize: 10 },
+  resetForm: { display: 'grid', gap: 9, marginTop: 14, padding: 13, borderRadius: 10, border: '1px solid var(--border-color)', background: 'var(--bg-tertiary)' },
+  resetHeading: { fontSize: 12, color: 'var(--text-primary)' },
+  resetActions: { display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' },
+  cancelButton: { border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-secondary)', borderRadius: 7, padding: '8px 11px', cursor: 'pointer', fontSize: 11 },
+  resetConfirmButton: { border: 0, background: 'var(--accent-color)', color: '#fff', borderRadius: 7, padding: '8px 11px', cursor: 'pointer', fontSize: 11, fontWeight: 650 },
+  userActions: { display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' },
+  resetButton: { border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-primary)', borderRadius: 7, padding: '7px 10px', cursor: 'pointer', fontSize: 11 },
+  disableButton: { border: '1px solid #7f1d1d', background: 'rgba(127,29,29,.2)', color: '#fecaca', borderRadius: 7, padding: '7px 10px', cursor: 'pointer', fontSize: 11 },
+  enableButton: { border: '1px solid #166534', background: 'rgba(22,101,52,.2)', color: '#bbf7d0', borderRadius: 7, padding: '7px 10px', cursor: 'pointer', fontSize: 11 },
+};

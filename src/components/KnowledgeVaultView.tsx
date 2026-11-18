@@ -1,0 +1,336 @@
+import React, { useState, useEffect } from 'react';
+import {
+  RefreshCw,
+  Plus,
+} from 'lucide-react';
+import {
+  fetchKnowledgeDocuments,
+  uploadKnowledgeDocument,
+  indexKnowledgeFolder,
+  indexKnowledgeText,
+  searchKnowledge,
+  deleteKnowledgeDocument,
+} from '../api';
+import { notify } from './common/Toast';
+import { ConfirmDialog } from './common/ConfirmDialog';
+import { API_BASE } from '../services/api/client';
+import { KnowledgeSearchBar } from './knowledge/KnowledgeSearchBar';
+import { DocumentListGrid } from './knowledge/DocumentListGrid';
+import { FolderIndexModal, TextSnippetModal } from './knowledge/DocumentModals';
+
+export const KnowledgeVaultView: React.FC = () => {
+  const [documents, setDocuments] = useState<any[]>([]);
+  const [canManageKnowledge, setCanManageKnowledge] = useState(false);
+  const [roleLoaded, setRoleLoaded] = useState(false);
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [documentsError, setDocumentsError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+
+  // Modais de Entrada
+  const [showFolderModal, setShowFolderModal] = useState(false);
+  const [folderPath, setFolderPath] = useState('');
+  const [folderCategory, setFolderCategory] = useState('projeto');
+  const [folderIndexing, setFolderIndexing] = useState(false);
+
+  const [showTextModal, setShowTextModal] = useState(false);
+  const [textDocName, setTextDocName] = useState('');
+  const [textContent, setTextContent] = useState('');
+  const [textCategory, setTextCategory] = useState('anotacoes');
+  const [textIndexing, setTextIndexing] = useState(false);
+  const [pendingDeleteDoc, setPendingDeleteDoc] = useState<string | null>(null);
+  const [deletingDoc, setDeletingDoc] = useState(false);
+
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const loadDocuments = async () => {
+    setLoading(true);
+    try {
+      const docs = await fetchKnowledgeDocuments();
+      setDocuments(docs || []);
+      setDocumentsError(null);
+    } catch (e: any) {
+      setDocumentsError(e instanceof Error ? e.message : 'Falha ao carregar documentos do Knowledge Vault.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_BASE}/auth/me`, { credentials: 'include' })
+      .then(async (response) => (response.ok ? response.json() : null))
+      .then((principal) => {
+        if (cancelled) return;
+        setCanManageKnowledge(
+          principal?.kind === 'human' &&
+          (principal?.role === 'admin' || principal?.role === 'developer')
+        );
+        setRoleLoaded(true);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCanManageKnowledge(false);
+          setRoleLoaded(true);
+        }
+      });
+    loadDocuments();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleSearch = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    setIsSearching(true);
+    try {
+      const results = await searchKnowledge(searchQuery.trim(), 5);
+      setSearchResults(results || []);
+      if (!results || results.length === 0) {
+        notify('Nenhum trecho relevante encontrado para esta consulta', 'info');
+      }
+    } catch (err: any) {
+      notify(`Erro ao consultar Vault: ${err.message}`, 'error');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canManageKnowledge) return;
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 25 * 1024 * 1024) {
+      notify('O arquivo excede o limite de 25 MB.', 'error');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+    setUploadingFile(true);
+    notify(`Indexando '${file.name}' no Knowledge Vault...`, 'info');
+    try {
+      const res = await uploadKnowledgeDocument(file, 'manuais');
+      notify(`Documento '${file.name}' processado em ${res.chunks_count} trechos semânticos!`, 'success');
+      await loadDocuments();
+    } catch (err: any) {
+      notify(`Falha ao indexar arquivo: ${err.message}`, 'error');
+    } finally {
+      setUploadingFile(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleFolderSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canManageKnowledge) return;
+    if (!folderPath.trim()) return;
+
+    setFolderIndexing(true);
+    notify(`Varrendo e indexando diretório no servidor JARVIS...`, 'info');
+    try {
+      const res = await indexKnowledgeFolder(folderPath.trim(), folderCategory);
+      notify(`Varredura concluída: ${res.indexed_count} arquivos indexados com sucesso!`, 'success');
+      setShowFolderModal(false);
+      setFolderPath('');
+      await loadDocuments();
+    } catch (err: any) {
+      notify(`Erro ao indexar pasta: ${err.message}`, 'error');
+    } finally {
+      setFolderIndexing(false);
+    }
+  };
+
+  const handleTextSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canManageKnowledge) return;
+    if (!textDocName.trim() || !textContent.trim()) return;
+
+    setTextIndexing(true);
+    try {
+      const res = await indexKnowledgeText(textDocName.trim(), textContent.trim(), textCategory);
+      notify(`Anotação '${textDocName}' indexada em ${res.chunks_count} blocos!`, 'success');
+      setShowTextModal(false);
+      setTextDocName('');
+      setTextContent('');
+      await loadDocuments();
+    } catch (err: any) {
+      notify(`Erro ao salvar anotação: ${err.message}`, 'error');
+    } finally {
+      setTextIndexing(false);
+    }
+  };
+
+  const handleDelete = (docName: string) => {
+    if (!canManageKnowledge) return;
+    setPendingDeleteDoc(docName);
+  };
+
+  const confirmDeleteDoc = async () => {
+    if (!canManageKnowledge || !pendingDeleteDoc) return;
+    const docName = pendingDeleteDoc;
+    setDeletingDoc(true);
+    try {
+      const result = await deleteKnowledgeDocument(docName);
+      if (result?.status !== 'deleted') {
+        throw new Error('O documento não foi encontrado na sua conta.');
+      }
+      notify(`Documento '${docName}' removido com sucesso`, 'success');
+      setPendingDeleteDoc(null);
+      await loadDocuments();
+      if (searchQuery) handleSearch();
+    } catch (err: any) {
+      notify(`Erro ao excluir documento: ${err.message}`, 'error');
+    } finally {
+      setDeletingDoc(false);
+    }
+  };
+
+  const totalChunks = documents.reduce((acc, d) => acc + (d.total_chunks || 0), 0);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', maxWidth: '1280px', margin: '0 auto' }}>
+      {!roleLoaded && <div role="status" className="glass-panel" style={{ padding: '10px 14px', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>Verificando permissões de gerenciamento do Knowledge Vault…</div>}
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+        <div>
+          <h2
+            className="claude-serif-title"
+            style={{
+              fontSize: '1.6rem',
+              fontWeight: 500,
+              margin: 0,
+              letterSpacing: '-0.02em',
+              color: 'var(--text-primary)',
+            }}
+          >
+            Base de Conhecimento & RAG Local
+          </h2>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', margin: '4px 0 0 0' }}>
+            {documents.length} documentos indexados ({totalChunks} trechos semânticos) com recuperação contextual para os agentes autorizados da conta.
+          </p>
+        </div>
+
+        {/* Botões de Ação */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {canManageKnowledge && <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileUpload}
+            style={{ display: 'none' }}
+            accept=".pdf,.docx,.md,.txt,.json,.yaml,.yml,.py,.ts,.tsx,.java,.go,.cs,.sql"
+            disabled={uploadingFile}
+          />}
+
+          {canManageKnowledge && <button
+            onClick={() => fileInputRef.current?.click()}
+            className="btn btn-primary"
+            style={{
+              fontSize: '0.82rem',
+              padding: '7px 14px',
+              borderRadius: '8px',
+            }}
+          >
+          <span>{uploadingFile ? 'Indexando…' : 'Upload de Arquivo'}</span>
+          </button>}
+
+          {canManageKnowledge && <button
+            onClick={() => setShowFolderModal(true)}
+            className="btn btn-secondary"
+            style={{ fontSize: '0.82rem', padding: '7px 14px', borderRadius: '8px' }}
+          >
+            <span>Indexar Pasta do Servidor</span>
+          </button>}
+
+          {canManageKnowledge && <button
+            onClick={() => setShowTextModal(true)}
+            className="btn btn-secondary"
+            style={{ fontSize: '0.82rem', padding: '8px 14px', display: 'flex', alignItems: 'center', gap: '6px', borderRadius: '8px' }}
+          >
+            <Plus size={14} />
+            <span>Adicionar Anotação</span>
+          </button>}
+
+          <button
+            onClick={loadDocuments}
+            className="btn btn-ghost"
+            style={{ padding: '8px 12px', color: 'var(--text-muted)', borderRadius: '8px' }}
+            title="Atualizar lista"
+          >
+            <RefreshCw size={14} className={loading ? 'spin' : ''} />
+          </button>
+        </div>
+      </div>
+
+      {/* Barra e Resultados de Pesquisa Semântica */}
+      <KnowledgeSearchBar
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        onSearch={handleSearch}
+        isSearching={isSearching}
+        searchResults={searchResults}
+        onClear={() => {
+          setSearchResults([]);
+          setSearchQuery('');
+        }}
+      />
+
+      {/* Grade de Documentos */}
+      <DocumentListGrid
+        documents={documents}
+        loading={loading}
+        error={documentsError}
+        onDelete={handleDelete}
+        canManage={canManageKnowledge}
+        onSelectFileClick={() => fileInputRef.current?.click()}
+      />
+
+      {/* Modais */}
+      {canManageKnowledge && <FolderIndexModal
+        isOpen={showFolderModal}
+        onClose={() => setShowFolderModal(false)}
+        folderPath={folderPath}
+        setFolderPath={setFolderPath}
+        folderCategory={folderCategory}
+        setFolderCategory={setFolderCategory}
+        onSubmit={handleFolderSubmit}
+        indexing={folderIndexing}
+      />}
+
+      {canManageKnowledge && <TextSnippetModal
+        isOpen={showTextModal}
+        onClose={() => setShowTextModal(false)}
+        textDocName={textDocName}
+        setTextDocName={setTextDocName}
+        textContent={textContent}
+        setTextContent={setTextContent}
+        textCategory={textCategory}
+        setTextCategory={setTextCategory}
+        onSubmit={handleTextSubmit}
+        indexing={textIndexing}
+      />}
+
+      <ConfirmDialog
+        isOpen={Boolean(pendingDeleteDoc)}
+        title="Remover documento"
+        description={
+          pendingDeleteDoc ? (
+            <>
+              Tem certeza que deseja remover <strong>{pendingDeleteDoc}</strong> da Base de Conhecimento?
+            </>
+          ) : null
+        }
+        confirmLabel="Remover"
+        tone="danger"
+        isLoading={deletingDoc}
+        onConfirm={confirmDeleteDoc}
+        onCancel={() => setPendingDeleteDoc(null)}
+      />
+    </div>
+  );
+};
