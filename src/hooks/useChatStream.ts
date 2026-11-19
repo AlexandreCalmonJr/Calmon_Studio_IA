@@ -8,13 +8,13 @@ import {
 } from '../api';
 import { ChatMessage } from '../types';
 import { getAccountStorageKey } from '../services/accountScope';
-import { notify } from '../components/common/Toast';
-import { CanvasArtifact } from '../components/chat/ArtifactCanvas';
+import { notify } from '../shared/common/Toast';
+import { CanvasArtifact } from '../features/chat/ArtifactCanvas';
 import {
   saveSessionMessagesLocally,
   getLocalSessionsCatalog,
   saveLocalSessionsCatalog,
-} from '../components/chat/ChatHistoryDrawer';
+} from '../features/chat/ChatHistoryDrawer';
 
 const STORAGE_MESSAGES_KEY = 'jarvis_chat_messages_v1';
 const STORAGE_SESSION_KEY = 'jarvis_chat_session_id_v1';
@@ -415,7 +415,11 @@ export function useChatStream(
     }
   };
 
-  const handleSubmit = async (promptToSend: string, modelOverride?: string) => {
+  const handleSubmit = async (
+    promptToSend: string,
+    modelOverride?: string,
+    options?: { enableWebSearch?: boolean; assistantName?: string }
+  ) => {
     const trimmed = promptToSend.trim();
     if (!trimmed || loading) return;
 
@@ -642,15 +646,25 @@ export function useChatStream(
         },
         (meta: any) => {
           metaInfo = meta;
+          setMessages((prev) => {
+            const next = [...prev];
+            const lastIdx = next.length - 1;
+            if (lastIdx >= 0 && next[lastIdx].sender === 'jarvis') {
+              next[lastIdx] = {
+                ...next[lastIdx],
+                taskData: {
+                  ...next[lastIdx].taskData,
+                  ...meta,
+                },
+              };
+            }
+            return next;
+          });
         },
         (done: any) => {
           finishStream();
-          const baseText = done.final_summary || accumulatedText || 'Tarefa concluída.';
+          const finalText = done.final_summary || accumulatedText || 'Tarefa concluída.';
           const sourceList = Array.isArray(done.sources) ? done.sources : [];
-          const citations = sourceList.length
-            ? `\n\nFontes consultadas:\n${sourceList.map((source: any) => `- [${source.title || source.url}](${source.url})${source.retrieved_at ? ` · ${source.retrieved_at}` : ''}`).join('\n')}`
-            : '';
-          const finalText = `${baseText}${citations}`;
           setMessages((prev) => {
             const next = [...prev];
             const lastIdx = next.length - 1;
@@ -664,6 +678,18 @@ export function useChatStream(
                   is_completed: done.is_completed,
                   approval_required: done.approval_required,
                   approval_id: done.approval_id,
+                  execution_mode: done.execution_mode || metaInfo?.execution_mode,
+                  provider: done.provider || metaInfo?.provider,
+                  model_used: done.model_used || metaInfo?.model_used,
+                  latency_ms: done.latency_ms ?? metaInfo?.latency_ms,
+                  reasoning: done.reasoning || metaInfo?.reasoning,
+                  routing_note: done.routing_note || metaInfo?.routing_note,
+                  sources: sourceList,
+                  agent_meta: done.agent_meta || metaInfo?.agent_meta,
+                  selected_agents: done.selected_agents || metaInfo?.selected_agents || [],
+                  plan_steps: done.plan_steps || metaInfo?.plan_steps || [],
+                  classified_intent: done.classified_intent || metaInfo?.classified_intent,
+                  agent_outputs: done.agent_outputs || metaInfo?.agent_outputs,
                 },
               };
             }
@@ -752,7 +778,8 @@ export function useChatStream(
           });
         },
         abortCtrl.signal,
-        modelOverride
+        modelOverride,
+        options
       );
     } catch (err: any) {
       finishStream();
