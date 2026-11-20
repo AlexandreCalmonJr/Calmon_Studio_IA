@@ -1,17 +1,22 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { OfficeAgent } from './AgentOfficeView';
+import type { OfficeAgent } from './AgentOfficeView';
+import type { LiveOfficeAgentStatus } from '../../services/api/orchestration';
 
 interface AgentOfficeCanvasProps {
   agents: OfficeAgent[];
   onSelectAgent: (agent: OfficeAgent) => void;
-  activeMeeting?: boolean;
+  liveStatuses?: LiveOfficeAgentStatus[];
+  roundtableActiveRoles?: string[];
+  roundtableTopic?: string | null;
+  assistantName?: string;
 }
 
 interface CanvasAvatar {
   id: string;
   name: string;
+  properName: string;
   role: string;
-  department: string;
+  department: OfficeAgent['department'];
   color: string;
   x: number;
   y: number;
@@ -20,87 +25,213 @@ interface CanvasAvatar {
   targetX: number;
   targetY: number;
   speed: number;
-  state: 'idle' | 'walking' | 'coding' | 'meeting';
+  state: 'idle' | 'walking' | 'working' | 'meeting';
+  mood: LiveOfficeAgentStatus['mood'];
   facing: 'left' | 'right';
   walkCycle: number;
   speechBubble: string | null;
   bubbleTimer: number;
   pauseTimer: number;
+  isLiveControlled: boolean;
 }
 
-// Layout dos Departamentos e Mesas em Coordenadas 2.5D (Canvas 960x520)
-const DESK_SLOTS: Record<string, { x: number; y: number }[]> = {
-  // 1. Comando Central (Topo Esquerdo)
+// Isometric projection helpers (Canvas 980 x 540)
+const ISO_ORIGIN_X = 490;
+const ISO_ORIGIN_Y = 50;
+const TILE_W = 56;
+const TILE_H = 28;
+
+function isoToScreen(gx: number, gy: number): { x: number; y: number } {
+  return {
+    x: ISO_ORIGIN_X + (gx - gy) * (TILE_W / 2),
+    y: ISO_ORIGIN_Y + (gx + gy) * (TILE_H / 2),
+  };
+}
+
+// 6 themed isometric zones in grid coordinates (grid is 16 x 16)
+const ISO_ZONES: Array<{
+  id: OfficeAgent['department'];
+  label: string;
+  gx: number;
+  gy: number;
+  gw: number;
+  gh: number;
+  accent: string;
+  fill: string;
+}> = [
+  { id: 'command', label: 'COMANDO CENTRAL', gx: 1, gy: 1, gw: 5, gh: 4, accent: '#f97316', fill: 'rgba(249, 115, 22, 0.10)' },
+  { id: 'dev', label: 'ENGENHARIA & CÓDIGO', gx: 10, gy: 1, gw: 5, gh: 4, accent: '#38bdf8', fill: 'rgba(56, 189, 248, 0.09)' },
+  { id: 'design', label: 'DESIGN & ARTEFATOS', gx: 1, gy: 6, gw: 4, gh: 4, accent: '#ec4899', fill: 'rgba(236, 72, 153, 0.09)' },
+  { id: 'infra', label: 'FLUXOS & DEVOPS', gx: 11, gy: 6, gw: 4, gh: 4, accent: '#fb923c', fill: 'rgba(251, 146, 60, 0.09)' },
+  { id: 'data', label: 'DADOS & DEEP RESEARCH', gx: 1, gy: 11, gw: 5, gh: 4, accent: '#22d3ee', fill: 'rgba(34, 211, 238, 0.09)' },
+  { id: 'security', label: 'SEGURANÇA SHIELD', gx: 10, gy: 11, gw: 5, gh: 4, accent: '#ef4444', fill: 'rgba(239, 68, 68, 0.09)' },
+];
+
+const DEPT_DESK_GRID: Record<OfficeAgent['department'], Array<{ gx: number; gy: number }>> = {
   command: [
-    { x: 180, y: 110 },
-    { x: 250, y: 110 },
-    { x: 320, y: 110 },
+    { gx: 2.2, gy: 2.2 },
+    { gx: 4.0, gy: 2.2 },
+    { gx: 3.1, gy: 3.6 },
   ],
-  // 2. Engenharia de Software (Topo Direito)
   dev: [
-    { x: 640, y: 100 },
-    { x: 710, y: 100 },
-    { x: 780, y: 100 },
-    { x: 670, y: 160 },
-    { x: 750, y: 160 },
+    { gx: 11.2, gy: 2.0 },
+    { gx: 13.0, gy: 2.0 },
+    { gx: 11.2, gy: 3.5 },
+    { gx: 13.0, gy: 3.5 },
+    { gx: 14.3, gy: 2.8 },
   ],
-  // 3. Design & Produto (Centro Esquerdo)
   design: [
-    { x: 140, y: 240 },
-    { x: 210, y: 240 },
+    { gx: 2.0, gy: 7.2 },
+    { gx: 3.6, gy: 7.2 },
+    { gx: 2.8, gy: 8.8 },
   ],
-  // 4. DevOps & Infra (Centro Direito)
   infra: [
-    { x: 750, y: 250 },
-    { x: 820, y: 250 },
-    { x: 780, y: 310 },
+    { gx: 12.0, gy: 7.2 },
+    { gx: 13.6, gy: 7.2 },
+    { gx: 12.8, gy: 8.8 },
   ],
-  // 5. Dados & Inteligência (Inferior Esquerdo)
   data: [
-    { x: 150, y: 380 },
-    { x: 220, y: 380 },
-    { x: 180, y: 440 },
-    { x: 250, y: 440 },
+    { gx: 2.0, gy: 12.2 },
+    { gx: 3.8, gy: 12.2 },
+    { gx: 2.0, gy: 13.8 },
+    { gx: 3.8, gy: 13.8 },
   ],
-  // 6. Cybersecurity Shield (Inferior Direito)
   security: [
-    { x: 650, y: 380 },
-    { x: 720, y: 380 },
-    { x: 790, y: 380 },
-    { x: 670, y: 440 },
-    { x: 740, y: 440 },
-    { x: 810, y: 440 },
+    { gx: 11.2, gy: 12.2 },
+    { gx: 13.0, gy: 12.2 },
+    { gx: 11.2, gy: 13.8 },
+    { gx: 13.0, gy: 13.8 },
+    { gx: 14.3, gy: 13.0 },
   ],
 };
 
-// Posições dos Assentos na Mesa Redonda Central de Consenso
-const ROUND_TABLE_SEATS = [
-  { x: 480, y: 210 }, // Topo (JARVIS Maestro)
-  { x: 530, y: 230 }, // Nordeste
-  { x: 550, y: 270 }, // Leste
-  { x: 530, y: 310 }, // Sudeste
-  { x: 480, y: 330 }, // Sul
-  { x: 430, y: 310 }, // Sudoeste
-  { x: 410, y: 270 }, // Oeste
-  { x: 430, y: 230 }, // Noroeste
+// Central Mesa Redonda grid center = (8, 8)
+const ROUNDTABLE_CENTER_GRID = { gx: 8, gy: 8 };
+const COFFEE_GRID = { gx: 8, gy: 2.2 };
+const RESEARCH_GRID = { gx: 5.4, gy: 11.8 };
+
+const ROUNDTABLE_SEATS = [
+  isoToScreen(8, 5.7),
+  isoToScreen(9.8, 6.4),
+  isoToScreen(10.3, 8.0),
+  isoToScreen(9.6, 9.7),
+  isoToScreen(8.0, 10.3),
+  isoToScreen(6.3, 9.6),
+  isoToScreen(5.7, 8.0),
+  isoToScreen(6.4, 6.3),
 ];
 
-const COFFEE_POINT = { x: 480, y: 90 };
+function drawIsoDiamond(
+  ctx: CanvasRenderingContext2D,
+  gx: number,
+  gy: number,
+  gw: number,
+  gh: number,
+  fill: string,
+  stroke?: string,
+  lineWidth = 1
+) {
+  const p1 = isoToScreen(gx, gy);
+  const p2 = isoToScreen(gx + gw, gy);
+  const p3 = isoToScreen(gx + gw, gy + gh);
+  const p4 = isoToScreen(gx, gy + gh);
+  ctx.beginPath();
+  ctx.moveTo(p1.x, p1.y);
+  ctx.lineTo(p2.x, p2.y);
+  ctx.lineTo(p3.x, p3.y);
+  ctx.lineTo(p4.x, p4.y);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  if (stroke) {
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = lineWidth;
+    ctx.stroke();
+  }
+}
+
+function drawIsoDesk(ctx: CanvasRenderingContext2D, gx: number, gy: number, accent: string) {
+  const c = isoToScreen(gx, gy);
+  // Desk pedestal shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.beginPath();
+  ctx.ellipse(c.x, c.y + 8, 18, 9, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Top isometric diamond slab
+  ctx.beginPath();
+  ctx.moveTo(c.x, c.y - 11);
+  ctx.lineTo(c.x + 20, c.y - 1);
+  ctx.lineTo(c.x, c.y + 9);
+  ctx.lineTo(c.x - 20, c.y - 1);
+  ctx.closePath();
+  ctx.fillStyle = '#1c2230';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Left & right extruded thickness (2.5D depth)
+  ctx.beginPath();
+  ctx.moveTo(c.x - 20, c.y - 1);
+  ctx.lineTo(c.x, c.y + 9);
+  ctx.lineTo(c.x, c.y + 14);
+  ctx.lineTo(c.x - 20, c.y + 4);
+  ctx.closePath();
+  ctx.fillStyle = '#12161f';
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(c.x + 20, c.y - 1);
+  ctx.lineTo(c.x, c.y + 9);
+  ctx.lineTo(c.x, c.y + 14);
+  ctx.lineTo(c.x + 20, c.y + 4);
+  ctx.closePath();
+  ctx.fillStyle = '#0f131b';
+  ctx.fill();
+
+  // Miniature glowing monitor on desk
+  ctx.fillStyle = '#0b0d12';
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.roundRect(c.x - 8, c.y - 14, 16, 8, 2);
+  ctx.fill();
+  ctx.stroke();
+}
 
 export const AgentOfficeCanvas: React.FC<AgentOfficeCanvasProps> = ({
   agents,
   onSelectAgent,
+  liveStatuses = [],
+  roundtableActiveRoles = [],
+  roundtableTopic = null,
+  assistantName = 'JARVIS',
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const avatarsRef = useRef<CanvasAvatar[]>([]);
+  const hoveredIdRef = useRef<string | null>(null);
+  const isWanderingRef = useRef(true);
+  const manualMeetingRef = useRef(false);
+  const roundtableTopicRef = useRef<string | null>(roundtableTopic);
+  const assistantNameRef = useRef(assistantName);
+  const agentsRef = useRef(agents);
+  const onSelectAgentRef = useRef(onSelectAgent);
+
   const [hoveredAvatar, setHoveredAvatar] = useState<CanvasAvatar | null>(null);
   const [isWandering, setIsWandering] = useState(true);
-  const [meetingActive, setMeetingActive] = useState(false);
-  const frameIdRef = useRef<number>(0);
+  const [manualMeeting, setManualMeeting] = useState(false);
 
-  // Inicializa posições dos avatares com base nas mesas de cada departamento
+  agentsRef.current = agents;
+  onSelectAgentRef.current = onSelectAgent;
+  roundtableTopicRef.current = roundtableTopic;
+  assistantNameRef.current = assistantName;
+  isWanderingRef.current = isWandering;
+  manualMeetingRef.current = manualMeeting;
+
+  // Initialize avatars onto isometric desk positions without destroying existing positions unnecessarily
   useEffect(() => {
-    const deptCounters: Record<string, number> = {
+    const deptCounters: Record<OfficeAgent['department'], number> = {
       command: 0,
       dev: 0,
       design: 0,
@@ -108,255 +239,323 @@ export const AgentOfficeCanvas: React.FC<AgentOfficeCanvasProps> = ({
       data: 0,
       security: 0,
     };
+    const prevById = new Map(avatarsRef.current.map((a) => [a.id, a]));
 
-    const list: CanvasAvatar[] = agents.map((agent) => {
-      const slots = DESK_SLOTS[agent.department] || DESK_SLOTS.command;
+    avatarsRef.current = agents.map((agent) => {
+      const slots = DEPT_DESK_GRID[agent.department] || DEPT_DESK_GRID.command;
       const slotIdx = deptCounters[agent.department] % slots.length;
       deptCounters[agent.department] += 1;
-      const slot = slots[slotIdx];
+      const gridSlot = slots[slotIdx];
+      const screenPos = isoToScreen(gridSlot.gx, gridSlot.gy);
+      const existing = prevById.get(agent.id);
 
       return {
         id: agent.id,
         name: agent.name,
+        properName: agent.properName || agent.name.split(' ')[0],
         role: agent.role,
         department: agent.department,
         color: agent.color,
-        x: slot.x,
-        y: slot.y,
-        homeX: slot.x,
-        homeY: slot.y,
-        targetX: slot.x,
-        targetY: slot.y,
-        speed: 1.2 + Math.random() * 0.4,
-        state: 'idle',
-        facing: 'right',
-        walkCycle: Math.random() * Math.PI * 2,
-        speechBubble: null,
-        bubbleTimer: 0,
-        pauseTimer: 60 + Math.random() * 120,
+        x: existing ? existing.x : screenPos.x,
+        y: existing ? existing.y : screenPos.y - 8,
+        homeX: screenPos.x,
+        homeY: screenPos.y - 8,
+        targetX: existing ? existing.targetX : screenPos.x,
+        targetY: existing ? existing.targetY : screenPos.y - 8,
+        speed: existing ? existing.speed : 1.55 + Math.random() * 0.35,
+        state: existing ? existing.state : 'idle',
+        mood: existing ? existing.mood : 'idle',
+        facing: existing ? existing.facing : 'right',
+        walkCycle: existing ? existing.walkCycle : Math.random() * Math.PI * 2,
+        speechBubble: existing ? existing.speechBubble : null,
+        bubbleTimer: existing ? existing.bubbleTimer : 0,
+        pauseTimer: existing ? existing.pauseTimer : 110 + Math.random() * 200,
+        isLiveControlled: existing ? existing.isLiveControlled : false,
       };
     });
-
-    avatarsRef.current = list;
   }, [agents]);
 
-  // Função para convocar reunião na Mesa Redonda
-  const handleToggleMeeting = useCallback(() => {
-    setMeetingActive((prev) => {
-      const nextState = !prev;
-      const avatars = avatarsRef.current;
+  // Apply real-time server WebSocket statuses + active Mesa Redonda roles
+  useEffect(() => {
+    const avatars = avatarsRef.current;
+    if (!avatars.length) return;
 
-      if (nextState) {
-        // Convoca especialistas-chave (Maestro, Dev Frontend, Cibersegurança, Arquiteto, QA, Dados)
-        const meetingRoles = [
+    const statusByRole = new Map(liveStatuses.map((s) => [s.agent_role, s]));
+    const rtSet = new Set(roundtableActiveRoles);
+    const coffeePos = isoToScreen(COFFEE_GRID.gx, COFFEE_GRID.gy);
+    const researchPos = isoToScreen(RESEARCH_GRID.gx, RESEARCH_GRID.gy);
+
+    let seatIdx = 0;
+    avatars.forEach((av) => {
+      const live = statusByRole.get(av.id);
+      const inRoundtable = rtSet.has(av.id) || live?.zone === 'roundtable';
+
+      if (inRoundtable) {
+        const seat = ROUNDTABLE_SEATS[seatIdx % ROUNDTABLE_SEATS.length];
+        seatIdx += 1;
+        av.targetX = seat.x;
+        av.targetY = seat.y;
+        av.mood = live?.mood || 'debating';
+        av.speechBubble =
+          live?.activity ||
+          (av.id === 'jarvis_master' ? 'Moderando Mesa Redonda' : 'Deliberando na Mesa Redonda');
+        av.bubbleTimer = 420;
+        av.isLiveControlled = true;
+      } else if (live && live.mood !== 'idle') {
+        av.mood = live.mood;
+        av.speechBubble = live.activity;
+        av.bubbleTimer = 360;
+        av.isLiveControlled = true;
+        if (live.zone === 'coffee') {
+          av.targetX = coffeePos.x + (Math.random() * 28 - 14);
+          av.targetY = coffeePos.y + (Math.random() * 14 - 7);
+        } else if (live.zone === 'research') {
+          av.targetX = researchPos.x + (Math.random() * 24 - 12);
+          av.targetY = researchPos.y + (Math.random() * 12 - 6);
+        } else {
+          av.targetX = av.homeX;
+          av.targetY = av.homeY;
+        }
+      } else if (av.isLiveControlled && !manualMeetingRef.current) {
+        av.isLiveControlled = false;
+        av.mood = 'idle';
+        av.targetX = av.homeX;
+        av.targetY = av.homeY;
+      }
+    });
+  }, [liveStatuses, roundtableActiveRoles]);
+
+  const handleToggleManualMeeting = useCallback(() => {
+    setManualMeeting((prev) => {
+      const next = !prev;
+      const avatars = avatarsRef.current;
+      if (next) {
+        const priority = [
           'jarvis_master',
           'software_architect',
-          'frontend_mobile_developer',
+          'sentinel_security',
           'cybersecurity_engineer',
-          'qa_engineer',
-          'backend_developer',
-          'data_scientist',
-          'project_designer_planner',
+          'presentation_creator',
+          'document_specialist',
+          'research_analyst',
+          'ux_ui_designer',
         ];
-
-        let seatIdx = 0;
-        avatars.forEach((av) => {
-          if (meetingRoles.includes(av.id) && seatIdx < ROUND_TABLE_SEATS.length) {
-            const seat = ROUND_TABLE_SEATS[seatIdx];
-            av.targetX = seat.x;
-            av.targetY = seat.y;
-            av.state = 'walking';
-            av.speechBubble =
-              av.id === 'jarvis_master'
-                ? 'Convocando Mesa Redonda...'
-                : av.id === 'cybersecurity_engineer'
-                ? 'Auditando OWASP...'
-                : av.id === 'frontend_mobile_developer'
-                ? 'Desenvolvendo UI...'
-                : 'Em Consenso...';
-            av.bubbleTimer = 300;
-            seatIdx += 1;
-          }
+        const chosen = avatars.filter((a) => priority.includes(a.id)).slice(0, ROUNDTABLE_SEATS.length);
+        const list = chosen.length >= 3 ? chosen : avatars.slice(0, Math.min(6, ROUNDTABLE_SEATS.length));
+        list.forEach((av, idx) => {
+          const seat = ROUNDTABLE_SEATS[idx % ROUNDTABLE_SEATS.length];
+          av.targetX = seat.x;
+          av.targetY = seat.y;
+          av.mood = 'debating';
+          av.speechBubble = av.id === 'jarvis_master' ? 'Reunindo especialistas...' : 'Indo à Mesa Redonda';
+          av.bubbleTimer = 300;
         });
       } else {
-        // Retornam todos às suas mesas
         avatars.forEach((av) => {
           av.targetX = av.homeX;
           av.targetY = av.homeY;
-          av.state = 'walking';
-          av.speechBubble = 'De volta à mesa!';
-          av.bubbleTimer = 180;
+          av.mood = 'idle';
+          av.speechBubble = 'Voltando à estação';
+          av.bubbleTimer = 140;
         });
       }
-
-      return nextState;
+      return next;
     });
   }, []);
 
-  // Loop de Animação e Renderização em 60 FPS
+  // Single mount 60 FPS Canvas loop — never torn down by React state updates
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    let hologramRot = 0;
+    let frameId = 0;
+    let tick = 0;
 
     const render = () => {
+      tick += 0.025;
       const width = canvas.width;
       const height = canvas.height;
-      hologramRot += 0.02;
 
-      // 1. Limpa o fundo do escritório
-      ctx.fillStyle = '#141312';
+      // 1. Deep Obsidian backdrop with subtle warm radial ambient
+      const bgGrad = ctx.createRadialGradient(width / 2, height * 0.48, 30, width / 2, height * 0.5, width * 0.6);
+      bgGrad.addColorStop(0, '#141925');
+      bgGrad.addColorStop(0.65, '#0d1017');
+      bgGrad.addColorStop(1, '#090b10');
+      ctx.fillStyle = bgGrad;
       ctx.fillRect(0, 0, width, height);
 
-      // Grid sutil no piso
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.025)';
+      // 2. Isometric room floor slab (16x16 diamond grid + 3D floor thickness)
+      const topCorner = isoToScreen(0, 0);
+      const rightCorner = isoToScreen(16, 0);
+      const bottomCorner = isoToScreen(16, 16);
+      const leftCorner = isoToScreen(0, 16);
+
+      // Floor thickness rim (Habbo-style cutaway)
+      ctx.beginPath();
+      ctx.moveTo(leftCorner.x, leftCorner.y);
+      ctx.lineTo(bottomCorner.x, bottomCorner.y);
+      ctx.lineTo(bottomCorner.x, bottomCorner.y + 18);
+      ctx.lineTo(leftCorner.x, leftCorner.y + 18);
+      ctx.closePath();
+      ctx.fillStyle = '#0e121b';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(249, 115, 22, 0.25)';
       ctx.lineWidth = 1;
-      const gridSize = 32;
-      for (let x = 0; x < width; x += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, height);
-        ctx.stroke();
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(rightCorner.x, rightCorner.y);
+      ctx.lineTo(bottomCorner.x, bottomCorner.y);
+      ctx.lineTo(bottomCorner.x, bottomCorner.y + 18);
+      ctx.lineTo(rightCorner.x, rightCorner.y + 18);
+      ctx.closePath();
+      ctx.fillStyle = '#0a0d14';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.stroke();
+
+      // Back isometric cutaway walls (left-top and right-top)
+      const wallH = 38;
+      ctx.beginPath();
+      ctx.moveTo(topCorner.x, topCorner.y);
+      ctx.lineTo(leftCorner.x, leftCorner.y);
+      ctx.lineTo(leftCorner.x, leftCorner.y - wallH);
+      ctx.lineTo(topCorner.x, topCorner.y - wallH);
+      ctx.closePath();
+      ctx.fillStyle = '#111622';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(topCorner.x, topCorner.y);
+      ctx.lineTo(rightCorner.x, rightCorner.y);
+      ctx.lineTo(rightCorner.x, rightCorner.y - wallH);
+      ctx.lineTo(topCorner.x, topCorner.y - wallH);
+      ctx.closePath();
+      ctx.fillStyle = '#141926';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
+      ctx.stroke();
+
+      // Floor base diamond
+      drawIsoDiamond(ctx, 0, 0, 16, 16, '#12161f', 'rgba(249, 115, 22, 0.22)', 1.2);
+
+      // Checkerboard isometric diamond tiles
+      for (let gx = 0; gx < 16; gx += 1) {
+        for (let gy = 0; gy < 16; gy += 1) {
+          const isAlt = (gx + gy) % 2 === 0;
+          drawIsoDiamond(
+            ctx,
+            gx,
+            gy,
+            1,
+            1,
+            isAlt ? 'rgba(255, 255, 255, 0.018)' : 'rgba(0, 0, 0, 0.14)',
+            'rgba(255, 255, 255, 0.03)',
+            0.75
+          );
+        }
       }
-      for (let y = 0; y < height; y += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(width, y);
-        ctx.stroke();
-      }
 
-      // 2. Desenha os Departamentos (Carpetes e Zonas)
-      const DEPT_ZONES = [
-        { name: '👑 Comando Central', x: 90, y: 50, w: 270, h: 140, color: 'rgba(234, 179, 8, 0.05)', border: 'rgba(234, 179, 8, 0.2)' },
-        { name: '💻 Engenharia de Software', x: 600, y: 50, w: 270, h: 140, color: 'rgba(217, 119, 87, 0.06)', border: 'rgba(217, 119, 87, 0.25)' },
-        { name: '🎨 Design & UX', x: 90, y: 200, w: 170, h: 110, color: 'rgba(236, 72, 153, 0.05)', border: 'rgba(236, 72, 153, 0.2)' },
-        { name: '🚀 DevOps & Infra', x: 700, y: 200, w: 170, h: 130, color: 'rgba(249, 115, 22, 0.05)', border: 'rgba(249, 115, 22, 0.2)' },
-        { name: '📊 Dados & BI', x: 90, y: 340, w: 230, h: 140, color: 'rgba(6, 182, 212, 0.05)', border: 'rgba(6, 182, 212, 0.2)' },
-        { name: '🛡️ Cybersecurity Shield', x: 600, y: 340, w: 270, h: 140, color: 'rgba(239, 68, 68, 0.05)', border: 'rgba(239, 68, 68, 0.2)' },
-      ];
-
-      DEPT_ZONES.forEach((z) => {
-        ctx.fillStyle = z.color;
-        ctx.strokeStyle = z.border;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.roundRect(z.x, z.y, z.w, z.h, 10);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.fillStyle = 'rgba(243, 242, 238, 0.42)';
-        ctx.font = '10px "Plus Jakarta Sans", sans-serif';
-        ctx.fillText(z.name, z.x + 12, z.y + 18);
+      // 3. Themed department carpets
+      ISO_ZONES.forEach((zone) => {
+        drawIsoDiamond(ctx, zone.gx, zone.gy, zone.gw, zone.gh, zone.fill, `${zone.accent}55`, 1.2);
+        const labelPt = isoToScreen(zone.gx + zone.gw * 0.5, zone.gy + 0.35);
+        ctx.fillStyle = zone.accent;
+        ctx.font = '700 9px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(zone.label, labelPt.x, labelPt.y - 2);
       });
 
-      // 3. Cantinho do Café & Água
-      ctx.fillStyle = 'rgba(245, 158, 11, 0.15)';
-      ctx.strokeStyle = 'rgba(245, 158, 11, 0.4)';
-      ctx.beginPath();
-      ctx.roundRect(COFFEE_POINT.x - 30, COFFEE_POINT.y - 20, 60, 40, 8);
-      ctx.fill();
-      ctx.stroke();
+      // 4. Coffee Bar Station (top center)
+      drawIsoDiamond(ctx, 7.1, 1.4, 1.8, 1.6, 'rgba(245, 158, 11, 0.14)', 'rgba(245, 158, 11, 0.45)', 1);
+      const coffeeCenter = isoToScreen(COFFEE_GRID.gx, COFFEE_GRID.gy);
       ctx.fillStyle = '#fbbf24';
-      ctx.font = '12px "Plus Jakarta Sans", sans-serif';
-      ctx.fillText('☕ Coffee Bar', COFFEE_POINT.x - 32, COFFEE_POINT.y + 30);
-
-      // 4. Mesa Redonda Central de Consenso
-      const centerX = 480;
-      const centerY = 270;
-      const tableRadius = 60;
-
-      // Carpete circular da sala de reunião
-      const carpetGrad = ctx.createRadialGradient(centerX, centerY, 10, centerX, centerY, 105);
-      carpetGrad.addColorStop(0, 'rgba(234, 179, 8, 0.15)');
-      carpetGrad.addColorStop(1, 'rgba(24, 23, 22, 0.65)');
-      ctx.fillStyle = carpetGrad;
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, 105, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(234, 179, 8, 0.3)';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
-      // Tampo da Mesa Redonda de Madeira Nobre / Vidro Escuro
-      ctx.fillStyle = '#2b2a27';
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, tableRadius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#eab308';
-      ctx.lineWidth = 2.5;
-      ctx.stroke();
-
-      // Holograma Central / Reator JARVIS Giratório
-      ctx.save();
-      ctx.translate(centerX, centerY);
-      ctx.rotate(hologramRot);
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.7)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(0, 0, 16, 0, Math.PI * 2);
-      ctx.stroke();
-
-      ctx.fillStyle = '#38bdf8';
-      ctx.beginPath();
-      ctx.arc(0, 0, 5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-
-      ctx.fillStyle = '#fef08a';
-      ctx.font = 'bold 10px "Plus Jakarta Sans", sans-serif';
+      ctx.font = '700 8.5px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('MESA REDONDA', centerX, centerY + 32);
+      ctx.fillText('COFFEE BAR', coffeeCenter.x, coffeeCenter.y - 12);
 
-      // 5. Desenha as Mesas de Escritório nos Departamentos
-      Object.entries(DESK_SLOTS).forEach(([, slots]) => {
-        slots.forEach((s) => {
-          // Tampo da mesa individual
-          ctx.fillStyle = 'rgba(38, 37, 35, 0.9)';
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.roundRect(s.x - 18, s.y - 12, 36, 24, 4);
-          ctx.fill();
-          ctx.stroke();
+      // 5. Central Glowing Mesa Redonda (Isometric Ellipse Table)
+      const rt = isoToScreen(ROUNDTABLE_CENTER_GRID.gx, ROUNDTABLE_CENTER_GRID.gy);
+      const isDebating = Boolean(roundtableTopicRef.current) || manualMeetingRef.current;
 
-          // Monitor miniatura sobre a mesa
-          ctx.fillStyle = '#10131a';
-          ctx.strokeStyle = '#3b82f6';
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.rect(s.x - 8, s.y - 10, 16, 5);
-          ctx.fill();
-          ctx.stroke();
-        });
+      // Ambient orange glow ring on floor
+      const haloGrad = ctx.createRadialGradient(rt.x, rt.y, 12, rt.x, rt.y, 108);
+      haloGrad.addColorStop(0, isDebating ? 'rgba(249, 115, 22, 0.34)' : 'rgba(249, 115, 22, 0.14)');
+      haloGrad.addColorStop(1, 'rgba(11, 13, 18, 0)');
+      ctx.fillStyle = haloGrad;
+      ctx.beginPath();
+      ctx.ellipse(rt.x, rt.y, 108, 56, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Table pedestal
+      ctx.fillStyle = '#0e1118';
+      ctx.beginPath();
+      ctx.ellipse(rt.x, rt.y + 10, 62, 31, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Table top obsidian + JARVIS Orange rim
+      ctx.fillStyle = '#181e2c';
+      ctx.beginPath();
+      ctx.ellipse(rt.x, rt.y, 64, 32, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = isDebating ? '#f97316' : 'rgba(249, 115, 22, 0.55)';
+      ctx.lineWidth = isDebating ? 2.4 : 1.6;
+      ctx.stroke();
+
+      // Animated holographic reactor core in center of Mesa Redonda
+      const pulse = 1 + Math.sin(tick * 2.5) * 0.14;
+      ctx.strokeStyle = isDebating ? '#fb923c' : 'rgba(56, 189, 248, 0.6)';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.ellipse(rt.x, rt.y - 2, 18 * pulse, 9 * pulse, 0, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.fillStyle = isDebating ? '#f97316' : '#38bdf8';
+      ctx.beginPath();
+      ctx.arc(rt.x, rt.y - 2, 4.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = isDebating ? '#fed7aa' : 'rgba(243, 244, 246, 0.72)';
+      ctx.font = '700 9px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(
+        isDebating ? 'MESA REDONDA · EM DEBATE' : `MESA REDONDA · ${assistantNameRef.current.toUpperCase()}`,
+        rt.x,
+        rt.y + 21
+      );
+
+      // 6. Isometric desks per department
+      ISO_ZONES.forEach((zone) => {
+        const slots = DEPT_DESK_GRID[zone.id] || [];
+        slots.forEach((slot) => drawIsoDesk(ctx, slot.gx, slot.gy, zone.accent));
       });
 
-      // 6. Atualiza e Renderiza os Avatares (com ordenação de profundidade Y-Sort)
+      // 7. Update & Y-Sort Slime/Mascot Avatars
       const avatars = avatarsRef.current;
+      const coffeePt = isoToScreen(COFFEE_GRID.gx, COFFEE_GRID.gy);
 
-      // Movimentação autônoma de passeio (quando ativada)
       avatars.forEach((av) => {
-        if (isWandering && !meetingActive) {
+        if (isWanderingRef.current && !manualMeetingRef.current && !av.isLiveControlled) {
           av.pauseTimer -= 1;
           if (av.pauseTimer <= 0) {
-            av.pauseTimer = 180 + Math.random() * 300;
+            av.pauseTimer = 220 + Math.random() * 280;
             const r = Math.random();
-            if (r < 0.25) {
-              // Vai tomar um café
-              av.targetX = COFFEE_POINT.x + (Math.random() * 40 - 20);
-              av.targetY = COFFEE_POINT.y + (Math.random() * 20 - 10);
-              av.speechBubble = 'Pausa para o café ☕';
+            if (r < 0.22) {
+              av.targetX = coffeePt.x + (Math.random() * 34 - 17);
+              av.targetY = coffeePt.y + (Math.random() * 14 - 7);
+              av.speechBubble = 'Pausa no café';
               av.bubbleTimer = 140;
-            } else if (r < 0.5) {
-              // Passeia pelo corredor central
-              av.targetX = 480 + (Math.random() * 120 - 60);
-              av.targetY = 270 + (Math.random() * 120 - 60);
-              av.speechBubble = 'Verificando status...';
+            } else if (r < 0.42) {
+              const seat = ROUNDTABLE_SEATS[Math.floor(Math.random() * ROUNDTABLE_SEATS.length)];
+              av.targetX = seat.x;
+              av.targetY = seat.y;
+              av.speechBubble = 'Checando pauta';
               av.bubbleTimer = 120;
             } else {
-              // Retorna à mesa de trabalho
               av.targetX = av.homeX;
               av.targetY = av.homeY;
               av.speechBubble = null;
@@ -364,7 +563,6 @@ export const AgentOfficeCanvas: React.FC<AgentOfficeCanvasProps> = ({
           }
         }
 
-        // Interpolação de movimento suave (X, Y)
         const dx = av.targetX - av.x;
         const dy = av.targetY - av.y;
         const dist = Math.hypot(dx, dy);
@@ -374,128 +572,136 @@ export const AgentOfficeCanvas: React.FC<AgentOfficeCanvasProps> = ({
           av.x += (dx / dist) * av.speed;
           av.y += (dy / dist) * av.speed;
           av.facing = dx < 0 ? 'left' : 'right';
-          av.walkCycle += 0.25;
+          av.walkCycle += 0.26;
         } else {
-          av.state = 'idle';
+          av.state = av.isLiveControlled ? 'working' : 'idle';
           av.x = av.targetX;
           av.y = av.targetY;
         }
 
         if (av.bubbleTimer > 0) {
           av.bubbleTimer -= 1;
-          if (av.bubbleTimer <= 0) {
+          if (av.bubbleTimer <= 0 && !av.isLiveControlled) {
             av.speechBubble = null;
           }
         }
       });
 
-      // Ordena por profundidade Y para sobreposição correta
-      const sortedAvatars = [...avatars].sort((a, b) => a.y - b.y);
+      const sorted = [...avatars].sort((a, b) => a.y - b.y);
 
-      sortedAvatars.forEach((av) => {
-        const isHovered = hoveredAvatar?.id === av.id;
+      sorted.forEach((av) => {
+        const isHovered = hoveredIdRef.current === av.id;
+        const isActive = av.isLiveControlled || av.mood !== 'idle';
+        const bounce =
+          av.state === 'walking'
+            ? Math.abs(Math.sin(av.walkCycle)) * 4.5
+            : Math.sin(tick * 2 + av.homeX) * 1.1;
 
         ctx.save();
         ctx.translate(av.x, av.y);
 
-        // Sombra oval sob os pés
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+        // Floor shadow
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
         ctx.beginPath();
-        ctx.ellipse(0, 8, 9, 4, 0, 0, Math.PI * 2);
+        ctx.ellipse(0, 6, 11, 5, 0, 0, Math.PI * 2);
         ctx.fill();
 
-        // Anel de foco se o mouse estiver sobre o avatar
-        if (isHovered) {
-          ctx.strokeStyle = '#eab308';
-          ctx.lineWidth = 1.5;
+        // Active / Hover ring
+        if (isHovered || isActive) {
+          ctx.strokeStyle = isHovered ? '#fb923c' : av.color;
+          ctx.lineWidth = isHovered ? 2 : 1.4;
           ctx.beginPath();
-          ctx.ellipse(0, 8, 14, 7, 0, 0, Math.PI * 2);
+          ctx.ellipse(0, 6, 15, 7.5, 0, 0, Math.PI * 2);
           ctx.stroke();
         }
 
-        // Animação das perninhas andando
-        const legBob = av.state === 'walking' ? Math.sin(av.walkCycle) * 3 : 0;
-        const bodyBob = av.state === 'walking' ? Math.abs(Math.sin(av.walkCycle)) * 2 : 0;
-
-        // Pernas
-        ctx.fillStyle = '#2b2a27';
-        ctx.fillRect(-5, 0 - bodyBob + legBob, 3, 7);
-        ctx.fillRect(2, 0 - bodyBob - legBob, 3, 7);
-
-        // Tronco / Uniforme do Departamento
+        // Cute Slime/Mascot Dome Body
         ctx.fillStyle = av.color;
         ctx.beginPath();
-        ctx.roundRect(-7, -10 - bodyBob, 14, 11, 3);
+        ctx.moveTo(-10, 4 - bounce);
+        ctx.bezierCurveTo(-11, -10 - bounce, -7, -17 - bounce, 0, -17 - bounce);
+        ctx.bezierCurveTo(7, -17 - bounce, 11, -10 - bounce, 10, 4 - bounce);
+        ctx.quadraticCurveTo(0, 7 - bounce, -10, 4 - bounce);
+        ctx.closePath();
         ctx.fill();
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+
+        ctx.strokeStyle = 'rgba(255,255,255,0.38)';
         ctx.lineWidth = 1;
         ctx.stroke();
 
-        // Cabeça
-        ctx.fillStyle = '#fed7aa'; // Tom de pele amigável
+        // Glossy slime highlight
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
         ctx.beginPath();
-        ctx.arc(0, -15 - bodyBob, 6, 0, Math.PI * 2);
+        ctx.ellipse(-4, -10 - bounce, 3, 1.8, -0.5, 0, Math.PI * 2);
         ctx.fill();
 
-        // Cabelo / Boné
-        ctx.fillStyle = '#141312';
+        // Eyes looking toward walking direction
+        const eyeShift = av.facing === 'left' ? -1.8 : 1.8;
+        ctx.fillStyle = '#0b0d12';
         ctx.beginPath();
-        ctx.arc(0, -17 - bodyBob, 6, Math.PI, Math.PI * 2);
+        ctx.arc(-2.6 + eyeShift, -5 - bounce, 1.6, 0, Math.PI * 2);
+        ctx.arc(2.6 + eyeShift, -5 - bounce, 1.6, 0, Math.PI * 2);
         ctx.fill();
 
-        // Olhinhos direcionados
-        const eyeOffset = av.facing === 'left' ? -2 : 2;
-        ctx.fillStyle = '#141312';
+        // Eye sparkle
+        ctx.fillStyle = '#ffffff';
         ctx.beginPath();
-        ctx.arc(eyeOffset, -15 - bodyBob, 1, 0, Math.PI * 2);
+        ctx.arc(-2.1 + eyeShift, -5.6 - bounce, 0.6, 0, Math.PI * 2);
+        ctx.arc(3.1 + eyeShift, -5.6 - bounce, 0.6, 0, Math.PI * 2);
         ctx.fill();
 
-        // Balão de Diálogo / Pensamento (Speech Bubble)
+        // Maestro orange crown dot for jarvis_master
+        if (av.id === 'jarvis_master') {
+          ctx.fillStyle = '#fbbf24';
+          ctx.beginPath();
+          ctx.moveTo(-5, -17 - bounce);
+          ctx.lineTo(-3, -22 - bounce);
+          ctx.lineTo(0, -18 - bounce);
+          ctx.lineTo(3, -22 - bounce);
+          ctx.lineTo(5, -17 - bounce);
+          ctx.closePath();
+          ctx.fill();
+        }
+
+        // Compact name tag under avatar
+        ctx.font = '600 8.5px "Plus Jakarta Sans", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = isHovered ? '#ffffff' : 'rgba(243, 244, 246, 0.78)';
+        ctx.fillText(av.properName, 0, 17);
+
+        // Speech bubble when speaking, active, or hovered
         if (av.speechBubble || isHovered) {
-          const txt = av.speechBubble || av.name;
-          ctx.font = 'bold 9px "Plus Jakarta Sans", sans-serif';
-          const txtWidth = ctx.measureText(txt).width;
-          const bubbleW = txtWidth + 12;
-          const bubbleH = 18;
-          const bubbleY = -34 - bodyBob;
+          const rawText = av.speechBubble || `${av.properName} · ${av.role}`;
+          const text = rawText.length > 34 ? `${rawText.slice(0, 32)}…` : rawText;
+          ctx.font = '600 9px "Plus Jakarta Sans", sans-serif';
+          const tw = ctx.measureText(text).width;
+          const bw = tw + 14;
+          const bh = 19;
+          const by = -25 - bounce;
 
-          // Caixa do balão
-          ctx.fillStyle = 'rgba(24, 23, 22, 0.94)';
-          ctx.strokeStyle = av.color;
+          ctx.fillStyle = 'rgba(11, 13, 18, 0.94)';
+          ctx.strokeStyle = isActive ? '#f97316' : av.color;
           ctx.lineWidth = 1;
           ctx.beginPath();
-          ctx.roundRect(-bubbleW / 2, bubbleY - bubbleH, bubbleW, bubbleH, 6);
+          ctx.roundRect(-bw / 2, by - bh, bw, bh, 5);
           ctx.fill();
           ctx.stroke();
 
-          // Rabinho do balão apontando para o avatar
-          ctx.fillStyle = 'rgba(24, 23, 22, 0.94)';
-          ctx.beginPath();
-          ctx.moveTo(-3, bubbleY);
-          ctx.lineTo(0, bubbleY + 4);
-          ctx.lineTo(3, bubbleY);
-          ctx.fill();
-
-          // Texto dentro do balão
-          ctx.fillStyle = '#f3f2ee';
+          ctx.fillStyle = '#f3f4f6';
           ctx.textAlign = 'center';
-          ctx.fillText(txt, 0, bubbleY - 5);
+          ctx.fillText(text, 0, by - 6);
         }
 
         ctx.restore();
       });
 
-      frameIdRef.current = requestAnimationFrame(render);
+      frameId = requestAnimationFrame(render);
     };
 
-    frameIdRef.current = requestAnimationFrame(render);
+    frameId = requestAnimationFrame(render);
+    return () => cancelAnimationFrame(frameId);
+  }, []);
 
-    return () => {
-      cancelAnimationFrame(frameIdRef.current);
-    };
-  }, [isWandering, meetingActive, hoveredAvatar]);
-
-  // Detector de Movimento do Mouse sobre o Canvas (Hit Testing)
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -505,17 +711,15 @@ export const AgentOfficeCanvas: React.FC<AgentOfficeCanvasProps> = ({
 
     let found: CanvasAvatar | null = null;
     avatarsRef.current.forEach((av) => {
-      const dist = Math.hypot(av.x - mouseX, av.y - mouseY);
-      if (dist < 18) {
+      if (Math.hypot(av.x - mouseX, av.y - 4 - mouseY) < 20) {
         found = av;
       }
     });
-
+    hoveredIdRef.current = found ? (found as CanvasAvatar).id : null;
     setHoveredAvatar(found);
     canvas.style.cursor = found ? 'pointer' : 'default';
   };
 
-  // Clique no Avatar abre o Drawer de Configurações
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -523,132 +727,128 @@ export const AgentOfficeCanvas: React.FC<AgentOfficeCanvasProps> = ({
     const mouseX = ((e.clientX - rect.left) / rect.width) * canvas.width;
     const mouseY = ((e.clientY - rect.top) / rect.height) * canvas.height;
 
-    avatarsRef.current.forEach((av) => {
-      const dist = Math.hypot(av.x - mouseX, av.y - mouseY);
-      if (dist < 20) {
-        const fullAgent = agents.find((a) => a.id === av.id);
-        if (fullAgent) {
-          onSelectAgent(fullAgent);
-        }
-      }
-    });
+    const clicked = avatarsRef.current.find((av) => Math.hypot(av.x - mouseX, av.y - 4 - mouseY) < 22);
+    if (clicked) {
+      const fullAgent = agentsRef.current.find((a) => a.id === clicked.id);
+      if (fullAgent) onSelectAgentRef.current(fullAgent);
+    }
   };
 
   return (
     <div
       style={{
-        borderRadius: '16px',
-        backgroundColor: 'var(--bg-input)',
+        borderRadius: 'var(--radius-lg)',
+        backgroundColor: '#0b0d12',
         border: '1px solid var(--border-color)',
         overflow: 'hidden',
-        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
         display: 'flex',
         flexDirection: 'column',
       }}
     >
-      {/* Barra de Controles do Andar Interativo */}
+      {/* Clean top bar */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '10px 16px',
-          backgroundColor: 'rgba(255, 255, 255, 0.02)',
+          padding: '10px 14px',
+          backgroundColor: 'var(--bg-secondary)',
           borderBottom: '1px solid var(--border-color)',
           flexWrap: 'wrap',
           gap: '10px',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-            Planta Baixa Viva dos 26 Especialistas
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+          <span style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-primary)', flexShrink: 0 }}>
+            Andar Isométrico 2.5D
           </span>
-          <span
-            style={{
-              fontSize: '0.66rem',
-              padding: '2px 8px',
-              borderRadius: '10px',
-              backgroundColor: 'rgba(16, 185, 129, 0.15)',
-              color: '#34d399',
-              border: '1px solid rgba(16, 185, 129, 0.3)',
-            }}
-          >
-            60 FPS Interativo
+          <span style={{ color: 'var(--text-muted)', fontSize: '0.76rem' }}>·</span>
+          <span className="jarvis-tabular" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
+            {agents.length} mascotes
           </span>
+          {roundtableTopic && (
+            <>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.76rem' }}>·</span>
+              <span
+                title={roundtableTopic}
+                style={{
+                  fontSize: '0.74rem',
+                  color: 'var(--accent-light)',
+                  fontWeight: 600,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  minWidth: 0,
+                }}
+              >
+                Mesa Redonda: {roundtableTopic}
+              </span>
+            </>
+          )}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <button
             type="button"
-            onClick={handleToggleMeeting}
-            className={`btn btn-sm ${meetingActive ? 'btn-secondary is-active' : 'btn-secondary'}`}
-            title="Chama os especialistas para deliberar na Mesa Redonda"
+            onClick={handleToggleManualMeeting}
+            className={`btn btn-sm ${manualMeeting ? 'btn-primary' : 'btn-secondary'}`}
           >
-            <span>{meetingActive ? 'Liberar Mesa Redonda' : 'Convocar Mesa Redonda'}</span>
+            {manualMeeting ? 'Dispersar Mesa Redonda' : 'Chamar para Mesa Redonda'}
           </button>
 
           <button
             type="button"
             onClick={() => setIsWandering((prev) => !prev)}
             className={`btn btn-sm ${isWandering ? 'btn-secondary is-active' : 'btn-ghost'}`}
-            title="Ativa ou pausa os avatares andando pelo escritório"
           >
-            <span>{isWandering ? 'Pausar Passeio' : 'Passeio Livre'}</span>
+            {isWandering ? 'Pausar Passeio' : 'Passeio Livre'}
           </button>
         </div>
       </div>
 
-      {/* Canvas 2.5D Responsivo com Scroll Horizontal se necessário */}
-      <div style={{ position: 'relative', width: '100%', overflowX: 'auto', display: 'flex', justifyContent: 'center' }}>
+      <div style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}>
         <canvas
           ref={canvasRef}
-          width={960}
-          height={520}
+          data-testid="isometric-office-canvas"
+          data-agent-count={agents.length}
+          data-roundtable-active={roundtableTopic || manualMeeting ? 'true' : 'false'}
+          width={980}
+          height={540}
           onMouseMove={handleMouseMove}
           onClick={handleClick}
           style={{
             width: '100%',
             maxWidth: '100%',
             height: 'auto',
-            aspectRatio: '960 / 520',
+            aspectRatio: '980 / 540',
             display: 'block',
           }}
         />
 
-        {/* Tooltip flutuante quando o mouse está sobre um avatar */}
         {hoveredAvatar && (
           <div
             style={{
               position: 'absolute',
               bottom: '12px',
-              left: '16px',
-              backgroundColor: 'var(--bg-elevated)',
+              left: '14px',
+              backgroundColor: 'rgba(18, 22, 31, 0.94)',
               border: `1px solid ${hoveredAvatar.color}`,
               padding: '6px 12px',
-              borderRadius: '8px',
+              borderRadius: 'var(--radius-md)',
               fontSize: '0.76rem',
               color: 'var(--text-primary)',
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
-              boxShadow: '0 4px 16px rgba(0, 0, 0, 0.5)',
               pointerEvents: 'none',
-              backdropFilter: 'blur(8px)',
             }}
           >
-            <span
-              style={{
-                width: '8px',
-                height: '8px',
-                borderRadius: '50%',
-                backgroundColor: hoveredAvatar.color,
-              }}
-            />
-            <strong>{hoveredAvatar.name}</strong>
-            <span style={{ color: 'var(--text-muted)' }}>•</span>
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: hoveredAvatar.color }} />
+            <strong>{hoveredAvatar.properName}</strong>
+            <span style={{ color: 'var(--text-muted)' }}>·</span>
             <span style={{ color: 'var(--text-secondary)' }}>{hoveredAvatar.role}</span>
-            <span style={{ color: 'var(--text-muted)' }}>•</span>
-            <span style={{ color: '#eab308' }}>Clique para configurar chave</span>
+            <span style={{ color: 'var(--text-muted)' }}>·</span>
+            <span style={{ color: 'var(--accent-light)' }}>Clique para abrir</span>
           </div>
         )}
       </div>

@@ -69,6 +69,30 @@ export interface TaskStateResponse {
     handle: string;
     mascot?: AgentMascotMeta;
   };
+  orchestration_mode?: string;
+  artifact_payload?: {
+    id: string;
+    kind: 'pptx' | 'pdf' | 'png';
+    title: string;
+    subtitle: string;
+    author: string;
+    created_at: string;
+    slides?: Array<{
+      title: string;
+      subtitle?: string;
+      bullets: string[];
+      speakerNotes?: string;
+      accent?: string;
+    }>;
+    sections?: Array<{
+      heading: string;
+      body: string;
+      highlights?: string[];
+    }>;
+    svg_markup?: string;
+    palette?: string[];
+    model_used: string;
+  } | null;
 }
 
 export interface AgentVersionSnapshot {

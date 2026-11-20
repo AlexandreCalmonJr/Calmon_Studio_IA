@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Bot, Play, Plus, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react';
+import { Bot, Pin, Play, Plus, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react';
 import { AgentInfo, getAgentLabel, getModelLabel } from '../../types';
 import { fetchAgents, updateAgentConfig } from '../../api';
 import { notify } from '../../shared/common/Toast';
@@ -10,6 +10,7 @@ import { AgentRouteModal } from './AgentRouteModal';
 import { PageHeader } from '../../shared/layout/PageHeader';
 import { MascotAvatar } from '../../shared/common/MascotAvatar';
 import { useAssistantIdentity } from '../../context/AssistantIdentityContext';
+import { getAccountStorageKey } from '../../services/accountScope';
 
 type AgentCategory = 'all' | 'studies' | 'creative' | 'security' | 'business' | 'dev';
 
@@ -55,8 +56,59 @@ export const AgentCenterView: React.FC = () => {
     }
   };
 
+  const [pinnedDockRoles, setPinnedDockRoles] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(getAccountStorageKey('jarvis_pinned_dock_agents'));
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed.map(String);
+      }
+    } catch {}
+    return [];
+  });
+
+  const handleTogglePinDock = (agent: AgentInfo) => {
+    const displayName = agent.proper_name || agent.name;
+    const currentlyPinned = pinnedDockRoles.includes(agent.role);
+    let next: string[];
+    if (currentlyPinned) {
+      next = pinnedDockRoles.filter((r) => r !== agent.role);
+      notify(`${displayName} removido do Dock lateral.`, 'info');
+    } else {
+      if (pinnedDockRoles.length >= 8) {
+        notify('O Dock lateral suporta até 8 agentes fixados simultaneamente.', 'warning');
+        return;
+      }
+      next = [...pinnedDockRoles, agent.role];
+      notify(`${displayName} fixado no Dock lateral!`, 'success');
+    }
+    setPinnedDockRoles(next);
+    try {
+      localStorage.setItem(getAccountStorageKey('jarvis_pinned_dock_agents'), JSON.stringify(next));
+      window.dispatchEvent(new CustomEvent('jarvis:dock-updated'));
+    } catch {}
+  };
+
   useEffect(() => {
     void loadAgents();
+    const onAgentsUpdated = () => {
+      void loadAgents();
+    };
+    const onDockUpdated = () => {
+      try {
+        const raw = localStorage.getItem(getAccountStorageKey('jarvis_pinned_dock_agents'));
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) setPinnedDockRoles(parsed.map(String));
+        }
+      } catch {}
+    };
+    window.addEventListener('jarvis:agents-updated', onAgentsUpdated);
+    window.addEventListener('jarvis:dock-updated', onDockUpdated);
+    return () => {
+      window.removeEventListener('jarvis:agents-updated', onAgentsUpdated);
+      window.removeEventListener('jarvis:dock-updated', onDockUpdated);
+    };
   }, []);
 
   const filteredAgents = useMemo(() => {
@@ -259,6 +311,22 @@ export const AgentCenterView: React.FC = () => {
                       >
                         {handleLabel}
                       </span>
+                      {agent.is_custom && (
+                        <span
+                          style={{
+                            fontSize: '0.64rem',
+                            fontFamily: 'var(--font-mono)',
+                            textTransform: 'uppercase',
+                            padding: '1px 6px',
+                            borderRadius: '4px',
+                            backgroundColor: 'var(--accent-soft)',
+                            border: '1px solid var(--border-accent)',
+                            color: 'var(--accent-light)',
+                          }}
+                        >
+                          Personalizado
+                        </span>
+                      )}
                     </div>
                     <div
                       style={{
@@ -273,6 +341,23 @@ export const AgentCenterView: React.FC = () => {
                       {agent.name || getAgentLabel(agent.role)}
                     </div>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => handleTogglePinDock(agent)}
+                    className={`btn btn-icon-sm ${pinnedDockRoles.includes(agent.role) ? 'btn-primary' : 'btn-ghost'}`}
+                    title={
+                      pinnedDockRoles.includes(agent.role)
+                        ? `Desafixar ${properName} do Dock lateral`
+                        : `Fixar ${properName} no Dock lateral`
+                    }
+                    aria-label={
+                      pinnedDockRoles.includes(agent.role)
+                        ? `Desafixar ${properName} do Dock lateral`
+                        : `Fixar ${properName} no Dock lateral`
+                    }
+                  >
+                    <Pin size={13} />
+                  </button>
                 </div>
 
                 <p

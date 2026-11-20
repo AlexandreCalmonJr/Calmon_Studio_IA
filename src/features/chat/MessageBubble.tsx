@@ -25,6 +25,8 @@ import type { InferenceTelemetryRecord } from '../../services/api/system';
 import { useAssistantIdentity } from '../../context/AssistantIdentityContext';
 import { MascotAvatar } from '../../shared/common/MascotAvatar';
 import { getDefaultMascotForRole } from '../../services/mascots';
+import { distillToBrain } from '../../services/api/brain';
+import { notify } from '../../shared/common/Toast';
 
 const INTENT_LABELS: Record<string, string> = {
   conversation: 'Conversação & Assistente',
@@ -79,6 +81,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
   const [inferenceRecords, setInferenceRecords] = useState<InferenceTelemetryRecord[]>([]);
   const [feedbackLoadingId, setFeedbackLoadingId] = useState<string | null>(null);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const [savingToBrain, setSavingToBrain] = useState(false);
+  const [savedToBrain, setSavedToBrain] = useState(false);
   const task = message.taskData;
   const userProfile = getUserProfile();
   const { assistantName } = useAssistantIdentity();
@@ -147,6 +151,27 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
     utterance.onerror = () => setIsSpeaking(false);
     setIsSpeaking(true);
     window.speechSynthesis.speak(utterance);
+  };
+
+  const handleSaveToBrain = async () => {
+    if (!displayText?.trim() || savingToBrain || savedToBrain) return;
+    setSavingToBrain(true);
+    try {
+      await distillToBrain({
+        prompt: task?.plan_steps?.[0] || `Insight de ${speakerLabel}`,
+        answer: displayText,
+        agent_role: activeAgentMeta?.role || 'jarvis_master',
+        agent_name: activeAgentMeta?.proper_name || assistantName,
+        layer: activeAgentMeta?.role && activeAgentMeta.role !== 'jarvis_master' ? 'agent' : 'private',
+        sources: task?.sources,
+      });
+      setSavedToBrain(true);
+      notify('Resposta destilada e salva no Segundo Cérebro.', 'success');
+    } catch (err: any) {
+      notify(err?.message || 'Não foi possível salvar no Segundo Cérebro.', 'error');
+    } finally {
+      setSavingToBrain(false);
+    }
   };
 
   // Extrai possíveis arquivos, artefatos JSON ou diffs do texto para abrir no Canvas
@@ -295,6 +320,27 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
                 >
                   {isSpeaking ? <VolumeX size={12} /> : <Volume2 size={12} />}
                   <span>{isSpeaking ? 'Parar' : 'Ouvir'}</span>
+                </button>
+              )}
+
+              {displayText && displayText.trim().length > 0 && (
+                <button
+                  type="button"
+                  data-testid="save-to-brain-btn"
+                  disabled={savingToBrain || savedToBrain}
+                  onClick={handleSaveToBrain}
+                  className="btn btn-ghost btn-xs"
+                  title="Destilar e salvar esta resposta no Segundo Cérebro"
+                  style={{ color: savedToBrain ? '#4ade80' : undefined }}
+                >
+                  {savingToBrain ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : savedToBrain ? (
+                    <Check size={12} />
+                  ) : (
+                    <Brain size={12} />
+                  )}
+                  <span>{savedToBrain ? 'Salvo no Cérebro' : 'Salvar no Cérebro'}</span>
                 </button>
               )}
             </>
@@ -629,6 +675,55 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
                   {feedbackError}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Card de Artefato Real Gerado (.PPTX, .PDF, .PNG) */}
+          {isJarvis && task?.artifact_payload && (
+            <div
+              data-testid="message-deliverable-card"
+              style={{
+                marginTop: '14px',
+                padding: '12px 16px',
+                borderRadius: 'var(--radius-lg)',
+                backgroundColor: 'var(--bg-secondary)',
+                border: '1px solid var(--border-accent)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '12px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                <div className="jarvis-page-header-icon">
+                  <Sparkles size={16} />
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    {task.artifact_payload.title}
+                  </div>
+                  <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                    Entregável pronto em <strong style={{ color: 'var(--accent-light)', fontFamily: 'var(--font-mono)' }}>.{task.artifact_payload.kind.toUpperCase()}</strong>
+                    {task.artifact_payload.slides ? ` · ${task.artifact_payload.slides.length} slides` : ''}
+                    {task.artifact_payload.sections ? ` · ${task.artifact_payload.sections.length} seções` : ''}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  onOpenArtifact({
+                    title: task.artifact_payload!.title,
+                    structuredArtifact: task.artifact_payload!,
+                    studioMode: true,
+                  })
+                }
+                className="btn btn-primary btn-sm"
+              >
+                <Sparkles size={14} />
+                <span>Abrir & Baixar .{task.artifact_payload.kind.toUpperCase()}</span>
+              </button>
             </div>
           )}
 

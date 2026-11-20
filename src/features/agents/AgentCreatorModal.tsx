@@ -172,6 +172,7 @@ export const AgentCreatorModal: React.FC<AgentCreatorModalProps> = ({
         await createAgent(payload);
         notify(`Especialista ${cleanProper} (${payload.handle}) criado com sucesso!`, 'success');
       }
+      window.dispatchEvent(new Event('jarvis:agents-updated'));
       await onSaved();
       onClose();
     } catch (err: any) {
@@ -188,6 +189,7 @@ export const AgentCreatorModal: React.FC<AgentCreatorModalProps> = ({
     try {
       await rollbackAgentVersion(editingAgent.role, version);
       notify(`Versão v${version} de ${editingAgent.proper_name || editingAgent.name} restaurada!`, 'success');
+      window.dispatchEvent(new Event('jarvis:agents-updated'));
       await onSaved();
       onClose();
     } catch (err: any) {
@@ -204,6 +206,7 @@ export const AgentCreatorModal: React.FC<AgentCreatorModalProps> = ({
     try {
       await deleteAgent(editingAgent.role);
       notify(`Especialista ${editingAgent.proper_name || editingAgent.name} removido.`, 'info');
+      window.dispatchEvent(new Event('jarvis:agents-updated'));
       await onSaved();
       onClose();
     } catch (err: any) {

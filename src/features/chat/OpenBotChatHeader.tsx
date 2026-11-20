@@ -9,6 +9,7 @@ import {
   Check,
   ChevronDown,
   Globe,
+  Sparkles,
 } from 'lucide-react';
 import { FormattedChatModel } from '../../services/chatModels';
 
@@ -35,6 +36,7 @@ interface OpenBotChatHeaderProps {
   onExportChat?: () => void;
   webSearchEnabled?: boolean;
   onToggleWebSearch?: () => void;
+  onOpenArtifactStudio?: () => void;
 }
 
 const AVAILABLE_MODELS = [
@@ -63,6 +65,7 @@ export const OpenBotChatHeader: React.FC<OpenBotChatHeaderProps> = ({
   onExportChat,
   webSearchEnabled = false,
   onToggleWebSearch,
+  onOpenArtifactStudio,
 }) => {
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
@@ -237,6 +240,19 @@ export const OpenBotChatHeader: React.FC<OpenBotChatHeaderProps> = ({
           >
             <Globe size={13} />
             <span className="hide-mobile">{webSearchEnabled ? 'Web: ON' : 'Pesquisa Web'}</span>
+          </button>
+        )}
+
+        {onOpenArtifactStudio && (
+          <button
+            type="button"
+            data-testid="open-artifact-studio-btn"
+            onClick={onOpenArtifactStudio}
+            className="btn btn-secondary btn-sm"
+            title="Abrir Estúdio de Artefatos (.PPTX, .PDF, .PNG)"
+          >
+            <Sparkles size={13} color="var(--accent-light)" />
+            <span className="hide-mobile">Artefatos</span>
           </button>
         )}
 

@@ -31,7 +31,9 @@ import { DiffViewer } from '../../shared/common/DiffViewer';
 import { ConfirmDialog } from '../../shared/common/ConfirmDialog';
 import { getAccountStorageKey } from '../../services/accountScope';
 import { API_BASE } from '../../services/api/client';
+import { apiFetch } from '../../services/sessionTransport';
 import { getOperationLabel, getProjectTypeLabel, getRiskLabel, getToolLabel } from '../../types';
+import { IdeWorkspacePanel } from './IdeWorkspacePanel';
 
 type Mode = 'plan' | 'ask' | 'auto';
 
@@ -119,6 +121,7 @@ export const CodingAgentView: React.FC = () => {
   const [canDecideApproval, setCanDecideApproval] = useState(false);
   const [canReloadMcp, setCanReloadMcp] = useState(false);
   const [roleLoaded, setRoleLoaded] = useState(false);
+  const [activeSurface, setActiveSurface] = useState<'ide' | 'terminal'>('ide');
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
   const [clearingHistory, setClearingHistory] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -126,7 +129,7 @@ export const CodingAgentView: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${API_BASE}/auth/me`, { credentials: 'include' })
+    apiFetch(`${API_BASE}/auth/me`)
       .then(async (response) => (response.ok ? response.json() : null))
       .then((principal) => {
         if (cancelled) return;
@@ -521,26 +524,54 @@ export const CodingAgentView: React.FC = () => {
       {/* Header */}
       <header className="jarvis-page-header">
         <div>
-          <h1 className="jarvis-page-header__title">Coding Agent JARVIS</h1>
+          <h1 className="jarvis-page-header__title">IDE & Código JARVIS</h1>
           <p className="jarvis-page-header__subtitle" style={{ maxWidth: '760px' }}>
-            Agente de desenvolvimento com ferramentas autorizadas, execução confinada ao projeto selecionado e aprovação humana para operações sensíveis.
+            Editor integrado estilo Claude Code com Diff visual lado a lado, checkpoints reversíveis em 1 clique e terminal de agente confinado ao projeto.
           </p>
         </div>
         <div className="jarvis-page-header__actions">
-          <button type="button" onClick={handleDownloadLog} className="btn btn-secondary" disabled={entries.length === 0}>
-            <Download size={14} /> Exportar log
-          </button>
-          <button type="button" onClick={handleNewSession} className="btn btn-secondary" disabled={running}>
-            Nova sessão
-          </button>
-          {canClearHistory && (
-            <button type="button" onClick={handleClearHistory} className="btn btn-secondary" disabled={running}>
-              Limpar histórico
+          <div className="jarvis-segmented" role="tablist" aria-label="Modo da IDE">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeSurface === 'ide'}
+              onClick={() => setActiveSurface('ide')}
+              className={`jarvis-segmented-btn ${activeSurface === 'ide' ? 'is-active' : ''}`}
+            >
+              IDE · Diff & Checkpoints
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeSurface === 'terminal'}
+              onClick={() => setActiveSurface('terminal')}
+              className={`jarvis-segmented-btn ${activeSurface === 'terminal' ? 'is-active' : ''}`}
+            >
+              Terminal do Agente
+            </button>
+          </div>
+          {activeSurface === 'terminal' && (
+            <>
+              <button type="button" onClick={handleDownloadLog} className="btn btn-secondary" disabled={entries.length === 0}>
+                <Download size={14} /> Exportar log
+              </button>
+              <button type="button" onClick={handleNewSession} className="btn btn-secondary" disabled={running}>
+                Nova sessão
+              </button>
+              {canClearHistory && (
+                <button type="button" onClick={handleClearHistory} className="btn btn-secondary" disabled={running}>
+                  Limpar histórico
+                </button>
+              )}
+            </>
           )}
         </div>
       </header>
 
+      {activeSurface === 'ide' ? (
+        <IdeWorkspacePanel />
+      ) : (
+        <>
       {/* Configuração */}
       <div style={styles.configCard}>
         <div style={styles.fieldGroup}>
@@ -782,6 +813,8 @@ export const CodingAgentView: React.FC = () => {
         onConfirm={confirmClearHistory}
         onCancel={() => setConfirmClearOpen(false)}
       />
+        </>
+      )}
     </div>
   );
 };

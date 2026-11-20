@@ -13,6 +13,11 @@ import {
   PanelRight,
   CircleHelp,
   Plus,
+  Mic,
+  LayoutDashboard,
+  MessageSquare,
+  Smartphone,
+  ShieldCheck,
 } from 'lucide-react';
 import { SetupWizardModal } from './shared/common/SetupWizardModal';
 import { InitialPasswordChangeModal } from './shared/common/InitialPasswordChangeModal';
@@ -21,6 +26,8 @@ import { UserProfileModal, getUserProfile, UserProfileData } from './shared/comm
 import { ToastContainer } from './shared/common/Toast';
 import { ApprovalPromptHost } from './shared/common/ApprovalPromptHost';
 import { CommandPalette } from './shared/common/CommandPalette';
+import { OfflineIndicator, PWAInstallButton } from './shared/pwa/PWAInstallButton';
+import { VoiceLiveHudModal } from './features/companion/VoiceLiveHudModal';
 import { ErrorBanner } from './shared/layout/StateFeedback';
 import { pathForTab, tabFromLocation } from './router';
 import { API_BASE } from './services/api/client';
@@ -98,6 +105,9 @@ const WorkflowCanvasView = lazy(() =>
 const UsageAnalyticsView = lazy(() =>
   import('./features/usage/UsageAnalyticsView').then((m) => ({ default: m.UsageAnalyticsView }))
 );
+const CompanionHubView = lazy(() =>
+  import('./features/companion/CompanionHubView').then((m) => ({ default: m.CompanionHubView }))
+);
 
 /**
  * Telas que ocupam toda a área útil com layout e cabeçalho internos próprios.
@@ -129,6 +139,7 @@ const TAB_LABELS: Record<string, { section: string; title: string }> = {
   server_logs: { section: 'Sistema', title: 'Logs do Servidor' },
   learning: { section: 'Suporte', title: 'Central de Ajuda' },
   settings: { section: 'Sistema', title: 'Configurações' },
+  companion: { section: 'Ecossistema', title: 'Voz, PWA & Companion' },
   not_found: { section: 'JARVIS', title: 'Página não encontrada' },
 };
 
@@ -251,6 +262,7 @@ const DashboardApp: React.FC = () => {
   const [showSetupWizard, setShowSetupWizard] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [showVoiceHud, setShowVoiceHud] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfileData>(getUserProfile);
 
   useEffect(() => {
@@ -590,10 +602,24 @@ const DashboardApp: React.FC = () => {
                       cpu: systemResources?.cpu_percent ?? null,
                       memory: systemResources?.ram_percent ?? null,
                     }}
-                    onOpenVoice={() => navigate('chat')}
+                    onOpenVoice={() => setShowVoiceHud(true)}
                   />
                 </div>
               )}
+
+              <PWAInstallButton compact />
+
+              <button
+                type="button"
+                onClick={() => setShowVoiceHud(true)}
+                className="btn btn-secondary btn-sm"
+                title={`Ativar Voz ao Vivo ("Ei ${assistantName}")`}
+                aria-label={`Abrir modo voz Ei ${assistantName}`}
+                style={{ borderColor: 'var(--border-accent)', color: 'var(--accent-light)' }}
+              >
+                <Mic size={13} />
+                <span className="hide-mobile">Ei {assistantName}</span>
+              </button>
 
               <button
                 type="button"
@@ -810,6 +836,12 @@ const DashboardApp: React.FC = () => {
                     />
                   )}
                   {activeTab === 'settings' && <SettingsView onNavigate={navigate} />}
+                  {activeTab === 'companion' && (
+                    <CompanionHubView
+                      onOpenVoiceHud={() => setShowVoiceHud(true)}
+                      onNavigate={navigate}
+                    />
+                  )}
                 </Suspense>
               </ModuleErrorBoundary>
             </div>
@@ -829,7 +861,7 @@ const DashboardApp: React.FC = () => {
             setTargetChatSessionId('agent_' + agentId);
             navigate('chat');
           }}
-          onAddAgent={() => navigate('skills')}
+          onAddAgent={() => navigate('agents')}
           onHideDock={handleToggleAgentDock}
         />
       )}
@@ -894,6 +926,54 @@ const DashboardApp: React.FC = () => {
         onOpenProfile={() => setShowProfileModal(true)}
       />
 
+      <VoiceLiveHudModal isOpen={showVoiceHud} onClose={() => setShowVoiceHud(false)} />
+
+      {/* Navegação Inferior Mobile PWA (visível apenas abaixo de 768px) */}
+      <nav className="jarvis-mobile-bottom-nav" aria-label="Navegação mobile rápida">
+        <button
+          type="button"
+          onClick={() => navigate('overview')}
+          className={`jarvis-mobile-bottom-nav__btn ${activeTab === 'overview' ? 'is-active' : ''}`}
+        >
+          <LayoutDashboard size={17} />
+          <span>Início</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('chat')}
+          className={`jarvis-mobile-bottom-nav__btn ${activeTab === 'chat' ? 'is-active' : ''}`}
+        >
+          <MessageSquare size={17} />
+          <span>Chat</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowVoiceHud(true)}
+          className="jarvis-mobile-bottom-nav__btn jarvis-mobile-bottom-nav__voice"
+          aria-label={`Falar com ${assistantName}`}
+        >
+          <Mic size={18} />
+          <span>Voz</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('companion')}
+          className={`jarvis-mobile-bottom-nav__btn ${activeTab === 'companion' ? 'is-active' : ''}`}
+        >
+          <Smartphone size={17} />
+          <span>PC/PWA</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('security')}
+          className={`jarvis-mobile-bottom-nav__btn ${activeTab === 'security' ? 'is-active' : ''}`}
+        >
+          <ShieldCheck size={17} />
+          <span>Sentinela</span>
+        </button>
+      </nav>
+
+      <OfflineIndicator />
       <ApprovalPromptHost />
       <ToastContainer />
     </div>

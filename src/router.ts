@@ -29,6 +29,7 @@ export const TAB_PATHS: Record<string, string> = {
   executive_report: '/executive-report',
   learning: '/learning',
   settings: '/settings',
+  companion: '/companion',
 };
 
 const PATH_TABS: Record<string, string> = {
@@ -74,6 +75,9 @@ const PATH_TABS: Record<string, string> = {
   settings: 'settings',
   profile: 'settings',
   config: 'settings',
+  companion: 'companion',
+  voice: 'companion',
+  pwa: 'companion',
 };
 
 export const KNOWN_TABS = new Set(Object.keys(TAB_PATHS));

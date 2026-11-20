@@ -2040,9 +2040,75 @@ textarea {
   }
 }
 
+.jarvis-mobile-bottom-nav {
+  display: none;
+}
+
 @media (max-width: 768px) {
   .hide-mobile {
     display: none !important;
+  }
+  main {
+    padding-bottom: 84px !important;
+  }
+  .jarvis-page-header__actions {
+    flex-wrap: wrap;
+    width: 100%;
+    max-width: 100%;
+  }
+  .jarvis-segmented {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .jarvis-segmented-btn {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .jarvis-toast-stack {
+    bottom: 80px !important;
+    right: 12px !important;
+    left: 12px !important;
+    max-width: none !important;
+  }
+  .jarvis-mobile-bottom-nav {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 90;
+    background-color: rgba(16, 19, 26, 0.96);
+    border-top: 1px solid var(--border-color);
+    backdrop-filter: blur(12px);
+    padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+    gap: 4px;
+  }
+  .jarvis-mobile-bottom-nav__btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 6px 4px;
+    border-radius: 9px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.68rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .jarvis-mobile-bottom-nav__btn.is-active {
+    color: var(--accent-light);
+    background-color: var(--accent-soft);
+    border-color: var(--border-accent);
+  }
+  .jarvis-mobile-bottom-nav__voice {
+    color: #fff7ed;
+    background: linear-gradient(135deg, #f97316 0%, #c2410c 100%);
+    border-color: rgba(251, 146, 60, 0.55);
   }
   .jarvis-starter-grid,
   .jarvis-onboarding-strip {

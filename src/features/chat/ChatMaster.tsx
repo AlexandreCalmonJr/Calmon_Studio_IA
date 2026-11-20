@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Code2, ShieldCheck, Users, Compass, ArrowUpRight } from 'lucide-react';
-import { fetchWorkspaceProjects, fetchModels, fetchChatSessionDetails } from '../../api';
+import { fetchWorkspaceProjects, fetchModels, fetchChatSessionDetails, fetchAgents } from '../../api';
 import { FormattedChatModel, parseChatModelOptions } from '../../services/chatModels';
 import { useChatStream } from '../../hooks/useChatStream';
 import { ArtifactCanvas, CanvasArtifact } from './ArtifactCanvas';
@@ -11,8 +11,8 @@ import { getSessionMessagesLocally, saveSessionMessagesLocally } from './ChatHis
 import { OpenBotConversationRail } from './OpenBotConversationRail';
 import { OpenBotChatHeader, ChatTabItem } from './OpenBotChatHeader';
 import { getAccountStorageKey } from '../../services/accountScope';
-import { ALL_26_AGENTS } from '../../data/agentsCatalog';
-import { ChatMessage } from '../../types';
+import { getAgentDisplayColor, getAgentProperName } from '../../services/agentSync';
+import { AgentInfo, ChatMessage } from '../../types';
 import { useAssistantIdentity } from '../../context/AssistantIdentityContext';
 
 interface ChatMasterProps {
@@ -37,15 +37,15 @@ const STARTER_CARDS = [
     icon: Compass,
   },
   {
-    title: 'Revisar segurança com a Kira',
-    desc: 'Auditoria preventiva contra golpes, permissões perigosas e riscos OWASP.',
-    prompt: 'Kira, faça uma checklist objetiva de segurança para proteger minha conta e meus arquivos hoje.',
+    title: 'Multi-agentes: Kira + Dante',
+    desc: 'Acione dois especialistas pelo nome para auditar segurança e gerar slides .PPTX.',
+    prompt: 'Chama a Kira para checar segurança de dados e o Dante para montar uma apresentação PowerPoint sobre IA segura.',
     icon: ShieldCheck,
   },
   {
-    title: 'Arquitetura & código com Atlas',
-    desc: 'Mapeie estrutura técnica, melhorias e boas práticas no seu projeto.',
-    prompt: 'Atlas, me ajude a estruturar a arquitetura limpa de um aplicativo web moderno passo a passo.',
+    title: 'Deep Research com Atlas',
+    desc: 'Pesquisa profunda em múltiplas fontes com relatório técnico pronto para PDF.',
+    prompt: 'Atlas, faça uma pesquisa profunda sobre arquitetura de agentes locais e híbridos em 2026 e gere um relatório PDF.',
     icon: Code2,
   },
   {
@@ -165,7 +165,26 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
     () => loadProjects()
   );
 
-  // Resolve especialista caso a sessão tenha sido aberta pelo Dock lateral
+  const [myAgents, setMyAgents] = useState<AgentInfo[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    const loadAgents = () => {
+      fetchAgents()
+        .then((list) => {
+          if (active && Array.isArray(list)) setMyAgents(list);
+        })
+        .catch(() => {});
+    };
+    loadAgents();
+    window.addEventListener('jarvis:agents-updated', loadAgents);
+    return () => {
+      active = false;
+      window.removeEventListener('jarvis:agents-updated', loadAgents);
+    };
+  }, []);
+
+  // Resolve especialista real da equipe caso a sessão tenha sido aberta pelo Dock lateral ou sidebar
   const activeAgent = React.useMemo(() => {
     if (!sessionId) return null;
     const rawKey = sessionId.startsWith('agent_')
@@ -174,8 +193,17 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
         ? sessionId.slice(6)
         : null;
     if (!rawKey) return null;
-    return ALL_26_AGENTS.find((a) => a.id === rawKey || a.role === rawKey) || null;
-  }, [sessionId]);
+    const found = myAgents.find((a) => a.role === rawKey);
+    if (!found) return null;
+    return {
+      id: found.role,
+      role: found.role,
+      name: getAgentProperName(found),
+      categoryLabel: found.name || found.handle || 'Especialista',
+      mission: found.mission,
+      color: getAgentDisplayColor(found),
+    };
+  }, [sessionId, myAgents]);
 
   // Função central para carregar e sincronizar histórico de sessão com o SQLite do backend
   const loadSessionMessages = useCallback(async (sid: string, titleHint?: string) => {
@@ -235,19 +263,19 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
       }
     }
 
-    // Atualiza aba da conversa com nome amigável para agentes
+    // Atualiza aba da conversa com nome amigável para agentes reais
     const agentKey = sid.startsWith('agent_')
       ? sid.slice(6)
       : sid.startsWith('agent-')
         ? sid.slice(6)
         : null;
     const matchedAgent = agentKey
-      ? ALL_26_AGENTS.find((a) => a.id === agentKey || a.role === agentKey)
+      ? myAgents.find((a) => a.role === agentKey)
       : null;
 
     const resolvedTitle =
       titleHint ||
-      (matchedAgent ? matchedAgent.name : agentKey ? agentKey.toUpperCase() : 'Chat ' + sid.substring(0, 8));
+      (matchedAgent ? getAgentProperName(matchedAgent) : agentKey ? agentKey.toUpperCase() : 'Chat ' + sid.substring(0, 8));
 
     setTabs((prev) => {
       const exists = prev.find((t) => t.id === sid);
@@ -259,7 +287,7 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
       return [...prev, { id: sid, title: resolvedTitle }];
     });
     setActiveTabId(sid);
-  }, [setSessionId, setMessages]);
+  }, [setSessionId, setMessages, myAgents]);
 
   // Se o App ou Sidebar solicitar carregar uma sessão específica ou iniciar nova conversa
   useEffect(() => {
@@ -344,23 +372,24 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
         backgroundColor: 'var(--bg-primary)',
       }}
     >
-      {/* Sub-rail Esquerdo de Conversas (OpenBot Channel / Agent Rail) */}
+      {/* Sub-rail Esquerdo de Conversas (auto-oculta quando o Painel de Artefatos está aberto) */}
       <OpenBotConversationRail
         activeSessionId={sessionId}
         onSelectSession={handleSelectSession}
         onNewChat={handleOpenNewChatTab}
-        isCollapsed={!isRailOpen}
+        isCollapsed={!isRailOpen || Boolean(activeArtifact)}
       />
 
       {/* Coluna Principal do Chat */}
       <div
         style={{
-          flex: activeArtifact ? '0 0 50%' : '1',
+          flex: activeArtifact ? '1 1 50%' : '1 1 auto',
+          minWidth: 0,
           display: 'flex',
           flexDirection: 'column',
           height: '100%',
           overflow: 'hidden',
-          transition: 'flex 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+          transition: 'flex 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
           borderRight: activeArtifact ? '1px solid var(--border-color)' : 'none',
         }}
       >
@@ -395,6 +424,17 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
           onExportChat={handleExportChat}
           webSearchEnabled={webSearchEnabled}
           onToggleWebSearch={() => setWebSearchEnabled((prev) => !prev)}
+          onOpenArtifactStudio={() =>
+            setActiveArtifact((prev) =>
+              prev?.studioMode
+                ? prev
+                : {
+                    title: 'Estúdio de Artefatos (.PPTX / .PDF / .PNG)',
+                    studioMode: true,
+                    structuredArtifact: prev?.structuredArtifact || null,
+                  }
+            )
+          }
         />
 
         {/* Tela inicial do Chat */}

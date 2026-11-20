@@ -690,11 +690,22 @@ export function useChatStream(
                   plan_steps: done.plan_steps || metaInfo?.plan_steps || [],
                   classified_intent: done.classified_intent || metaInfo?.classified_intent,
                   agent_outputs: done.agent_outputs || metaInfo?.agent_outputs,
+                  orchestration_mode: done.orchestration_mode || metaInfo?.orchestration_mode,
+                  artifact_payload: done.artifact_payload || null,
                 },
               };
             }
             return next;
           });
+
+          if (done.artifact_payload && onArtifactDetected) {
+            onArtifactDetected({
+              title: done.artifact_payload.title || 'Artefato Gerado',
+              structuredArtifact: done.artifact_payload,
+              studioMode: true,
+            });
+            return;
+          }
 
           // Detecta se a resposta contém payload JSON estruturado ou projeto/diff
           let parsedArtPayload = false;

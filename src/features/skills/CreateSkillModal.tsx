@@ -48,6 +48,7 @@ const SKILL_TEMPLATES = [
 export const CreateSkillModal: React.FC<CreateSkillModalProps> = ({
   isOpen,
   onClose,
+  agents = [],
   onSkillCreated,
   initialTab = 'create',
 }) => {
@@ -295,8 +296,9 @@ Ao refatorar métodos com complexidade ciclomática elevada:
                   padding: '8px',
                 }}
               >
-                {ALL_26_AGENTS.slice(0, 12).map((ag) => {
+                {(agents.length > 0 ? agents : ALL_26_AGENTS).map((ag) => {
                   const isChecked = selectedAgents.includes(ag.role);
+                  const displayName = 'proper_name' in ag && ag.proper_name ? `${ag.proper_name} · ${ag.name}` : ag.name;
                   return (
                     <label
                       key={ag.role}
@@ -320,7 +322,7 @@ Ao refatorar métodos com complexidade ciclomática elevada:
                         style={{ accentColor: 'var(--accent-color)' }}
                       />
                       <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {ag.name}
+                        {displayName}
                       </span>
                     </label>
                   );

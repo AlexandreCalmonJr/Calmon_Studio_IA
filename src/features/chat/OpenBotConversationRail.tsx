@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Search, Plus, Trash2, ChevronDown, Check, MessageSquare } from 'lucide-react';
-import { fetchChatSessions, deleteChatSession } from '../../api';
-import { ChatSessionItem } from '../../types';
+import { fetchChatSessions, deleteChatSession, fetchAgents } from '../../api';
+import { AgentInfo, ChatSessionItem } from '../../types';
 import {
   getLocalSessionsCatalog,
   removeSessionLocally,
@@ -9,6 +9,7 @@ import {
   STORAGE_CATALOG_KEY,
 } from './ChatHistoryDrawer';
 import { getAccountStorageKey } from '../../services/accountScope';
+import { resolveQuickChatAgents } from '../../services/agentSync';
 import { ConfirmDialog } from '../../shared/common/ConfirmDialog';
 import { notify } from '../../shared/common/Toast';
 
@@ -29,14 +30,6 @@ interface DisplaySession {
   avatarColor: string;
 }
 
-const DEFAULT_AGENTS = [
-  { id: 'agent-qa', title: 'QA Tester', subtitle: 'Testes e Validações', dateStr: 'Especialista', avatarColor: '#c084fc' },
-  { id: 'agent-bug', title: 'Bug Fixer', subtitle: 'Correção de Erros', dateStr: 'Especialista', avatarColor: '#fb923c' },
-  { id: 'agent-sec', title: 'Security Auditor', subtitle: 'Auditoria de Segurança', dateStr: 'Especialista', avatarColor: '#34d399' },
-  { id: 'agent-copy', title: 'Copy Editor', subtitle: 'Revisão Técnica', dateStr: 'Especialista', avatarColor: '#38bdf8' },
-  { id: 'agent-design', title: 'Design Center', subtitle: 'Design & Interfaces', dateStr: 'Especialista', avatarColor: '#818cf8' },
-];
-
 export const OpenBotConversationRail: React.FC<OpenBotConversationRailProps> = ({
   activeSessionId,
   onSelectSession,
@@ -46,8 +39,27 @@ export const OpenBotConversationRail: React.FC<OpenBotConversationRailProps> = (
   const [searchTerm, setSearchTerm] = useState('');
   const [localCatalog, setLocalCatalog] = useState<LocalSessionMeta[]>([]);
   const [remoteSessions, setRemoteSessions] = useState<ChatSessionItem[]>([]);
+  const [activeAgents, setActiveAgents] = useState<AgentInfo[]>([]);
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
+
+  const loadMyAgents = useCallback(async () => {
+    try {
+      const list = await fetchAgents();
+      if (Array.isArray(list)) setActiveAgents(list);
+    } catch {
+      // mantém estado atual
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadMyAgents();
+    const onUpdated = () => {
+      void loadMyAgents();
+    };
+    window.addEventListener('jarvis:agents-updated', onUpdated);
+    return () => window.removeEventListener('jarvis:agents-updated', onUpdated);
+  }, [loadMyAgents]);
 
   // 3 Modos de exibição de sugestões / especialistas:
   // 'auto': Aparecem enquanto vazio; somem ao criar primeira conversa
@@ -190,12 +202,16 @@ export const OpenBotConversationRail: React.FC<OpenBotConversationRailProps> = (
     return list.filter((s) => s.title.toLowerCase().includes(q) || s.subtitle.toLowerCase().includes(q));
   }, [localCatalog, remoteSessions, searchTerm]);
 
-  // Lista de especialistas filtrada por busca
-  const filteredSpecialists = useMemo(() => {
-    if (!searchTerm.trim()) return DEFAULT_AGENTS;
-    const q = searchTerm.toLowerCase();
-    return DEFAULT_AGENTS.filter((s) => s.title.toLowerCase().includes(q) || s.subtitle.toLowerCase().includes(q));
-  }, [searchTerm]);
+  // Lista de agentes reais da equipe do usuário filtrada por busca
+  const filteredSpecialists: DisplaySession[] = useMemo(() => {
+    return resolveQuickChatAgents(activeAgents, searchTerm).map((ag) => ({
+      id: ag.id,
+      title: ag.properName,
+      subtitle: ag.subtitle,
+      dateStr: ag.isCustom ? 'Criado' : ag.handle,
+      avatarColor: ag.color,
+    }));
+  }, [activeAgents, searchTerm]);
 
   const renderCard = (session: DisplaySession) => {
     const isActive = activeSessionId === session.id;
@@ -265,7 +281,7 @@ export const OpenBotConversationRail: React.FC<OpenBotConversationRailProps> = (
           </div>
         </div>
 
-        {!session.id.startsWith('agent-') && (
+        {!session.id.startsWith('agent-') && !session.id.startsWith('agent_') && (
           <button
             type="button"
             onClick={(e) => {
@@ -432,7 +448,7 @@ export const OpenBotConversationRail: React.FC<OpenBotConversationRailProps> = (
                     }}
                   >
                     <span style={{ fontSize: '0.68rem', color: '#737373', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                      Especialistas Rápidos
+                      Meus Agentes ({filteredSpecialists.length})
                     </span>
                     <ChevronDown
                       size={12}
@@ -474,12 +490,12 @@ export const OpenBotConversationRail: React.FC<OpenBotConversationRailProps> = (
                   </div>
                 </div>
               ) : (
-                /* Opção 1 e 2: Exibe especialistas como atalhos de inicialização */
+                /* Opção 1 e 2: Exibe agentes reais do usuário como atalhos de inicialização */
                 <>
                   <div style={{ padding: '2px 6px 6px 6px', fontSize: '0.66rem', color: '#666666' }}>
                     {agentsMode === 'auto'
-                      ? 'Atalhos para iniciar (somem após a primeira mensagem):'
-                      : 'Especialistas disponíveis para atendimento rápido:'}
+                      ? `Meus Agentes ativos (${filteredSpecialists.length}) — clique para conversar:`
+                      : `Meus Agentes (${filteredSpecialists.length}):`}
                   </div>
                   {filteredSpecialists.map((agent) => renderCard(agent))}
                 </>

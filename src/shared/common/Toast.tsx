@@ -40,6 +40,7 @@ export const ToastContainer: React.FC = () => {
 
   return (
     <div
+      className="jarvis-toast-stack"
       style={{
         position: 'fixed',
         bottom: '24px',

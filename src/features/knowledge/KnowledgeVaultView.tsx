@@ -4,6 +4,9 @@ import {
   Plus,
   Upload,
   FolderPlus,
+  Brain,
+  Users,
+  FileText,
 } from 'lucide-react';
 import {
   fetchKnowledgeDocuments,
@@ -17,11 +20,17 @@ import { notify } from '../../shared/common/Toast';
 import { ConfirmDialog } from '../../shared/common/ConfirmDialog';
 import { PageHeader } from '../../shared/layout/PageHeader';
 import { API_BASE } from '../../services/api/client';
+import { apiFetch } from '../../services/sessionTransport';
 import { KnowledgeSearchBar } from './KnowledgeSearchBar';
 import { DocumentListGrid } from './DocumentListGrid';
 import { FolderIndexModal, TextSnippetModal } from './DocumentModals';
+import { BrainMapPanel } from './BrainMapPanel';
+import { AssistantFederationPanel } from './AssistantFederationPanel';
+
+type KnowledgeTabId = 'brain' | 'assistants' | 'documents';
 
 export const KnowledgeVaultView: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<KnowledgeTabId>('brain');
   const [documents, setDocuments] = useState<any[]>([]);
   const [canManageKnowledge, setCanManageKnowledge] = useState(false);
   const [roleLoaded, setRoleLoaded] = useState(false);
@@ -32,7 +41,7 @@ export const KnowledgeVaultView: React.FC = () => {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
-  // Modais de Entrada
+  // Modais de Entrada (Documentos & RAG)
   const [showFolderModal, setShowFolderModal] = useState(false);
   const [folderPath, setFolderPath] = useState('');
   const [folderCategory, setFolderCategory] = useState('projeto');
@@ -63,7 +72,7 @@ export const KnowledgeVaultView: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${API_BASE}/auth/me`, { credentials: 'include' })
+    apiFetch(`${API_BASE}/auth/me`)
       .then(async (response) => (response.ok ? response.json() : null))
       .then((principal) => {
         if (cancelled) return;
@@ -199,98 +208,158 @@ export const KnowledgeVaultView: React.FC = () => {
   return (
     <div className="jarvis-page-shell">
       <PageHeader
-        title="Base de Conhecimento & RAG Local"
-        subtitle="Recuperação contextual privada para os agentes autorizados da conta."
+        title="Segundo Cérebro & Conhecimento"
+        subtitle="Memória viva em 3 camadas, comunicação entre assistentes da casa e cofre RAG de documentos."
         meta={[
           <span key="docs" className="jarvis-tabular">{documents.length} documento{documents.length === 1 ? '' : 's'}</span>,
-          <span key="chunks" className="jarvis-tabular">{totalChunks} trechos semânticos</span>,
+          <span key="chunks" className="jarvis-tabular">{totalChunks} trechos RAG</span>,
         ]}
         actions={
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            {canManageKnowledge && (
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileUpload}
-                style={{ display: 'none' }}
-                accept=".pdf,.docx,.md,.txt,.json,.yaml,.yml,.py,.ts,.tsx,.java,.go,.cs,.sql"
-                disabled={uploadingFile}
-              />
-            )}
+          activeTab === 'documents' ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              {canManageKnowledge && (
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileUpload}
+                  style={{ display: 'none' }}
+                  accept=".pdf,.docx,.md,.txt,.json,.yaml,.yml,.py,.ts,.tsx,.java,.go,.cs,.sql"
+                  disabled={uploadingFile}
+                />
+              )}
 
-            {canManageKnowledge && (
+              {canManageKnowledge && (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadingFile}
+                  className="btn btn-primary btn-sm"
+                >
+                  <Upload size={14} />
+                  <span>{uploadingFile ? 'Indexando…' : 'Upload de Arquivo'}</span>
+                </button>
+              )}
+
+              {canManageKnowledge && (
+                <button
+                  type="button"
+                  onClick={() => setShowFolderModal(true)}
+                  className="btn btn-secondary btn-sm"
+                >
+                  <FolderPlus size={14} />
+                  <span>Indexar Pasta</span>
+                </button>
+              )}
+
+              {canManageKnowledge && (
+                <button
+                  type="button"
+                  onClick={() => setShowTextModal(true)}
+                  className="btn btn-secondary btn-sm"
+                >
+                  <Plus size={14} />
+                  <span>Nova Anotação</span>
+                </button>
+              )}
+
               <button
                 type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploadingFile}
-                className="btn btn-primary btn-sm"
+                onClick={loadDocuments}
+                className="btn btn-ghost btn-icon"
+                title="Atualizar lista"
+                aria-label="Atualizar lista"
               >
-                <Upload size={14} />
-                <span>{uploadingFile ? 'Indexando…' : 'Upload de Arquivo'}</span>
+                <RefreshCw size={14} className={loading ? 'spin' : ''} />
               </button>
-            )}
-
-            {canManageKnowledge && (
-              <button
-                type="button"
-                onClick={() => setShowFolderModal(true)}
-                className="btn btn-secondary btn-sm"
-              >
-                <FolderPlus size={14} />
-                <span>Indexar Pasta</span>
-              </button>
-            )}
-
-            {canManageKnowledge && (
-              <button
-                type="button"
-                onClick={() => setShowTextModal(true)}
-                className="btn btn-secondary btn-sm"
-              >
-                <Plus size={14} />
-                <span>Nova Anotação</span>
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={loadDocuments}
-              className="btn btn-ghost btn-icon"
-              title="Atualizar lista"
-              aria-label="Atualizar lista"
-            >
-              <RefreshCw size={14} className={loading ? 'spin' : ''} />
-            </button>
-          </div>
+            </div>
+          ) : undefined
         }
       />
 
-      {!roleLoaded && (
-        <div role="status" className="jarvis-callout jarvis-callout--info">
-          Verificando permissões de gerenciamento do Knowledge Vault…
-        </div>
-      )}
-
-      <KnowledgeSearchBar
-        searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
-        onSearch={handleSearch}
-        isSearching={isSearching}
-        searchResults={searchResults}
-        onClear={() => {
-          setSearchResults([]);
-          setSearchQuery('');
+      {/* Primary Section Tabs */}
+      <div
+        role="tablist"
+        aria-label="Seções do Segundo Cérebro e Conhecimento"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          borderBottom: '1px solid var(--border-color)',
+          paddingBottom: '10px',
+          flexWrap: 'wrap',
         }}
-      />
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'brain'}
+          onClick={() => setActiveTab('brain')}
+          className={`btn btn-sm ${activeTab === 'brain' ? 'btn-primary' : 'btn-ghost'}`}
+          style={{ whiteSpace: 'nowrap' }}
+        >
+          <Brain size={14} />
+          <span>Mapa do Cérebro</span>
+        </button>
 
-      <DocumentListGrid
-        documents={documents}
-        loading={loading}
-        error={documentsError}
-        onDelete={handleDelete}
-        canManage={canManageKnowledge}
-        onSelectFileClick={() => fileInputRef.current?.click()}
-      />
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'assistants'}
+          onClick={() => setActiveTab('assistants')}
+          className={`btn btn-sm ${activeTab === 'assistants' ? 'btn-primary' : 'btn-ghost'}`}
+          style={{ whiteSpace: 'nowrap' }}
+        >
+          <Users size={14} />
+          <span>Assistentes Conectados</span>
+        </button>
+
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'documents'}
+          onClick={() => setActiveTab('documents')}
+          className={`btn btn-sm ${activeTab === 'documents' ? 'btn-primary' : 'btn-ghost'}`}
+          style={{ whiteSpace: 'nowrap' }}
+        >
+          <FileText size={14} />
+          <span>Documentos & RAG ({documents.length})</span>
+        </button>
+      </div>
+
+      {activeTab === 'brain' && <BrainMapPanel />}
+
+      {activeTab === 'assistants' && <AssistantFederationPanel />}
+
+      {activeTab === 'documents' && (
+        <>
+          {!roleLoaded && (
+            <div role="status" className="jarvis-callout jarvis-callout--info">
+              Verificando permissões de gerenciamento do Knowledge Vault…
+            </div>
+          )}
+
+          <KnowledgeSearchBar
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            onSearch={handleSearch}
+            isSearching={isSearching}
+            searchResults={searchResults}
+            onClear={() => {
+              setSearchResults([]);
+              setSearchQuery('');
+            }}
+          />
+
+          <DocumentListGrid
+            documents={documents}
+            loading={loading}
+            error={documentsError}
+            onDelete={handleDelete}
+            canManage={canManageKnowledge}
+            onSelectFileClick={() => fileInputRef.current?.click()}
+          />
+        </>
+      )}
 
       {canManageKnowledge && (
         <FolderIndexModal

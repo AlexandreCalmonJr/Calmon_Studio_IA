@@ -1,16 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Plus, PanelRightClose, PanelRightOpen, X } from 'lucide-react';
-import { ALL_26_AGENTS } from '../../data/agentsCatalog';
+import { fetchAgents } from '../../api';
 import { getAccountStorageKey } from '../../services/accountScope';
+import { resolveDockAgents, UnifiedDockAgent } from '../../services/agentSync';
 
-export interface DockAgent {
-  id: string;
-  name: string;
-  role: string;
-  color: string;
-  shape?: 'squircle' | 'round' | 'diamond';
-  expression?: 'happy' | 'focused' | 'grumpy' | 'calm';
-}
+export type DockAgent = UnifiedDockAgent;
 
 interface AgentDockProps {
   activeAgentId?: string;
@@ -18,13 +12,6 @@ interface AgentDockProps {
   onAddAgent?: () => void;
   onHideDock?: () => void;
 }
-
-const DEFAULT_AGENTS: DockAgent[] = [
-  { id: 'qa_tester', name: 'QA Tester', role: 'Validador de Qualidade', color: '#ec4899' },
-  { id: 'copy_editor', name: 'Copy Editor', role: 'Redator & Revisor', color: '#3b82f6' },
-  { id: 'bug_fixer', name: 'Bug Fixer', role: 'Depurador de Código', color: '#f59e0b' },
-  { id: 'security_specialist', name: 'Security', role: 'Guardião de Segurança', color: '#22c55e' },
-];
 
 const getInitials = (name: string): string => {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -47,61 +34,39 @@ export const AgentDock: React.FC<AgentDockProps> = ({
     }
   });
 
-  const [dockAgents, setDockAgents] = useState<DockAgent[]>(() => {
-    try {
-      const raw = localStorage.getItem(getAccountStorageKey('jarvis_pinned_dock_agents'));
-      if (raw) {
-        const ids: string[] = JSON.parse(raw);
-        const mapped: DockAgent[] = ids.map((id) => {
-          const found26 = ALL_26_AGENTS.find((a) => a.id === id || a.role === id);
-          if (found26) {
-            return {
-              id: found26.id,
-              name: found26.name,
-              role: found26.categoryLabel,
-              color: found26.color,
-              shape: found26.shape,
-              expression: found26.expression,
-            };
-          }
-          const foundDef = DEFAULT_AGENTS.find((a) => a.id === id);
-          return foundDef || { id, name: id, role: 'Especialista', color: '#3b82f6' };
-        });
-        if (mapped.length > 0) return mapped;
-      }
-    } catch {}
-    return DEFAULT_AGENTS;
-  });
+  const [dockAgents, setDockAgents] = useState<DockAgent[]>([]);
 
-  useEffect(() => {
-    const handleSync = () => {
+  const loadDockAgents = useCallback(async () => {
+    try {
+      const realAgents = await fetchAgents();
+      let pinnedIds: string[] | null = null;
       try {
         const raw = localStorage.getItem(getAccountStorageKey('jarvis_pinned_dock_agents'));
         if (raw) {
-          const ids: string[] = JSON.parse(raw);
-          const mapped: DockAgent[] = ids.map((id) => {
-            const found26 = ALL_26_AGENTS.find((a) => a.id === id || a.role === id);
-            if (found26) {
-              return {
-                id: found26.id,
-                name: found26.name,
-                role: found26.categoryLabel,
-                color: found26.color,
-                shape: found26.shape,
-                expression: found26.expression,
-              };
-            }
-            const foundDef = DEFAULT_AGENTS.find((a) => a.id === id);
-            return foundDef || { id, name: id, role: 'Especialista', color: '#3b82f6' };
-          });
-          if (mapped.length > 0) setDockAgents(mapped);
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) pinnedIds = parsed.map(String);
         }
-      } catch {}
-    };
-
-    window.addEventListener('jarvis:dock-updated', handleSync);
-    return () => window.removeEventListener('jarvis:dock-updated', handleSync);
+      } catch {
+        pinnedIds = null;
+      }
+      setDockAgents(resolveDockAgents(realAgents, pinnedIds, 6));
+    } catch {
+      // mantém estado atual caso o backend ainda esteja inicializando
+    }
   }, []);
+
+  useEffect(() => {
+    void loadDockAgents();
+    const handleSync = () => {
+      void loadDockAgents();
+    };
+    window.addEventListener('jarvis:dock-updated', handleSync);
+    window.addEventListener('jarvis:agents-updated', handleSync);
+    return () => {
+      window.removeEventListener('jarvis:dock-updated', handleSync);
+      window.removeEventListener('jarvis:agents-updated', handleSync);
+    };
+  }, [loadDockAgents]);
 
   const toggleExpanded = () => {
     setIsExpanded((prev) => {
@@ -140,7 +105,7 @@ export const AgentDock: React.FC<AgentDockProps> = ({
               textTransform: 'uppercase',
             }}
           >
-            Especialistas
+            Meus Agentes
           </span>
         )}
         <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
@@ -148,8 +113,8 @@ export const AgentDock: React.FC<AgentDockProps> = ({
             type="button"
             onClick={toggleExpanded}
             className="btn btn-ghost btn-icon-sm"
-            title={isExpanded ? 'Modo compacto do dock' : 'Expandir nomes dos especialistas'}
-            aria-label={isExpanded ? 'Modo compacto do dock' : 'Expandir nomes dos especialistas'}
+            title={isExpanded ? 'Modo compacto do dock' : 'Expandir nomes dos agentes'}
+            aria-label={isExpanded ? 'Modo compacto do dock' : 'Expandir nomes dos agentes'}
           >
             {isExpanded ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
           </button>
@@ -158,8 +123,8 @@ export const AgentDock: React.FC<AgentDockProps> = ({
               type="button"
               onClick={onHideDock}
               className="btn btn-ghost btn-icon-sm"
-              title="Ocultar dock de especialistas"
-              aria-label="Ocultar dock de especialistas"
+              title="Ocultar dock de agentes"
+              aria-label="Ocultar dock de agentes"
             >
               <X size={14} />
             </button>
@@ -167,7 +132,7 @@ export const AgentDock: React.FC<AgentDockProps> = ({
         </div>
       </div>
 
-      {/* Lista de Especialistas Fixados */}
+      {/* Lista de Agentes Ativos Fixados */}
       <div
         style={{
           display: 'flex',
@@ -191,7 +156,7 @@ export const AgentDock: React.FC<AgentDockProps> = ({
                 type="button"
                 onClick={() => onSelectAgent(agent.id)}
                 className={`agent-dock-row ${isActive ? 'is-active' : ''}`}
-                aria-label={`Conversar com ${agent.name}`}
+                aria-label={`Conversar com ${agent.properName}`}
               >
                 <span
                   style={{
@@ -209,7 +174,7 @@ export const AgentDock: React.FC<AgentDockProps> = ({
                     flexShrink: 0,
                   }}
                 >
-                  {getInitials(agent.name)}
+                  {getInitials(agent.properName)}
                 </span>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div
@@ -222,7 +187,7 @@ export const AgentDock: React.FC<AgentDockProps> = ({
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {agent.name}
+                    {agent.properName}
                   </div>
                   <div
                     style={{
@@ -233,7 +198,7 @@ export const AgentDock: React.FC<AgentDockProps> = ({
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {agent.role}
+                    {agent.subtitle}
                   </div>
                 </div>
               </button>
@@ -250,8 +215,8 @@ export const AgentDock: React.FC<AgentDockProps> = ({
               <button
                 type="button"
                 onClick={() => onSelectAgent(agent.id)}
-                aria-label={`Conversar com ${agent.name} (${agent.role})`}
-                title={`${agent.name} — ${agent.role}`}
+                aria-label={`Conversar com ${agent.properName} (${agent.subtitle})`}
+                title={`${agent.properName} (${agent.handle}) — ${agent.subtitle}`}
                 className={`agent-dock-bubble ${isActive ? 'is-active' : ''}`}
                 style={{
                   backgroundColor: `${agent.color}20`,
@@ -259,7 +224,7 @@ export const AgentDock: React.FC<AgentDockProps> = ({
                   borderColor: isActive ? agent.color : `${agent.color}40`,
                 }}
               >
-                {getInitials(agent.name)}
+                {getInitials(agent.properName)}
               </button>
 
               {isHovered && (
@@ -280,8 +245,13 @@ export const AgentDock: React.FC<AgentDockProps> = ({
                     zIndex: 120,
                   }}
                 >
-                  <div style={{ fontWeight: 600 }}>{agent.name}</div>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{agent.role}</div>
+                  <div style={{ fontWeight: 600 }}>
+                    {agent.properName}{' '}
+                    <span style={{ color: 'var(--accent-light)', fontFamily: 'var(--font-mono)', fontSize: '0.72rem' }}>
+                      {agent.handle}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{agent.subtitle}</div>
                 </div>
               )}
             </div>

@@ -1,10 +1,11 @@
 import React from 'react';
 import { Users, CheckCircle, XCircle, Trash2, BookOpen, Wrench } from 'lucide-react';
-import { SkillInfo } from '../../types';
+import { AgentInfo, SkillInfo } from '../../types';
 import { ALL_26_AGENTS } from '../../data/agentsCatalog';
 
 interface SkillCardProps {
   skill: SkillInfo;
+  activeAgents?: AgentInfo[];
   onToggle: (id: string) => void;
   onEditAgents: (skill: SkillInfo) => void;
   onViewInstructions?: (skill: SkillInfo) => void;
@@ -25,6 +26,7 @@ const DOMAIN_LABELS: Record<string, string> = {
 
 export const SkillCard: React.FC<SkillCardProps> = ({
   skill,
+  activeAgents = [],
   onToggle,
   onEditAgents,
   onViewInstructions,
@@ -48,6 +50,15 @@ export const SkillCard: React.FC<SkillCardProps> = ({
         : null;
 
   const assigned = (skill.assigned_agents || []).map((role) => {
+    const real = activeAgents.find((a) => a.role === role);
+    if (real) {
+      return {
+        role: real.role,
+        name: real.proper_name ? `${real.proper_name} (${real.name})` : real.name,
+        color: real.mascot?.color || '#f97316',
+        categoryLabel: real.handle || 'Especialista',
+      };
+    }
     const ag = ALL_26_AGENTS.find((a) => a.role === role);
     return (
       ag || {

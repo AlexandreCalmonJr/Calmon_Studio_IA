@@ -1597,7 +1597,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <div className="jarvis-setting-row__info">
                       <div className="jarvis-setting-row__title">Especialistas na Barra Lateral do Chat</div>
                       <div className="jarvis-setting-row__desc">
-                        Controla como os atalhos de especialistas (QA, Bug Fixer, Security, Copy, Design) aparecem no histórico.
+                        Controla como os atalhos dos seus agentes ativos (incluindo os criados por você) aparecem na barra lateral do Chat.
                       </div>
                     </div>
                     <div className="jarvis-setting-row__control">
