@@ -25,7 +25,8 @@ export function resolveDeploymentOptions(body: Record<string, unknown>): BrainDe
     port: Math.min(65535, Math.max(1024, Number(body?.port || DEFAULT_DEPLOYMENT_OPTIONS.port) || 3000)),
     enableOllama: body?.enableOllama !== undefined ? Boolean(body.enableOllama) : true,
     enableRemoteGateway: body?.enableRemoteGateway !== undefined ? Boolean(body.enableRemoteGateway) : true,
-    enablePythonWorker: Boolean(body?.enablePythonWorker),
+    enablePythonWorker: body?.enablePythonWorker !== undefined ? Boolean(body.enablePythonWorker) : true,
+    enableGoGateway: body?.enableGoGateway !== undefined ? Boolean(body.enableGoGateway) : true,
     dataDir:
       String(body?.dataDir || DEFAULT_DEPLOYMENT_OPTIONS.dataDir).trim().slice(0, 120) ||
       DEFAULT_DEPLOYMENT_OPTIONS.dataDir,

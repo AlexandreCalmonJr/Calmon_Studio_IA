@@ -100,7 +100,7 @@ test('validateJarvisBrainPack validates and sanitizes valid .jarvis-pack exports
   assert.equal(good.pack?.knowledge.length, 1);
 });
 
-test('buildDualModeServerArtifacts generates 8 real dual-mode server files without hardcoded secrets', () => {
+test('buildDualModeServerArtifacts generates polyglot server files (Node + Python + Go) without hardcoded secrets', () => {
   const files = buildDualModeServerArtifacts({
     brainName: 'Cérebro Casa',
     mode: 'docker_postgres',
@@ -108,11 +108,12 @@ test('buildDualModeServerArtifacts generates 8 real dual-mode server files witho
     enableOllama: true,
     enableRemoteGateway: true,
     enablePythonWorker: true,
+    enableGoGateway: true,
     postgresDb: 'jarvis_casa',
     assistantName: 'JARVIS',
   });
 
-  assert.equal(files.length, 8);
+  assert.equal(files.length, 14);
   const paths = files.map((f) => f.path);
   assert.ok(paths.includes('docker-compose.yml'));
   assert.ok(paths.includes('Dockerfile'));
@@ -122,6 +123,12 @@ test('buildDualModeServerArtifacts generates 8 real dual-mode server files witho
   assert.ok(paths.includes('scripts/start-local-brain.sh'));
   assert.ok(paths.includes('Caddyfile'));
   assert.ok(paths.includes('README_CEREBRO_DUAL_MODE.md'));
+  assert.ok(paths.includes('services/go-gateway/go.mod'));
+  assert.ok(paths.includes('services/go-gateway/main.go'));
+  assert.ok(paths.includes('services/go-gateway/Dockerfile'));
+  assert.ok(paths.includes('services/python-worker/worker.py'));
+  assert.ok(paths.includes('services/python-worker/requirements.txt'));
+  assert.ok(paths.includes('services/python-worker/Dockerfile'));
 
   const compose = files.find((f) => f.path === 'docker-compose.yml')!.content;
   assert.ok(compose.includes('pgvector/pgvector:pg16'));
@@ -129,10 +136,21 @@ test('buildDualModeServerArtifacts generates 8 real dual-mode server files witho
   assert.ok(compose.includes('ollama/ollama:latest'));
   assert.ok(compose.includes('caddy:2-alpine'));
   assert.ok(compose.includes('jarvis-python-worker'));
+  assert.ok(compose.includes('jarvis-go-gateway'));
   assert.ok(compose.includes('POSTGRES_PASSWORD:?'));
   assert.ok(compose.includes('JWT_SECRET:?'));
+
+  const goSource = files.find((f) => f.path === 'services/go-gateway/main.go')!.content;
+  assert.ok(goSource.includes('isPublicHTTPTarget'));
+  assert.ok(goSource.includes('/gateway/crawl'));
 
   const envFile = files.find((f) => f.path === '.env.example')!.content;
   assert.ok(envFile.includes('POSTGRES_PASSWORD=\n'));
   assert.ok(envFile.includes('GEMINI_API_KEY=\n'));
+
+  const minimalFiles = buildDualModeServerArtifacts({
+    enablePythonWorker: false,
+    enableGoGateway: false,
+  });
+  assert.equal(minimalFiles.length, 8);
 });
