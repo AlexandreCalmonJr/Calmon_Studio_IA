@@ -102,6 +102,19 @@ import {
   buildGitHubKnowledgeMarkdown,
 } from './src/services/githubImporterEngine.ts';
 import { inspectGitHubRepository as inspectGitHubRepoDetailed } from './server/githubImporterServer.ts';
+import {
+  PairedDeviceRecord,
+  PairingSessionInfo,
+  buildAndroidMobilePreviewHtml,
+  buildPairingQrPayload,
+  validateBrainServerUrl,
+} from './src/services/androidAppEngine.ts';
+import {
+  packageAndroidProjectToZip,
+  resolveAndroidMobileConfig,
+} from './server/androidAppServer.ts';
+import { createLocalSqliteBrainStore } from './server/brain/sqliteBrainStore.ts';
+import { createBrainRouter } from './server/brain/brainRouter.ts';
 
 const realtimeClients = new Set<WebSocket>();
 function broadcastRealtimeEvent(type: string, payload: unknown) {
@@ -6604,6 +6617,275 @@ ${original}
       message: `Documentação "${createdDoc.name}" indexada na Base de Conhecimento.`,
     });
   });
+
+  // ==================== FASE 7: APP MOBILE ANDROID (PAREAMENTO QR + PACOTE APK/AAB) ====================
+  const generatePairingCode = (): string => {
+    const raw = crypto.randomBytes(4).toString('hex').toUpperCase();
+    return `${raw.slice(0, 4)}-${raw.slice(4, 8)}`;
+  };
+
+  let pairedDevicesList: PairedDeviceRecord[] = [
+    {
+      id: 'dev_android_seed_1',
+      name: 'Android Principal (Exemplo)',
+      platform: 'android',
+      model: 'Smartphone Android',
+      os_version: 'Android 15',
+      status: 'online',
+      paired_at: nowIso(),
+      last_seen: nowIso(),
+      token_hint: 'ks_9f2a••••e41b',
+    },
+  ];
+
+  const createFreshPairingSession = (opts?: {
+    serverUrl?: string;
+    brainName?: string;
+    assistantName?: string;
+  }): PairingSessionInfo => {
+    const safeUrl = validateBrainServerUrl(opts?.serverUrl || 'http://192.168.1.50:3000');
+    const brainName = String(opts?.brainName || 'Cérebro Casa · Local').trim().slice(0, 48) || 'Cérebro Casa · Local';
+    const assistantName = String(opts?.assistantName || 'JARVIS').trim().slice(0, 32) || 'JARVIS';
+    const pairing_code = generatePairingCode();
+    const expires_at = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    const qr_payload = buildPairingQrPayload({
+      brainName,
+      serverUrl: safeUrl,
+      pairingCode: pairing_code,
+      expiresAt: expires_at,
+      assistantName,
+    });
+    return {
+      pairing_code,
+      expires_at,
+      server_url: safeUrl,
+      brain_name: brainName,
+      qr_payload,
+    };
+  };
+
+  let activePairingSession: PairingSessionInfo = createFreshPairingSession();
+
+  api.get('/devices', requireAuth, (_req, res) => {
+    if (Date.now() > Date.parse(activePairingSession.expires_at)) {
+      activePairingSession = createFreshPairingSession({
+        serverUrl: activePairingSession.server_url,
+        brainName: activePairingSession.brain_name,
+      });
+    }
+    res.json({ devices: pairedDevicesList, pairing: activePairingSession });
+  });
+
+  api.post('/devices/pair/init', requireAuth, (req, res) => {
+    try {
+      activePairingSession = createFreshPairingSession({
+        serverUrl: req.body?.serverUrl,
+        brainName: req.body?.brainName,
+        assistantName: req.body?.assistantName,
+      });
+      res.json(activePairingSession);
+    } catch (err: any) {
+      res.status(400).json({ error: err?.message || 'Não foi possível gerar QR Code de pareamento.' });
+    }
+  });
+
+  api.post('/devices/pair/confirm', requireAuth, (req, res) => {
+    const code = String(req.body?.pairingCode || '').trim().toUpperCase();
+    const deviceName = String(req.body?.deviceName || 'Celular Android').trim().slice(0, 48);
+    const model = String(req.body?.model || 'Android').trim().slice(0, 48);
+    const osVersion = String(req.body?.osVersion || 'Android 15').trim().slice(0, 28);
+
+    if (!code || code !== activePairingSession.pairing_code) {
+      res.status(400).json({ error: 'Código de pareamento inválido ou já utilizado. Gere um novo QR Code.' });
+      return;
+    }
+    if (Date.now() > Date.parse(activePairingSession.expires_at)) {
+      res.status(400).json({ error: 'Código de pareamento expirado. Gere um novo QR Code.' });
+      return;
+    }
+
+    const tokenRaw = crypto.randomBytes(8).toString('hex');
+    const created: PairedDeviceRecord = {
+      id: `dev_android_${Date.now().toString(36)}`,
+      name: deviceName || 'Celular Android',
+      platform: 'android',
+      model,
+      os_version: osVersion,
+      status: 'online',
+      paired_at: nowIso(),
+      last_seen: nowIso(),
+      token_hint: `ks_${tokenRaw.slice(0, 4)}••••${tokenRaw.slice(-4)}`,
+    };
+    pairedDevicesList = [created, ...pairedDevicesList];
+    localBrainStore.savePairedDevice(created);
+    // Rotaciona o código efêmero imediatamente após uso único
+    activePairingSession = createFreshPairingSession({
+      serverUrl: activePairingSession.server_url,
+      brainName: activePairingSession.brain_name,
+    });
+    res.status(201).json({ device: created, devices: pairedDevicesList, pairing: activePairingSession });
+  });
+
+  api.delete('/devices/:id', requireAuth, (req, res) => {
+    const id = String(req.params.id || '');
+    const before = pairedDevicesList.length;
+    pairedDevicesList = pairedDevicesList.filter((d) => d.id !== id);
+    localBrainStore.revokePairedDevice(id);
+    res.json({ deleted: pairedDevicesList.length < before, devices: pairedDevicesList });
+  });
+
+  api.post('/android-app/preview', requireAuth, async (req, res) => {
+    try {
+      const config = resolveAndroidMobileConfig(req.body || {});
+      const { files, zipBuffer, filename } = await packageAndroidProjectToZip(config);
+      res.json({
+        config,
+        files,
+        preview_html: buildAndroidMobilePreviewHtml(config),
+        zip_size_bytes: zipBuffer.length,
+        filename,
+      });
+    } catch (err: any) {
+      res.status(400).json({ error: err?.message || 'Não foi possível gerar a prévia do projeto Android.' });
+    }
+  });
+
+  api.post('/android-app/package.zip', requireAuth, async (req, res) => {
+    try {
+      const config = resolveAndroidMobileConfig(req.body || {});
+      const { zipBuffer, filename } = await packageAndroidProjectToZip(config);
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.send(zipBuffer);
+    } catch (err: any) {
+      res.status(400).json({ error: err?.message || 'Falha ao compactar o projeto Android.' });
+    }
+  });
+
+  // ==================== FASE 8: SERVIDOR CÉREBRO REAL (LOCAL_SQLITE WAL + ROUTER MODULAR) ====================
+  const localBrainStore = createLocalSqliteBrainStore({
+    defaultOrigin: `http://localhost:${process.env.PORT || 3000}`,
+    brainName: process.env.BRAIN_NAME || 'Esta Máquina · Local (Sem Docker)',
+    assistantName: process.env.ASSISTANT_NAME || 'JARVIS',
+  });
+
+  const syncRuntimeToSqlite = () => {
+    localBrainStore.syncWorkspaceSnapshot({
+      agents: agentsList,
+      skills: skillsList,
+      workflows: savedWorkflows as any[],
+      knowledge: knowledgeDocs as any[],
+    });
+  };
+
+  localBrainStore.seedPairedDevicesIfEmpty(pairedDevicesList);
+  pairedDevicesList = localBrainStore.listPairedDevices();
+  syncRuntimeToSqlite();
+
+  api.use(
+    '/brain',
+    createBrainRouter({
+      store: localBrainStore,
+      requireAuth,
+      isGeminiConfigured: isGeminiApiConfigured,
+      getLiveCounts: () => ({
+        agents: agentsList.length,
+        skills: skillsList.length,
+        workflows: savedWorkflows.length,
+        knowledge: knowledgeDocs.length,
+        sessions: chatSessions.size,
+        paired_devices: pairedDevicesList.length,
+      }),
+      syncSnapshotBeforeExport: syncRuntimeToSqlite,
+      onPackImported: (pack) => {
+        for (const a of pack.agents) {
+          if (!agentsList.some((existing) => existing.role === a.role)) {
+            const created = {
+              role: a.role,
+              name: a.name,
+              handle: a.handle || `@${a.role}`,
+              description: a.description || 'Agente migrado via .jarvis-pack.',
+              system_prompt: a.system_prompt || 'Responda sempre em português do Brasil com clareza.',
+              color: '#f97316',
+              avatar_icon: 'bot',
+              preferred_model: 'gemini-2.5-flash',
+              autonomy_level: 'confirm',
+              hybrid_policy: {
+                mode: 'hybrid',
+                fallback_to_cloud: true,
+                prefer_local_for_private: true,
+              },
+              is_custom: true,
+              installed_skills: a.installed_skills || [],
+              version: 1,
+              updated_at: nowIso(),
+            };
+            agentsList.unshift(created);
+            recordAgentVersion(created, `Migrado de ${pack.sourceBrain.name}`);
+          }
+        }
+        for (const s of pack.skills) {
+          if (!skillsList.some((existing) => existing.name.toLowerCase() === s.name.toLowerCase())) {
+            skillsList.unshift({
+              id: s.id || `skill_pack_${Date.now().toString(36)}`,
+              name: s.name,
+              version: '1.0.0',
+              origin: 'custom',
+              license: 'JARVIS Pack',
+              description: s.description || 'Habilidade migrada via .jarvis-pack.',
+              domain: s.domain || 'geral',
+              allowed_tools: ['read_file', 'web_search'],
+              required_permissions: ['skills:read'],
+              assigned_agents: s.assigned_agents || [],
+              content_hash: `sha256:${crypto.randomBytes(6).toString('hex')}`,
+              is_approved: true,
+              is_revoked: false,
+              instructions: s.instructions || '',
+              created_at: nowIso(),
+              updated_at: nowIso(),
+            });
+          }
+        }
+        for (const w of pack.workflows) {
+          if (!savedWorkflows.some((existing: any) => existing.title.toLowerCase() === w.title.toLowerCase())) {
+            savedWorkflows.unshift({
+              id: w.id || `wf_pack_${Date.now().toString(36)}`,
+              title: w.title,
+              description: w.description || 'Fluxo migrado via .jarvis-pack.',
+              schedule_cron: w.schedule_cron || '0 8 * * *',
+              schedule_enabled: Boolean(w.schedule_enabled),
+              nodes: Array.isArray(w.nodes) ? w.nodes : [],
+              edges: Array.isArray(w.edges) ? w.edges : [],
+              updated_at: nowIso(),
+            } as any);
+          }
+        }
+        for (const k of pack.knowledge) {
+          if (!knowledgeDocs.some((existing: any) => existing.name === k.name)) {
+            knowledgeDocs.unshift({
+              name: k.name,
+              category: k.category || 'geral',
+              chunks: Math.max(1, Math.ceil(k.content.length / 650)),
+              size_bytes: Buffer.byteLength(k.content, 'utf8'),
+              file_type: k.file_type || 'md',
+              indexed_at: nowIso(),
+              content: k.content,
+            });
+          }
+        }
+      },
+      onActiveBrainChanged: ({ name, baseUrl }) => {
+        try {
+          activePairingSession = createFreshPairingSession({
+            serverUrl: baseUrl,
+            brainName: name,
+          });
+        } catch {
+          // Mantém sessão de pareamento atual se a URL for apenas modelo
+        }
+      },
+    })
+  );
 
   // Fallback for any other unmapped API endpoints so the UI receives clean JSON instead of HTML
   api.use(requireAuth, (_req, res) => {

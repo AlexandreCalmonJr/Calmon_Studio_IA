@@ -125,6 +125,16 @@ const GitHubImporterView = lazy(() =>
     default: m.GitHubImporterView,
   }))
 );
+const AndroidMobileHubView = lazy(() =>
+  import('./features/mobile/AndroidMobileHubView').then((m) => ({
+    default: m.AndroidMobileHubView,
+  }))
+);
+const BrainServerHubView = lazy(() =>
+  import('./features/brain/BrainServerHubView').then((m) => ({
+    default: m.BrainServerHubView,
+  }))
+);
 
 /**
  * Telas que ocupam toda a área útil com layout e cabeçalho internos próprios.
@@ -160,6 +170,8 @@ const TAB_LABELS: Record<string, { section: string; title: string }> = {
   creative_studio: { section: 'Principal', title: 'Estúdio Criativo (Excel, Imagens & Vídeos)' },
   app_builder: { section: 'Principal', title: 'Construtor de Apps (Android & Windows)' },
   github_import: { section: 'Engenharia', title: 'Importar do GitHub' },
+  android_app: { section: 'Ecossistema', title: 'App Mobile Android (.apk / .aab)' },
+  brain_server: { section: 'Ecossistema', title: 'Cérebros & Servidor (Local / Docker)' },
   not_found: { section: 'JARVIS', title: 'Página não encontrada' },
 };
 
@@ -467,11 +479,23 @@ const DashboardApp: React.FC = () => {
       }
     };
 
+    const handleOpenAndroidPairing = () => {
+      navigate('android_app');
+    };
+
+    const handleOpenBrainManager = () => {
+      navigate('brain_server');
+    };
+
     window.addEventListener('popstate', handlePopState);
     window.addEventListener('keydown', handleGlobalKeyDown);
+    window.addEventListener('jarvis:open-android-pairing', handleOpenAndroidPairing);
+    window.addEventListener('jarvis:open-brain-manager', handleOpenBrainManager);
     return () => {
       window.removeEventListener('popstate', handlePopState);
       window.removeEventListener('keydown', handleGlobalKeyDown);
+      window.removeEventListener('jarvis:open-android-pairing', handleOpenAndroidPairing);
+      window.removeEventListener('jarvis:open-brain-manager', handleOpenBrainManager);
     };
   }, []);
 
@@ -910,6 +934,8 @@ const DashboardApp: React.FC = () => {
                   {activeTab === 'creative_studio' && <CreativeMediaStudioView />}
                   {activeTab === 'app_builder' && <AppBuilderView />}
                   {activeTab === 'github_import' && <GitHubImporterView onNavigate={navigate} />}
+                  {activeTab === 'android_app' && <AndroidMobileHubView />}
+                  {activeTab === 'brain_server' && <BrainServerHubView />}
                 </Suspense>
               </ModuleErrorBoundary>
             </div>

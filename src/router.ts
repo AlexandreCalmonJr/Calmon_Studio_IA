@@ -33,6 +33,8 @@ export const TAB_PATHS: Record<string, string> = {
   creative_studio: '/creative-studio',
   app_builder: '/app-builder',
   github_import: '/github-import',
+  android_app: '/android-app',
+  brain_server: '/brain-server',
 };
 
 const PATH_TABS: Record<string, string> = {
@@ -94,6 +96,16 @@ const PATH_TABS: Record<string, string> = {
   'github-import': 'github_import',
   github_import: 'github_import',
   github: 'github_import',
+  'android-app': 'android_app',
+  android_app: 'android_app',
+  android: 'android_app',
+  mobile: 'android_app',
+  'brain-server': 'brain_server',
+  brain_server: 'brain_server',
+  cerebros: 'brain_server',
+  brains: 'brain_server',
+  docker: 'brain_server',
+  servidor: 'brain_server',
 };
 
 export const KNOWN_TABS = new Set(Object.keys(TAB_PATHS));

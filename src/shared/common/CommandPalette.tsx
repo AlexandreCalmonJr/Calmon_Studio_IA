@@ -24,6 +24,7 @@ import {
   Wand2,
   AppWindow,
   GitBranch,
+  Smartphone,
 } from 'lucide-react';
 import { openWorkspaceRoot, savePonytailLevel } from '../../api';
 import { notify } from './Toast';
@@ -146,6 +147,26 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       iconColor: 'var(--accent-color)',
       badge: 'GitHub',
       action: () => { onNavigate('github_import'); onClose(); },
+    },
+    {
+      id: 'nav-android-app',
+      category: 'Navegação',
+      title: 'App Mobile Android (QR Code, APK & Play Store)',
+      subtitle: 'Parear celular por QR Code, gerir dispositivos e baixar projeto Android (.zip)',
+      icon: Smartphone,
+      iconColor: 'var(--accent-color)',
+      badge: 'Android',
+      action: () => { onNavigate('android_app'); onClose(); },
+    },
+    {
+      id: 'nav-brain-server',
+      category: 'Navegação',
+      title: 'Cérebros & Servidor Dual-Mode (Local SQLite / Docker)',
+      subtitle: 'Alternar entre múltiplos cérebros, exportar .jarvis-pack e baixar Docker Compose + SQLite (.zip)',
+      icon: Server,
+      iconColor: 'var(--accent-color)',
+      badge: 'Multi-Brain',
+      action: () => { onNavigate('brain_server'); onClose(); },
     },
     {
       id: 'nav-approvals',

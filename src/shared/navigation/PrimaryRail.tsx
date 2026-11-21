@@ -88,7 +88,19 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
   const assistantInitial = getAssistantInitial(assistantName);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [serverMenuOpen, setServerMenuOpen] = useState(false);
+  const [activeBrainLabel, setActiveBrainLabel] = useState<string>('Esta Máquina · Local');
   const navRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const onBrainSwitched = (e: Event) => {
+      const detail = (e as CustomEvent<{ name?: string }>).detail;
+      if (detail?.name) {
+        setActiveBrainLabel(detail.name);
+      }
+    };
+    window.addEventListener('jarvis:brain-switched', onBrainSwitched);
+    return () => window.removeEventListener('jarvis:brain-switched', onBrainSwitched);
+  }, []);
 
   const [pinnedItems, setPinnedItems] = useState<Record<string, boolean>>({
     overview: true,
@@ -112,6 +124,8 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
     creative_studio: true,
     app_builder: true,
     github_import: true,
+    android_app: true,
+    brain_server: true,
     executive_report: false,
     advisor: false,
     server_logs: false,
@@ -171,6 +185,8 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
         { id: 'workspace', label: 'Projetos', icon: FolderKanban },
         { id: 'coding', label: 'IDE & Código', icon: Code2 },
         { id: 'security', label: 'Sentinela & Segurança', icon: ShieldCheck },
+        { id: 'android_app', label: 'App Mobile Android', icon: Smartphone },
+        { id: 'brain_server', label: 'Cérebros & Servidor', icon: Server },
         { id: 'companion', label: 'Voz & Companion', icon: Smartphone },
       ],
     },
@@ -210,6 +226,8 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
         { id: 'chat', label: `Conversar com ${assistantName}`, icon: MessageSquare },
         { id: 'creative_studio', label: 'Planilhas, Imagens & Vídeos', icon: Wand2 },
         { id: 'app_builder', label: 'Criar Apps (Android/PC)', icon: AppWindow },
+        { id: 'android_app', label: 'App Android (QR & APK)', icon: Smartphone },
+        { id: 'brain_server', label: 'Cérebros (Local / Docker)', icon: Server },
         { id: 'companion', label: 'Voz & Celular (PWA)', icon: Smartphone },
         { id: 'agents', label: 'Meus Agentes', icon: Bot },
         { id: 'github_import', label: 'Importar do GitHub', icon: GitBranch },
@@ -719,8 +737,22 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
                 }}
               >
                 <Check size={15} color="var(--success-color)" />
-                <span style={{ fontWeight: 600 }}>JARVIS Hub Local</span>
+                <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {activeBrainLabel}
+                </span>
               </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  onNavigate('brain_server');
+                  setServerMenuOpen(false);
+                }}
+                className="btn btn-ghost btn-sm btn-block btn-start"
+              >
+                <Server size={15} color="var(--accent-light)" />
+                <span>Trocar Cérebro / Docker</span>
+              </button>
 
               <button
                 type="button"

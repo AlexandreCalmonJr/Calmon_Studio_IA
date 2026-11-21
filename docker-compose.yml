@@ -1,0 +1,84 @@
+# JARVIS AI Hub — Stack Docker Dual-Mode (Usuário Avançado)
+# Para rodar SEM Docker (usuário comum): npm install && npm run dev (usa SQLite local)
+# Para rodar COM Docker:
+#   docker compose up -d
+#   docker compose --profile local-ai up -d   (inclui Ollama local)
+#   docker compose --profile remote up -d     (inclui HTTPS automático Caddy)
+
+services:
+  jarvis-brain-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jarvis-brain-api
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - BRAIN_MODE=docker_postgres
+      - BRAIN_NAME=${BRAIN_NAME:-Cérebro JARVIS Docker}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-jarvis}:${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no .env}@jarvis-brain-db:5432/${POSTGRES_DB:-jarvis_brain}
+      - REDIS_URL=redis://jarvis-brain-redis:6379
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://jarvis-ollama:11434}
+      - JWT_SECRET=${JWT_SECRET:?Defina JWT_SECRET no .env}
+    depends_on:
+      jarvis-brain-db:
+        condition: service_healthy
+      jarvis-brain-redis:
+        condition: service_healthy
+    volumes:
+      - jarvis_brain_storage:/app/storage
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/v1/brain/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+
+  jarvis-brain-db:
+    image: pgvector/pgvector:pg16
+    container_name: jarvis-brain-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-jarvis}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no .env}
+      - POSTGRES_DB=${POSTGRES_DB:-jarvis_brain}
+    volumes:
+      - jarvis_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-jarvis} -d ${POSTGRES_DB:-jarvis_brain}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  jarvis-brain-redis:
+    image: redis:7-alpine
+    container_name: jarvis-brain-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - jarvis_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  jarvis-ollama:
+    image: ollama/ollama:latest
+    container_name: jarvis-ollama
+    profiles: ["local-ai"]
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - jarvis_ollama_models:/root/.ollama
+
+volumes:
+  jarvis_brain_storage:
+  jarvis_pg_data:
+  jarvis_redis_data:
+  jarvis_ollama_models:
