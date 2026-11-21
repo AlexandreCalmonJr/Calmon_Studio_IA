@@ -317,7 +317,7 @@ let activeHardwareProfileId = hardwareProfiles[0].id;
 let providerConnectivity: ProviderConnectivity = {
   ollama_connected: true,
   huggingface_connected: true,
-  gemini_connected: true,
+  gemini_connected: isGeminiApiConfigured(),
 };
 
 function getActiveHardwareProfile(): NotebookHardwareProfile {

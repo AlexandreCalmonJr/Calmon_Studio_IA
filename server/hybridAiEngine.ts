@@ -94,7 +94,8 @@ async function runOllamaChat(
   const start = Date.now();
   const base = ollamaBaseUrl.replace(/\/+$/, '');
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5000);
+  // Modelos locais (como 7B / 14B) podem levar até 120s para carregamento na memória e inferência completa
+  const timeout = setTimeout(() => controller.abort(), 120000);
 
   try {
     const response = await fetch(`${base}/api/chat`, {
@@ -143,7 +144,7 @@ export async function fetchOllamaLocalModels(ollamaBaseUrl: string): Promise<{
   const start = Date.now();
   const base = (ollamaBaseUrl || 'http://127.0.0.1:11434').replace(/\/+$/, '');
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 1600);
+  const timeout = setTimeout(() => controller.abort(), 6000);
 
   try {
     const res = await fetch(`${base}/api/tags`, {
@@ -280,7 +281,7 @@ export async function runHybridInference(req: HybridInferenceRequest): Promise<H
 
   const ollamaUrl = req.ollamaBaseUrl || 'http://127.0.0.1:11434';
   const ollamaEnabled = req.ollamaConnected !== false;
-  const geminiEnabled = req.geminiConnected !== false;
+  const geminiEnabled = req.geminiConnected !== false && isGeminiApiConfigured();
 
   if (wantsLocal && ollamaEnabled) {
     const localModel = requested && !isGeminiModelId(requested) && requested !== 'auto' ? requested : 'llama3.1:8b';
@@ -297,8 +298,12 @@ export async function runHybridInference(req: HybridInferenceRequest): Promise<H
       };
     } catch (localErr: any) {
       if (policy === 'local_only' || !geminiEnabled) {
+        const errorDetail =
+          localErr?.name === 'AbortError'
+            ? 'Tempo limite de resposta excedido (120s)'
+            : String(localErr?.message || 'sem resposta');
         throw new Error(
-          `Não foi possível conectar ao Ollama local em ${ollamaUrl} (${localErr?.message || 'sem resposta'}). Verifique se o Ollama está ativo no seu notebook ou habilite o modo Híbrido (Gemini Online).`
+          `Não foi possível executar no modelo local (${localModel}) via Ollama em ${ollamaUrl}: ${errorDetail}.`
         );
       }
       // Transparent hybrid failover to Gemini Online
@@ -319,7 +324,10 @@ export async function runHybridInference(req: HybridInferenceRequest): Promise<H
   }
 
   if (!geminiEnabled) {
-    throw new Error('O provedor Gemini Online está desconectado na Central de Modelos. Reconecte-o ou ative um nó Ollama local.');
+    if (wantsLocal && !ollamaEnabled) {
+      throw new Error(`O nó Ollama local está desativado na Central de Modelos. Ative-o para utilizar o modelo ${requested || 'local'}.`);
+    }
+    throw new Error('GEMINI_API_KEY não configurada no servidor. Configure a chave no painel Settings > Secrets ou selecione um modelo local do Ollama.');
   }
 
   const geminiModel = resolveSafeGeminiModel(requested);
