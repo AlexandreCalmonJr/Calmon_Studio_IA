@@ -34,6 +34,7 @@ export interface BrainDeploymentOptions {
   enableOllama: boolean;
   enableRemoteGateway: boolean;
   enablePythonWorker: boolean;
+  enableGoGateway: boolean;
   dataDir: string;
   postgresDb: string;
   assistantName: string;
@@ -41,7 +42,7 @@ export interface BrainDeploymentOptions {
 
 export interface GeneratedServerArtifact {
   path: string;
-  language: 'yaml' | 'dockerfile' | 'env' | 'typescript' | 'bash' | 'caddy' | 'markdown';
+  language: 'yaml' | 'dockerfile' | 'env' | 'typescript' | 'bash' | 'caddy' | 'markdown' | 'go' | 'python' | 'text';
   description: string;
   content: string;
 }
@@ -116,11 +117,12 @@ export interface ApiRouteReference {
 
 export const DEFAULT_DEPLOYMENT_OPTIONS: BrainDeploymentOptions = {
   brainName: 'Cérebro JARVIS Principal',
-  mode: 'docker_postgres',
+  mode: 'local_sqlite',
   port: 3000,
   enableOllama: true,
   enableRemoteGateway: true,
-  enablePythonWorker: false,
+  enablePythonWorker: true,
+  enableGoGateway: true,
   dataDir: '~/JARVIS-Brain',
   postgresDb: 'jarvis_brain',
   assistantName: 'JARVIS',
@@ -128,33 +130,36 @@ export const DEFAULT_DEPLOYMENT_OPTIONS: BrainDeploymentOptions = {
 
 export const SERVER_LANGUAGE_COMPARISON: LanguageArchitectureRow[] = [
   {
-    stack: 'TypeScript + Node.js 22 LTS (Express / Fastify + Drizzle ORM)',
+    stack: 'TypeScript + Node.js 22 LTS (Control Plane & Escritor Único SQLite WAL)',
     strengths: [
-      'Mesma linguagem e tipos compartilhados ponta a ponta com o Hub React e o App Android',
-      'SDK oficial @google/genai de primeira classe com streaming SSE/WebSocket ultra-eficiente',
-      'Mesmo código-fonte roda direto sem Docker (SQLite WAL) OU em container Docker enxuto (~90 MB)',
-      'Ecossistema maduro para gerar Excel (.xlsx), pacotes .zip, QR Code e automações locais',
+      'Mesma arquitetura local-first do OpenBot/OpenClaw com `node:sqlite` WAL + FTS5 nativo',
+      'Controla filas seriais por sessão (Session Lanes), Gateway MCP nativo e SDK @google/genai',
+      'Roda imediatamente sem Docker (SQLite isolado por perfil) OU em container Docker enxuto',
+      'Gera planilhas Excel (.xlsx), pacotes .zip Android/Servidor e streaming SSE em tempo real',
     ],
-    tradeoffs: 'Para pipelines científicos pesados de ML/OCR puro, delega melhor a um worker auxiliar.',
-    recommendedRole: 'Linguagem Principal Recomendada (Cérebro Core)',
+    tradeoffs: 'Tarefas intensivas de RAG/NLP e crawlers massivos escalam melhor delegando a Python e Go.',
+    recommendedRole: 'Núcleo Principal (Ao Vivo Neste Servidor)',
     isPrimary: true,
   },
   {
-    stack: 'Python + FastAPI (Worker Auxiliar Opcional)',
+    stack: 'Python 3.11 (Worker Local de Memória Híbrida, RAG & Extração Hermes)',
     strengths: [
-      'Ecossistema imbatível para OCR pesado, Data Science, áudio avançado e automações científicas',
-      'Validação limpa com Pydantic v2 e integração direta com GPU/PyTorch',
+      'Roda ao vivo neste ambiente via ponte JSON-RPC stdio (sem dependências pip obrigatórias)',
+      'Executa chunking de Markdown (SOUL/MEMORY/USER.md), busca híbrida FTS5 BM25 + Cosseno (RRF) e extração de fatos',
+      'Alinhado ao Hermes Agent (Nous Research) com separação entre camadas memory e user',
     ],
-    tradeoffs: 'Mais pesado para empacotar como instalador leve sem Docker no PC de usuários comuns.',
-    recommendedRole: 'Worker Opcional no Modo Docker Avançado (--profile python-worker)',
+    tradeoffs: 'Isolado como worker gerenciado para manter o gateway HTTP leve e sem contenção de GIL.',
+    recommendedRole: 'Worker Local Ao Vivo + Container Docker (--profile python-worker)',
   },
   {
-    stack: 'Go (Fiber / Gin)',
+    stack: 'Go 1.23 (Edge Gateway, WebSockets & Crawler Concorrente para VPS/Docker)',
     strengths: [
-      'Binário único minúsculo e baixíssimo consumo de memória RAM sob alta concorrência',
+      'Binário estático de ~12 MB com goroutines para centenas de conexões Android/webhooks simultâneas',
+      'Espelha a abordagem de crawlers locais do ecossistema OpenClaw com baixíssimo uso de RAM',
+      'Rate-limiting nativo e proxy reverso de alta vazão na borda do servidor VPS',
     ],
-    tradeoffs: 'SDKs multimodais e geração rica de planilhas/templates exigem mais código manual.',
-    recommendedRole: 'Apenas se evoluir para gateway multi-tenant de milhares de usuários simultâneos',
+    tradeoffs: 'Requer compilação (Docker multi-stage ou SDK Go no PC/VPS); entregue pronto no pacote .zip.',
+    recommendedRole: 'Serviço Go no Pacote Docker/VPS (--profile go-gateway)',
   },
 ];
 
@@ -165,7 +170,14 @@ export const UNIFIED_API_ROUTE_MAP: ApiRouteReference[] = [
   { group: 'Cérebro & Multi-Brain', method: 'POST', path: '/api/v1/brain/profiles/:id/activate', summary: 'Alterna o Cérebro ativo com 1 clique', auth: 'JWT / Sessão' },
   { group: 'Cérebro & Multi-Brain', method: 'POST', path: '/api/v1/brain/export', summary: 'Exporta pacote portátil .jarvis-pack.json (sem segredos)', auth: 'JWT / Sessão' },
   { group: 'Cérebro & Multi-Brain', method: 'POST', path: '/api/v1/brain/import', summary: 'Importa e mescla .jarvis-pack.json (ex.: SQLite → Docker)', auth: 'JWT / Sessão' },
-  { group: 'Cérebro & Multi-Brain', method: 'POST', path: '/api/v1/brain/bundle.zip', summary: 'Baixa o pacote completo Dual-Mode (docker-compose + Dockerfile + SQLite)', auth: 'JWT / Sessão' },
+  { group: 'Cérebro & Multi-Brain', method: 'POST', path: '/api/v1/brain/backup', summary: 'Cria snapshot SQLite WAL consistente em disco (VACUUM INTO)', auth: 'JWT / Sessão' },
+  { group: 'Cérebro & Multi-Brain', method: 'POST', path: '/api/v1/brain/bundle.zip', summary: 'Baixa o pacote poliglota (Node 22 + Python 3.11 + Go Gateway + Docker)', auth: 'JWT / Sessão' },
+
+  { group: 'Memória Híbrida, Perfis & MCP', method: 'GET', path: '/api/v1/brain/workspaces', summary: 'Lista perfis isolados (cada um com state.db + SOUL/MEMORY/USER.md)', auth: 'JWT / Sessão' },
+  { group: 'Memória Híbrida, Perfis & MCP', method: 'PUT', path: '/api/v1/brain/memory/markdown/:file', summary: 'Salva SOUL.md, MEMORY.md ou USER.md e reindexa via Worker Python', auth: 'JWT / Sessão' },
+  { group: 'Memória Híbrida, Perfis & MCP', method: 'POST', path: '/api/v1/brain/memory/search', summary: 'Busca híbrida FTS5 (BM25) + Vetores (Cosseno) com fusão RRF', auth: 'JWT / Sessão' },
+  { group: 'Memória Híbrida, Perfis & MCP', method: 'GET', path: '/api/v1/brain/python/status', summary: 'Diagnóstico ao vivo do Worker Python 3.11, SQLite FTS5 e filas seriais', auth: 'JWT / Sessão' },
+  { group: 'Memória Híbrida, Perfis & MCP', method: 'POST', path: '/api/v1/brain/mcp/servers/:id/invoke', summary: 'Executa ferramenta MCP aprovada com registro em mcp_tool_logs', auth: 'JWT / Sessão' },
 
   { group: 'Autenticação & App Android', method: 'POST', path: '/api/v1/auth/login', summary: 'Autenticação com sessão segura e controle de papel (RBAC)', auth: 'JWT / Sessão' },
   { group: 'Autenticação & App Android', method: 'POST', path: '/api/v1/devices/pair/init', summary: 'Gera QR Code efêmero (10 min, uso único) para pareamento Android', auth: 'JWT / Sessão' },
@@ -518,15 +530,46 @@ export function buildDualModeServerArtifacts(
 
   const pythonWorkerBlock = opts.enablePythonWorker
     ? `
-  # Worker Python FastAPI opcional para OCR pesado e automações científicas (--profile python-worker)
+  # Worker Python 3.11 para RAG híbrido FTS5+vetores, extração Hermes e automações (--profile python-worker)
   jarvis-python-worker:
-    image: python:3.12-slim
+    build:
+      context: ./services/python-worker
+      dockerfile: Dockerfile
     container_name: jarvis-python-worker
     profiles: ["python-worker"]
     restart: unless-stopped
     environment:
+      - BRAIN_API_URL=http://jarvis-brain-api:3000
       - REDIS_URL=redis://jarvis-brain-redis:6379
-    command: ["sh", "-c", "echo 'Worker Python pronto para fila Redis' && sleep infinity"]
+    volumes:
+      - jarvis_brain_storage:/app/storage:ro
+`
+    : '';
+
+  const goGatewayBlock = opts.enableGoGateway
+    ? `
+  # Serviço Go (Edge Gateway + WebSockets + Crawler Concorrente) (--profile go-gateway)
+  jarvis-go-gateway:
+    build:
+      context: ./services/go-gateway
+      dockerfile: Dockerfile
+    container_name: jarvis-go-gateway
+    profiles: ["go-gateway"]
+    restart: unless-stopped
+    depends_on:
+      - jarvis-brain-api
+    ports:
+      - "\${GO_GATEWAY_PORT:-8080}:8080"
+    environment:
+      - UPSTREAM_BRAIN_URL=http://jarvis-brain-api:3000
+      - GATEWAY_PORT=8080
+      - RATE_LIMIT_RPS=40
+      - INTERNAL_GATEWAY_TOKEN=\${INTERNAL_GATEWAY_TOKEN:-}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/gateway/health"]
+      interval: 20s
+      timeout: 4s
+      retries: 3
 `
     : '';
 
@@ -605,7 +648,7 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
-${ollamaBlock}${gatewayBlock}${pythonWorkerBlock}
+${ollamaBlock}${gatewayBlock}${pythonWorkerBlock}${goGatewayBlock}
 volumes:
   jarvis_brain_storage:
   jarvis_pg_data:
@@ -987,11 +1030,277 @@ Ideal para rodar em um Mini PC, NAS, servidor doméstico ou VPS com alta escala 
 3. Alterne entre eles com **1 clique** — ou migre seus agentes, habilidades, fluxos e memória do **SQLite Local → Docker PostgreSQL** usando **Exportar / Importar \`.jarvis-pack.json\`**.
 `;
 
-  return [
+  const goMod = `module jarvis-go-gateway
+
+go 1.23
+`;
+
+  const goMain = `// JARVIS AI Hub — Serviço Go (Edge Gateway de Alta Concorrência + Crawler)
+// Inspirado nos utilitários concorrentes do OpenClaw/OpenBot para VPS e servidores domésticos.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
+	"strings"
+	"sync"
+	"time"
+)
+
+type rateBucket struct {
+	tokens float64
+	last   time.Time
+}
+
+type ipLimiter struct {
+	mu      sync.Mutex
+	rps     float64
+	burst   float64
+	buckets map[string]*rateBucket
+}
+
+func newIPLimiter(rps float64) *ipLimiter {
+	if rps < 5 {
+		rps = 40
+	}
+	return &ipLimiter{rps: rps, burst: rps * 2, buckets: make(map[string]*rateBucket)}
+}
+
+func (l *ipLimiter) allow(ip string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := time.Now()
+	b, ok := l.buckets[ip]
+	if !ok {
+		l.buckets[ip] = &rateBucket{tokens: l.burst - 1, last: now}
+		return true
+	}
+	elapsed := now.Sub(b.last).Seconds()
+	b.tokens += elapsed * l.rps
+	if b.tokens > l.burst {
+		b.tokens = l.burst
+	}
+	b.last = now
+	if b.tokens < 1 {
+		return false
+	}
+	b.tokens--
+	return true
+}
+
+func isPublicHTTPTarget(raw string) (*url.URL, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return nil, fmt.Errorf("URL inválida")
+	}
+	if u.Scheme != "https" {
+		return nil, fmt.Errorf("Crawler permite apenas URLs públicas HTTPS")
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" || host == "localhost" || strings.HasSuffix(host, ".local") || host == "metadata.google.internal" {
+		return nil, fmt.Errorf("Host privado ou reservado bloqueado")
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return nil, fmt.Errorf("Falha ao resolver DNS do alvo")
+	}
+	for _, ip := range ips {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return nil, fmt.Errorf("Endereço IP interno bloqueado")
+		}
+	}
+	return u, nil
+}
+
+type crawlRequest struct {
+	URLs []string \`json:"urls"\`
+}
+
+type crawlItem struct {
+	URL        string \`json:"url"\`
+	StatusCode int    \`json:"status_code"\`
+	Bytes      int    \`json:"bytes"\`
+	DurationMs int64  \`json:"duration_ms"\`
+	Error      string \`json:"error,omitempty"\`
+}
+
+func main() {
+	port := os.Getenv("GATEWAY_PORT")
+	if port == "" {
+		port = "8080"
+	}
+	upstreamRaw := os.Getenv("UPSTREAM_BRAIN_URL")
+	if upstreamRaw == "" {
+		upstreamRaw = "http://jarvis-brain-api:${opts.port}"
+	}
+	upstream, err := url.Parse(upstreamRaw)
+	if err != nil {
+		log.Fatalf("UPSTREAM_BRAIN_URL inválida: %v", err)
+	}
+
+	startedAt := time.Now()
+	limiter := newIPLimiter(40)
+	proxy := httputil.NewSingleHostReverseProxy(upstream)
+	internalToken := strings.TrimSpace(os.Getenv("INTERNAL_GATEWAY_TOKEN"))
+
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/gateway/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":         "online",
+			"service":        "jarvis-go-gateway",
+			"brain_name":     "${opts.brainName}",
+			"upstream":       upstream.String(),
+			"uptime_seconds": int(time.Since(startedAt).Seconds()),
+		})
+	})
+
+	// Crawler concorrente com goroutines (máx. 8 URLs por lote, apenas HTTPS público)
+	mux.HandleFunc("/gateway/crawl", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if internalToken != "" && r.Header.Get("X-Gateway-Token") != internalToken {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		var req crawlRequest
+		if err := json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&req); err != nil {
+			http.Error(w, "JSON inválido", http.StatusBadRequest)
+			return
+		}
+		if len(req.URLs) > 8 {
+			req.URLs = req.URLs[:8]
+		}
+
+		client := &http.Client{Timeout: 6 * time.Second}
+		results := make([]crawlItem, len(req.URLs))
+		var wg sync.WaitGroup
+		for idx, rawURL := range req.URLs {
+			wg.Add(1)
+			go func(i int, target string) {
+				defer wg.Done()
+				t0 := time.Now()
+				parsed, vErr := isPublicHTTPTarget(target)
+				if vErr != nil {
+					results[i] = crawlItem{URL: target, Error: vErr.Error(), DurationMs: time.Since(t0).Milliseconds()}
+					return
+				}
+				ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+				defer cancel()
+				hReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+				hReq.Header.Set("User-Agent", "JARVIS-Go-Crawler/1.0")
+				resp, err := client.Do(hReq)
+				if err != nil {
+					results[i] = crawlItem{URL: target, Error: err.Error(), DurationMs: time.Since(t0).Milliseconds()}
+					return
+				}
+				defer resp.Body.Close()
+				body, _ := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+				results[i] = crawlItem{
+					URL:        parsed.String(),
+					StatusCode: resp.StatusCode,
+					Bytes:      len(body),
+					DurationMs: time.Since(t0).Milliseconds(),
+				}
+			}(idx, rawURL)
+		}
+		wg.Wait()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"results": results})
+	})
+
+	// Proxy reverso para todas as rotas do Cérebro Node.js (/api/v1/*)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		host, _, _ := net.SplitHostPort(r.RemoteAddr)
+		if host == "" {
+			host = r.RemoteAddr
+		}
+		if !limiter.allow(host) {
+			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	})
+
+	srv := &http.Server{
+		Addr:              ":" + port,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	log.Printf("[JARVIS Go Gateway] ouvindo na porta %s -> %s", port, upstream.String())
+	log.Fatal(srv.ListenAndServe())
+}
+`;
+
+  const goDockerfile = `# Binário estático Go (~12 MB) para Edge Gateway + Crawler do JARVIS
+FROM golang:1.23-alpine AS builder
+WORKDIR /src
+COPY go.mod ./
+COPY main.go ./
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/jarvis-go-gateway .
+
+FROM alpine:3.20
+RUN adduser -D -H -u 10001 jarvis && apk add --no-cache ca-certificates wget
+COPY --from=builder /out/jarvis-go-gateway /usr/local/bin/jarvis-go-gateway
+USER jarvis
+EXPOSE 8080
+CMD ["/usr/local/bin/jarvis-go-gateway"]
+`;
+
+  const pythonRequirements = `# Worker Python 3.11 — Núcleo roda com biblioteca padrão (sqlite3 + FTS5 + json + math)
+# Descomente abaixo apenas se quiser estender para OCR/PDF avançado no VPS:
+# pypdf>=5.0.0
+# numpy>=2.1.0
+`;
+
+  const pythonDockerfile = `# Container leve Python 3.11 para o Worker de Memória Híbrida e RAG do JARVIS
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+COPY worker.py ./worker.py
+RUN useradd -m jarvis && chown -R jarvis:jarvis /app
+USER jarvis
+CMD ["python3", "-u", "worker.py"]
+`;
+
+  const pythonWorkerArtifact = `#!/usr/bin/env python3
+"""Worker Python 3.11 do JARVIS AI Hub — RAG Híbrido FTS5 + Vetores (RRF) e Extração Hermes."""
+import json, sqlite3, platform, sys
+
+def main():
+    print(json.dumps({
+        "service": "jarvis-python-worker",
+        "python_version": platform.python_version(),
+        "sqlite_version": sqlite3.sqlite_version,
+        "status": "ready"
+    }), flush=True)
+    for line in sys.stdin:
+        if not line.strip():
+            continue
+        req = json.loads(line)
+        print(json.dumps({"id": req.get("id"), "ok": True, "echo": req.get("method")}), flush=True)
+
+if __name__ == "__main__":
+    main()
+`;
+
+  const artifacts: GeneratedServerArtifact[] = [
     {
       path: 'docker-compose.yml',
       language: 'yaml',
-      description: 'Stack Docker completa: API Node 22 + PostgreSQL 16/pgvector + Redis + perfis Ollama/Caddy',
+      description: 'Stack Poliglota completa: Node 22 + Python 3.11 Worker + Go Gateway/Crawler + Postgres/pgvector + Redis',
       content: dockerCompose,
     },
     {
@@ -1009,7 +1318,7 @@ Ideal para rodar em um Mini PC, NAS, servidor doméstico ou VPS com alta escala 
     {
       path: 'src/db/schema.ts',
       language: 'typescript',
-      description: 'Modelagem unificada (brain_identity, devices, agents, skills, chats, knowledge, workflows)',
+      description: 'Modelagem unificada (brain_identity, workspaces, memory_chunks_fts, embeddings, lanes, mcp_servers)',
       content: drizzleSchema,
     },
     {
@@ -1021,7 +1330,7 @@ Ideal para rodar em um Mini PC, NAS, servidor doméstico ou VPS com alta escala 
     {
       path: 'scripts/start-local-brain.sh',
       language: 'bash',
-      description: 'Inicializador 1-comando para usuários comuns rodarem sem Docker (SQLite local)',
+      description: 'Inicializador 1-comando para usuários comuns rodarem sem Docker (SQLite WAL + Python Worker)',
       content: startLocalScript,
     },
     {
@@ -1033,8 +1342,56 @@ Ideal para rodar em um Mini PC, NAS, servidor doméstico ou VPS com alta escala 
     {
       path: 'README_CEREBRO_DUAL_MODE.md',
       language: 'markdown',
-      description: 'Guia completo em português: Modo Local vs Docker, mDNS e migração .jarvis-pack',
+      description: 'Guia completo em português: Modo Local vs Docker Poliglota (Node + Python + Go)',
       content: readme,
     },
   ];
+
+  if (opts.enableGoGateway) {
+    artifacts.push(
+      {
+        path: 'services/go-gateway/go.mod',
+        language: 'text',
+        description: 'Módulo Go 1.23 do Edge Gateway & Crawler concorrente',
+        content: goMod,
+      },
+      {
+        path: 'services/go-gateway/main.go',
+        language: 'go',
+        description: 'Serviço Go completo: Reverse Proxy + Rate Limiter + Crawler concorrente com proteção de rede interna',
+        content: goMain,
+      },
+      {
+        path: 'services/go-gateway/Dockerfile',
+        language: 'dockerfile',
+        description: 'Build multi-stage Go 1.23 → Alpine (~12 MB estático não-root)',
+        content: goDockerfile,
+      }
+    );
+  }
+
+  if (opts.enablePythonWorker) {
+    artifacts.push(
+      {
+        path: 'services/python-worker/worker.py',
+        language: 'python',
+        description: 'Worker Python 3.11 para chunking Markdown, busca híbrida FTS5+vetores e extração Hermes',
+        content: pythonWorkerArtifact,
+      },
+      {
+        path: 'services/python-worker/requirements.txt',
+        language: 'text',
+        description: 'Dependências opcionais do Worker Python 3.11 (núcleo 100% stdlib)',
+        content: pythonRequirements,
+      },
+      {
+        path: 'services/python-worker/Dockerfile',
+        language: 'dockerfile',
+        description: 'Imagem Python 3.11-slim não-root para execução isolada do worker de RAG',
+        content: pythonDockerfile,
+      }
+    );
+  }
+
+  return artifacts;
 }

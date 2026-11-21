@@ -77,6 +77,33 @@ services:
     volumes:
       - jarvis_ollama_models:/root/.ollama
 
+  jarvis-python-worker:
+    image: python:3.11-slim
+    container_name: jarvis-python-worker
+    profiles: ["python-worker"]
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./server/brain/python_worker.py:/app/python_worker.py:ro
+      - jarvis_brain_storage:/app/storage:ro
+    command: ["python3", "-u", "/app/python_worker.py"]
+
+  jarvis-go-gateway:
+    build:
+      context: ./services/go-gateway
+      dockerfile: Dockerfile
+    container_name: jarvis-go-gateway
+    profiles: ["go-gateway"]
+    restart: unless-stopped
+    depends_on:
+      - jarvis-brain-api
+    ports:
+      - "${GO_GATEWAY_PORT:-8080}:8080"
+    environment:
+      - UPSTREAM_BRAIN_URL=http://jarvis-brain-api:3000
+      - GATEWAY_PORT=8080
+      - INTERNAL_GATEWAY_TOKEN=${INTERNAL_GATEWAY_TOKEN:-}
+
 volumes:
   jarvis_brain_storage:
   jarvis_pg_data:

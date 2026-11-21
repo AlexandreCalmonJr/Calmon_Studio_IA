@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   ArrowRightLeft,
+  BookOpen,
   Check,
   CheckCircle2,
   Cloud,
@@ -15,6 +16,7 @@ import {
   HardDrive,
   Layers,
   Loader2,
+  Plug,
   Plus,
   Radio,
   RefreshCw,
@@ -55,7 +57,18 @@ import {
   type BrainSchemaResponse,
 } from '../../services/api/brainServer';
 
-type BrainHubTab = 'multi_brain' | 'dual_mode' | 'files' | 'api_map';
+import { BrainMemoryPanel } from './BrainMemoryPanel';
+import { BrainPythonLanesPanel } from './BrainPythonLanesPanel';
+import { BrainMcpPanel } from './BrainMcpPanel';
+
+type BrainHubTab =
+  | 'multi_brain'
+  | 'memory_hybrid'
+  | 'python_lanes'
+  | 'mcp_gateway'
+  | 'dual_mode'
+  | 'files'
+  | 'api_map';
 
 const MODE_BADGE_MAP: Record<BrainMode, { label: string; color: string; bg: string }> = {
   local_sqlite: {
@@ -381,12 +394,12 @@ export const BrainServerHubView: React.FC = () => {
           </div>
           <div style={{ minWidth: 0 }}>
             <h1 style={{ margin: 0, fontSize: '1.32rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-              Cérebros &amp; Servidor Dual-Mode (Local SQLite ou Docker)
+              Cérebro Poliglota &amp; Servidor (Node 22 + Python 3.11 + Go + SQLite Híbrido)
             </h1>
             <p style={{ margin: '6px 0 0', fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
-              Conecte-se a vários cérebros com <strong>1 clique</strong>, rode <strong>direto sem Docker (SQLite local)</strong> para
-              uso diário ou suba a stack <strong>Docker Compose (PostgreSQL + pgvector + Redis + Ollama)</strong> com o mesmo código em{' '}
-              <strong>TypeScript + Node.js 22</strong>.
+              Rode <strong>local-first em SQLite WAL + FTS5 + vetores</strong> com memória editável em Markdown (<code>SOUL.md</code> / <code>MEMORY.md</code>),{' '}
+              <strong>Worker Python 3.11 ao vivo</strong>, filas seriais por sessão, <strong>Gateway MCP nativo</strong> e{' '}
+              <strong>Serviço Go (Gateway + Crawler)</strong> no pacote Docker/VPS.
             </p>
           </div>
         </div>
@@ -399,10 +412,10 @@ export const BrainServerHubView: React.FC = () => {
             className="btn btn-primary"
           >
             {downloadingZip ? <Loader2 size={16} className="spin" /> : <Download size={16} />}
-            <span>{downloadingZip ? 'Empacotando...' : 'Baixar Servidor Dual-Mode (.zip)'}</span>
+            <span>{downloadingZip ? 'Empacotando...' : 'Baixar Stack Poliglota (.zip)'}</span>
           </button>
           <span style={{ fontSize: '0.73rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-            {serverFiles.length} arquivos reais · {zipSizeBytes > 0 ? `${(zipSizeBytes / 1024).toFixed(1)} KB` : 'Node 22 + Docker'} · API /api/v1
+            {serverFiles.length} arquivos reais · {zipSizeBytes > 0 ? `${(zipSizeBytes / 1024).toFixed(1)} KB` : 'Node + Python + Go'} · API /api/v1
           </span>
         </div>
       </section>
@@ -411,7 +424,10 @@ export const BrainServerHubView: React.FC = () => {
       <div role="tablist" aria-label="Seções de Cérebros e Servidor" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
         {[
           { id: 'multi_brain' as const, label: `Meus Cérebros (${profiles.length})`, icon: ArrowRightLeft },
-          { id: 'dual_mode' as const, label: 'Local (Sem Docker) vs. Docker', icon: Layers },
+          { id: 'memory_hybrid' as const, label: 'Memória & Markdown', icon: BookOpen },
+          { id: 'python_lanes' as const, label: 'Worker Python & Filas', icon: Cpu },
+          { id: 'mcp_gateway' as const, label: 'Gateway MCP', icon: Plug },
+          { id: 'dual_mode' as const, label: 'Local vs. Docker Poliglota', icon: Layers },
           { id: 'files' as const, label: `Arquivos do Servidor (${serverFiles.length})`, icon: Code2 },
           { id: 'api_map' as const, label: 'Mapa da API (/api/v1) & Banco', icon: Database },
         ].map((tab) => {
@@ -432,6 +448,19 @@ export const BrainServerHubView: React.FC = () => {
           );
         })}
       </div>
+
+      {/* NOVAS ABAS POLIGLOTAS: MEMÓRIA MARKDOWN/HÍBRIDA, WORKER PYTHON/FILAS & GATEWAY MCP */}
+      {activeTab === 'memory_hybrid' && (
+        <BrainMemoryPanel onMutated={() => void loadAllBrainState()} />
+      )}
+
+      {activeTab === 'python_lanes' && (
+        <BrainPythonLanesPanel onWorkspaceChanged={() => void loadAllBrainState()} />
+      )}
+
+      {activeTab === 'mcp_gateway' && (
+        <BrainMcpPanel onMutated={() => void loadAllBrainState()} />
+      )}
 
       {/* ABA 1: GERENCIADOR MULTI-CÉREBROS + MIGRAÇÃO .jarvis-pack */}
       {activeTab === 'multi_brain' && (
@@ -948,8 +977,13 @@ export const BrainServerHubView: React.FC = () => {
                 },
                 {
                   key: 'enablePythonWorker' as const,
-                  title: 'Worker Python FastAPI (--profile python-worker)',
-                  desc: 'Serviço auxiliar opcional conectado ao Redis para OCR pesado e automações científicas.',
+                  title: 'Worker Python 3.11 (--profile python-worker)',
+                  desc: 'Chunking Markdown, busca híbrida FTS5 + vetores (RRF) e extração de fatos Hermes.',
+                },
+                {
+                  key: 'enableGoGateway' as const,
+                  title: 'Serviço Go Gateway + Crawler (--profile go-gateway)',
+                  desc: 'Binário Go (~12 MB) de alta concorrência: Reverse Proxy, Rate Limit e Crawler goroutines.',
                 },
               ].map((opt) => {
                 const enabled = deployOpts[opt.key];

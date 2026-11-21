@@ -10,6 +10,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
+    "test": "tsx --test server/brain/polyglotBrain.test.ts server/brain/sqliteBrainStore.test.ts src/router.test.ts src/services/*.test.ts firestore.rules.test.ts",
+    "test:unit": "tsx --test server/brain/polyglotBrain.test.ts server/brain/sqliteBrainStore.test.ts src/router.test.ts src/services/*.test.ts firestore.rules.test.ts",
     "test:router": "node --test scripts/router.test.mjs",
     "test:overview": "node --test scripts/overview.test.mjs",
     "test:dashboard": "node --test",

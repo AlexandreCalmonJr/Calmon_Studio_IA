@@ -1,1 +1,9 @@
 node_modules
+dist
+dev-dist
+.env
+.jarvis-brain/*.db-wal
+.jarvis-brain/*.db-shm
+.jarvis-brain/workspaces/*/*.db-wal
+.jarvis-brain/workspaces/*/*.db-shm
+

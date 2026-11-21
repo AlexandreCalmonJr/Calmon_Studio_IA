@@ -24,12 +24,23 @@ import {
   BRAIN_SCHEMA_VERSION,
   CORE_SQLITE_TABLES,
   SQLITE_SCHEMA_DDL,
+  type AgentWorkspaceModel,
   type AuditLogModel,
   type BrainBackupRecord,
   type BrainIdentityModel,
   type BrainProfileModel,
+  type McpServerModel,
+  type McpToolDescriptor,
+  type McpToolLogModel,
+  type McpTransport,
+  type SessionLaneJobModel,
   type SqliteTableStats,
 } from './models.ts';
+import {
+  resolveConfinedPath,
+  sanitizeWorkspaceSlug,
+  WorkspaceMemoryStore,
+} from './workspaceMemoryStore.ts';
 
 export interface LocalSqliteStoreOptions {
   dataDir?: string;
@@ -85,7 +96,9 @@ export class LocalSqliteBrainStore {
   public readonly dataDir: string;
   public readonly dbPath: string;
   public readonly backupsDir: string;
+  public readonly workspacesDir: string;
   private readonly db: DatabaseSync;
+  private readonly workspaceStores = new Map<string, WorkspaceMemoryStore>();
   private readonly startedAtMs: number;
   private closed = false;
 
@@ -93,6 +106,7 @@ export class LocalSqliteBrainStore {
     this.startedAtMs = Date.now();
     this.dataDir = resolveSafeSqliteStorageDir(options.dataDir);
     this.backupsDir = path.join(this.dataDir, 'backups');
+    this.workspacesDir = path.join(this.dataDir, 'workspaces');
     const safeFilename = path.basename(options.dbFilename || 'brain.db').replace(/[^a-zA-Z0-9._-]/g, '_') || 'brain.db';
     this.dbPath = path.join(this.dataDir, safeFilename);
 
@@ -100,11 +114,13 @@ export class LocalSqliteBrainStore {
     fs.mkdirSync(path.join(this.dataDir, 'media'), { recursive: true });
     fs.mkdirSync(path.join(this.dataDir, 'spreadsheets'), { recursive: true });
     fs.mkdirSync(this.backupsDir, { recursive: true });
+    fs.mkdirSync(this.workspacesDir, { recursive: true });
 
     this.db = new DatabaseSync(this.dbPath);
     this.db.exec(SQLITE_SCHEMA_DDL);
 
     this.ensureInitialRecords(options);
+    this.ensureDefaultWorkspaceAndMcp();
   }
 
   private ensureInitialRecords(options: LocalSqliteStoreOptions): void {
@@ -232,10 +248,12 @@ export class LocalSqliteBrainStore {
   }
 
   public getTableStats(): SqliteTableStats[] {
-    return CORE_SQLITE_TABLES.map((table) => {
+    const core = CORE_SQLITE_TABLES.map((table) => {
       const row = this.db.prepare(`SELECT COUNT(*) AS total FROM ${table}`).get() as { total: number };
       return { table, rows: Number(row?.total || 0) };
     });
+    const wsStats = this.getActiveWorkspaceStore().getTableStats();
+    return [...core, ...wsStats];
   }
 
   // ==================== MULTI-BRAIN PROFILES ====================
@@ -942,9 +960,423 @@ export class LocalSqliteBrainStore {
       .all(safeLimit) as unknown as AuditLogModel[];
   }
 
+  // ==================== PERFIS ISOLADOS (HERMES / OPENCLAW) ====================
+  private ensureDefaultWorkspaceAndMcp(): void {
+    const now = nowIso();
+    const wsCount = (
+      this.db.prepare('SELECT COUNT(*) AS total FROM agent_workspaces').get() as { total: number }
+    ).total;
+
+    if (wsCount === 0) {
+      this.db
+        .prepare(
+          `INSERT INTO agent_workspaces (slug, name, description, storage_subdir, db_filename, is_active, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 'state.db', 1, ?, ?)`
+        )
+        .run(
+          'default',
+          'Perfil Principal',
+          'Workspace local-first padrão com memória Markdown (SOUL/MEMORY/USER.md) e índice híbrido SQLite FTS5 + vetores.',
+          'workspaces/default',
+          now,
+          now
+        );
+    }
+
+    // Garante inicialização em disco do workspace ativo
+    this.getActiveWorkspaceStore();
+
+    const mcpCount = (
+      this.db.prepare('SELECT COUNT(*) AS total FROM mcp_servers').get() as { total: number }
+    ).total;
+
+    if (mcpCount === 0) {
+      const builtinServers: Array<{
+        id: string;
+        name: string;
+        transport: McpTransport;
+        endpoint: string;
+        description: string;
+        tools: McpToolDescriptor[];
+      }> = [
+        {
+          id: 'mcp_jarvis_memory',
+          name: 'JARVIS Memory MCP',
+          transport: 'stdio',
+          endpoint: 'builtin://memory-hybrid',
+          description: 'Servidor MCP nativo de leitura/busca híbrida FTS5 + vetores e consulta aos arquivos SOUL.md, MEMORY.md e USER.md.',
+          tools: [
+            {
+              name: 'memory.search_hybrid',
+              description: 'Executa busca híbrida BM25 + cosseno (RRF) no perfil ativo',
+              requires_approval: false,
+              input_hint: '{"query": "sqlite wal"}',
+            },
+            {
+              name: 'memory.list_facts',
+              description: 'Lista fatos consolidados nas camadas memory e user (estilo Hermes)',
+              requires_approval: false,
+              input_hint: '{"scope": "memory"}',
+            },
+          ],
+        },
+        {
+          id: 'mcp_jarvis_workspace',
+          name: 'JARVIS Workspace Ops MCP',
+          transport: 'stdio',
+          endpoint: 'builtin://workspace-ops',
+          description: 'Servidor MCP nativo para diagnóstico do SQLite WAL, perfis isolados e estatísticas de filas seriais.',
+          tools: [
+            {
+              name: 'workspace.health_report',
+              description: 'Retorna integridade SQLite WAL, tamanho do banco e tabelas ativas',
+              requires_approval: false,
+              input_hint: '{}',
+            },
+            {
+              name: 'workspace.snapshot_backup',
+              description: 'Dispara snapshot consistente VACUUM INTO do banco SQLite local',
+              requires_approval: true,
+              input_hint: '{}',
+            },
+          ],
+        },
+      ];
+
+      const ins = this.db.prepare(
+        `INSERT INTO mcp_servers
+          (id, name, transport, endpoint, description, is_approved, is_builtin, status, tools_json, last_checked_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 1, 1, 'online', ?, ?, ?, ?)`
+      );
+      for (const s of builtinServers) {
+        ins.run(s.id, s.name, s.transport, s.endpoint, s.description, JSON.stringify(s.tools), now, now, now);
+      }
+    }
+  }
+
+  public listWorkspaces(): { activeSlug: string; workspaces: AgentWorkspaceModel[] } {
+    const rows = this.db
+      .prepare('SELECT * FROM agent_workspaces ORDER BY is_active DESC, created_at ASC')
+      .all() as unknown as AgentWorkspaceModel[];
+    const active = rows.find((r) => r.is_active === 1) || rows[0];
+    return {
+      activeSlug: active?.slug || 'default',
+      workspaces: rows,
+    };
+  }
+
+  public getActiveWorkspace(): AgentWorkspaceModel {
+    const { activeSlug, workspaces } = this.listWorkspaces();
+    return workspaces.find((w) => w.slug === activeSlug) || workspaces[0];
+  }
+
+  public getWorkspaceStore(slug: string): WorkspaceMemoryStore {
+    const clean = sanitizeWorkspaceSlug(slug);
+    const cached = this.workspaceStores.get(clean);
+    if (cached) return cached;
+
+    const row = this.db
+      .prepare('SELECT slug, name FROM agent_workspaces WHERE slug = ?')
+      .get(clean) as { slug: string; name: string } | undefined;
+
+    if (!row) {
+      throw new Error(`Perfil isolado "${clean}" não encontrado.`);
+    }
+
+    const identity = this.getIdentity();
+    const store = new WorkspaceMemoryStore({
+      workspacesRootDir: this.workspacesDir,
+      slug: row.slug,
+      workspaceName: row.name,
+      assistantName: identity?.assistant_name || 'JARVIS',
+    });
+    this.workspaceStores.set(clean, store);
+    return store;
+  }
+
+  public getActiveWorkspaceStore(): WorkspaceMemoryStore {
+    const active = this.getActiveWorkspace();
+    return this.getWorkspaceStore(active.slug);
+  }
+
+  public createWorkspace(input: { name: string; description?: string; slug?: string }): {
+    created: AgentWorkspaceModel;
+    activeSlug: string;
+    workspaces: AgentWorkspaceModel[];
+  } {
+    const name = String(input.name || '').trim().slice(0, 64);
+    if (name.length < 2) {
+      throw new Error('Informe um nome para o perfil isolado (mínimo 2 caracteres).');
+    }
+    const baseSlug = sanitizeWorkspaceSlug(input.slug || name);
+    let slug = baseSlug;
+    let suffix = 2;
+    while (this.db.prepare('SELECT 1 FROM agent_workspaces WHERE slug = ?').get(slug)) {
+      slug = `${baseSlug.slice(0, 28)}-${suffix}`;
+      suffix += 1;
+    }
+
+    // Garante confinamento estrito do diretório do perfil
+    resolveConfinedPath(this.workspacesDir, slug);
+    const description =
+      String(input.description || '').trim().slice(0, 220) ||
+      `Ambiente isolado "${name}" com banco SQLite WAL próprio e arquivos Markdown dedicados.`;
+    const now = nowIso();
+
+    this.db
+      .prepare(
+        `INSERT INTO agent_workspaces (slug, name, description, storage_subdir, db_filename, is_active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'state.db', 0, ?, ?)`
+      )
+      .run(slug, name, description, `workspaces/${slug}`, now, now);
+
+    // Inicializa imediatamente state.db + SOUL.md / MEMORY.md / USER.md em disco
+    this.getWorkspaceStore(slug);
+
+    this.appendAuditLog({
+      action: 'brain.workspace.created',
+      actor: 'admin',
+      resource: slug,
+      detail: `Perfil isolado "${name}" criado em workspaces/${slug}/state.db`,
+    });
+
+    const listed = this.listWorkspaces();
+    const created = listed.workspaces.find((w) => w.slug === slug)!;
+    return { created, ...listed };
+  }
+
+  public activateWorkspace(slug: string): {
+    active: AgentWorkspaceModel;
+    activeSlug: string;
+    workspaces: AgentWorkspaceModel[];
+  } {
+    const clean = sanitizeWorkspaceSlug(slug);
+    const existing = this.db
+      .prepare('SELECT slug, name FROM agent_workspaces WHERE slug = ?')
+      .get(clean) as { slug: string; name: string } | undefined;
+    if (!existing) {
+      throw new Error('Perfil isolado não encontrado.');
+    }
+
+    const now = nowIso();
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.prepare('UPDATE agent_workspaces SET is_active = 0').run();
+      this.db.prepare('UPDATE agent_workspaces SET is_active = 1, updated_at = ? WHERE slug = ?').run(now, clean);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+
+    this.getWorkspaceStore(clean);
+    this.appendAuditLog({
+      action: 'brain.workspace.activated',
+      actor: 'admin',
+      resource: clean,
+      detail: `Perfil isolado ativo alterado para "${existing.name}"`,
+    });
+
+    const listed = this.listWorkspaces();
+    const active = listed.workspaces.find((w) => w.slug === clean)!;
+    return { active, ...listed };
+  }
+
+  // ==================== FILAS SERIAIS POR SESSÃO ====================
+  public recordLaneJob(job: SessionLaneJobModel): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO session_lane_jobs
+          (id, session_id, workspace_slug, job_type, status, duration_ms, summary, error_message, created_at, finished_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        job.id,
+        job.session_id,
+        job.workspace_slug,
+        job.job_type,
+        job.status,
+        job.duration_ms,
+        job.summary,
+        job.error_message,
+        job.created_at,
+        job.finished_at
+      );
+  }
+
+  public listLaneJobs(limit = 25): SessionLaneJobModel[] {
+    const safeLimit = Math.min(100, Math.max(1, Number(limit) || 25));
+    return this.db
+      .prepare('SELECT * FROM session_lane_jobs ORDER BY created_at DESC LIMIT ?')
+      .all(safeLimit) as unknown as SessionLaneJobModel[];
+  }
+
+  // ==================== GATEWAY MCP NATIVO ====================
+  private rowToMcpServer(r: Record<string, any>): McpServerModel {
+    return {
+      id: String(r.id),
+      name: String(r.name),
+      transport: r.transport === 'http' ? 'http' : 'stdio',
+      endpoint: String(r.endpoint),
+      description: String(r.description || ''),
+      is_approved: Boolean(r.is_approved),
+      is_builtin: Boolean(r.is_builtin),
+      status: r.status === 'online' || r.status === 'error' ? r.status : 'standby',
+      tools: safeJsonParse<McpToolDescriptor[]>(r.tools_json, []),
+      last_checked_at: r.last_checked_at ? String(r.last_checked_at) : null,
+      created_at: String(r.created_at),
+      updated_at: String(r.updated_at),
+    };
+  }
+
+  public listMcpServers(): McpServerModel[] {
+    const rows = this.db
+      .prepare('SELECT * FROM mcp_servers ORDER BY is_builtin DESC, created_at ASC')
+      .all() as Array<Record<string, any>>;
+    return rows.map((r) => this.rowToMcpServer(r));
+  }
+
+  public addMcpServer(input: {
+    name: string;
+    transport: McpTransport;
+    endpoint: string;
+    description?: string;
+  }): McpServerModel {
+    const name = String(input.name || '').trim().slice(0, 64);
+    if (name.length < 2) {
+      throw new Error('Informe um nome para o servidor MCP (mínimo 2 caracteres).');
+    }
+    const transport: McpTransport = input.transport === 'http' ? 'http' : 'stdio';
+    let endpoint = String(input.endpoint || '').trim().slice(0, 240);
+    if (!endpoint) {
+      throw new Error('Informe o endpoint ou comando de identificação do servidor MCP.');
+    }
+
+    if (transport === 'http') {
+      const check = validateBrainProfileUrl(endpoint);
+      if (!check.valid) {
+        throw new Error(check.error || 'URL MCP inválida.');
+      }
+      endpoint = check.normalizedUrl;
+    } else {
+      // Para transporte stdio, bloqueia metacaracteres de shell
+      if (/[;&|`$<>]/.test(endpoint)) {
+        throw new Error('Identificador stdio não pode conter operadores de shell.');
+      }
+    }
+
+    const description =
+      String(input.description || '').trim().slice(0, 240) ||
+      `Servidor MCP (${transport.toUpperCase()}) aguardando aprovação e descoberta de ferramentas.`;
+    const id = `mcp_${Date.now().toString(36)}_${crypto.randomBytes(2).toString('hex')}`;
+    const now = nowIso();
+
+    this.db
+      .prepare(
+        `INSERT INTO mcp_servers
+          (id, name, transport, endpoint, description, is_approved, is_builtin, status, tools_json, last_checked_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 0, 0, 'standby', '[]', NULL, ?, ?)`
+      )
+      .run(id, name, transport, endpoint, description, now, now);
+
+    this.appendAuditLog({
+      action: 'brain.mcp.registered',
+      actor: 'admin',
+      resource: id,
+      detail: `${name} (${transport}) -> ${endpoint}`,
+    });
+
+    const row = this.db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(id) as Record<string, any>;
+    return this.rowToMcpServer(row);
+  }
+
+  public toggleMcpServerApproval(id: string, isApproved: boolean): McpServerModel {
+    const existing = this.db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(id) as Record<string, any> | undefined;
+    if (!existing) throw new Error('Servidor MCP não encontrado.');
+    const now = nowIso();
+    this.db
+      .prepare('UPDATE mcp_servers SET is_approved = ?, updated_at = ? WHERE id = ?')
+      .run(isApproved ? 1 : 0, now, id);
+    this.appendAuditLog({
+      action: isApproved ? 'brain.mcp.approved' : 'brain.mcp.revoked',
+      actor: 'admin',
+      resource: id,
+      detail: `Servidor MCP "${existing.name}" ${isApproved ? 'aprovado' : 'bloqueado'}`,
+    });
+    const updated = this.db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(id) as Record<string, any>;
+    return this.rowToMcpServer(updated);
+  }
+
+  public updateMcpServerDiscovery(
+    id: string,
+    status: 'online' | 'standby' | 'error',
+    tools: McpToolDescriptor[]
+  ): McpServerModel {
+    const existing = this.db.prepare('SELECT id FROM mcp_servers WHERE id = ?').get(id) as { id: string } | undefined;
+    if (!existing) throw new Error('Servidor MCP não encontrado.');
+    const now = nowIso();
+    this.db
+      .prepare('UPDATE mcp_servers SET status = ?, tools_json = ?, last_checked_at = ?, updated_at = ? WHERE id = ?')
+      .run(status, JSON.stringify(tools), now, now, id);
+    const updated = this.db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(id) as Record<string, any>;
+    return this.rowToMcpServer(updated);
+  }
+
+  public deleteMcpServer(id: string): void {
+    const existing = this.db
+      .prepare('SELECT id, name, is_builtin FROM mcp_servers WHERE id = ?')
+      .get(id) as { id: string; name: string; is_builtin: number } | undefined;
+    if (!existing) throw new Error('Servidor MCP não encontrado.');
+    if (existing.is_builtin === 1) {
+      throw new Error('Servidores MCP nativos do sistema não podem ser removidos.');
+    }
+    this.db.prepare('DELETE FROM mcp_servers WHERE id = ?').run(id);
+    this.appendAuditLog({
+      action: 'brain.mcp.deleted',
+      actor: 'admin',
+      resource: id,
+      detail: `Servidor MCP "${existing.name}" removido`,
+    });
+  }
+
+  public recordMcpToolLog(entry: Omit<McpToolLogModel, 'id' | 'created_at'>): McpToolLogModel {
+    const id = `mcplog_${Date.now().toString(36)}_${crypto.randomBytes(2).toString('hex')}`;
+    const created_at = nowIso();
+    this.db
+      .prepare(
+        `INSERT INTO mcp_tool_logs
+          (id, server_id, server_name, tool_name, arguments_json, status, output_summary, duration_ms, actor, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        id,
+        entry.server_id,
+        entry.server_name,
+        entry.tool_name,
+        entry.arguments_json,
+        entry.status,
+        entry.output_summary.slice(0, 600),
+        Math.max(0, Number(entry.duration_ms || 0)),
+        entry.actor || 'admin',
+        created_at
+      );
+    return { id, ...entry, created_at };
+  }
+
+  public listMcpToolLogs(limit = 25): McpToolLogModel[] {
+    const safeLimit = Math.min(100, Math.max(1, Number(limit) || 25));
+    return this.db
+      .prepare('SELECT * FROM mcp_tool_logs ORDER BY created_at DESC LIMIT ?')
+      .all(safeLimit) as unknown as McpToolLogModel[];
+  }
+
   public close(): void {
     if (this.closed) return;
     this.closed = true;
+    for (const ws of this.workspaceStores.values()) {
+      ws.close();
+    }
+    this.workspaceStores.clear();
     this.db.close();
   }
 }
