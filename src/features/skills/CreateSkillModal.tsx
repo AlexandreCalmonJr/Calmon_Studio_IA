@@ -5,6 +5,13 @@ import { createUserSkill, importEccSkill } from '../../api';
 import { notify } from '../../shared/common/Toast';
 import { AgentInfo } from '../../types';
 import { ALL_26_AGENTS } from '../../data/agentsCatalog';
+import {
+  CUSTOM_AREA_VALUE,
+  SKILL_DOMAIN_CATALOG,
+  SKILL_QUICK_TEMPLATES,
+  SkillQuickTemplate,
+  normalizeCustomAreaId,
+} from '../../services/domainCatalog';
 
 interface CreateSkillModalProps {
   isOpen: boolean;
@@ -14,52 +21,34 @@ interface CreateSkillModalProps {
   initialTab?: 'create' | 'import';
 }
 
-const SKILL_TEMPLATES = [
-  {
-    label: 'Clean Architecture & SOLID',
-    domain: 'backend',
-    desc: 'Boas práticas de desacoplamento, Domain-Driven Design e injeção de dependência.',
-    instructions:
-      'Separe estritamente as camadas de Domínio (Entidades/Regras de Negócio), Aplicação (Casos de Uso), Infraestrutura (Banco/Gateways) e Apresentação (Controllers/APIs). Não permita dependências da camada de domínio para bibliotecas externas.',
-  },
-  {
-    label: 'OWASP Hardening & SAST',
-    domain: 'security',
-    desc: 'Blindagem contra SQL Injection, XSS, CSRF, SSRF e controle rígido de autorização.',
-    instructions:
-      'Valide todas as entradas de dados contra schemas estritos. Aplique escape contextual de saídas, parametrização obrigatória em consultas SQL e verificação do escopo do usuário autenticado antes de qualquer mutação de estado.',
-  },
-  {
-    label: 'TDD & Testes Automatizados',
-    domain: 'qa',
-    desc: 'Fluxo Red-Green-Refactor com testes unitários, de integração e contratos de API.',
-    instructions:
-      'Escreva testes unitários concisos antes da implementação. Isole efeitos colaterais com fakes em memória. Garanta que todas as ramificações de erro e casos de borda possuam asserções explícitas.',
-  },
-  {
-    label: 'DevOps & Contêineres',
-    domain: 'ops',
-    desc: 'Padronização de Dockerfile multi-stage, pipelines CI/CD e observabilidade.',
-    instructions:
-      'Utilize imagens base minimalistas (distroless ou alpine). Execute a aplicação sob usuário não-root (UID 1000). Garanta healthchecks HTTP e logs estruturados em formato JSON para stdout.',
-  },
-];
+const OPERATIONS_DOMAINS = SKILL_DOMAIN_CATALOG.filter((d) => d.group === 'operations');
+const PERSONAL_DOMAINS = SKILL_DOMAIN_CATALOG.filter((d) => d.group === 'personal');
+const TECH_DOMAINS = SKILL_DOMAIN_CATALOG.filter((d) => d.group === 'tech');
 
 export const CreateSkillModal: React.FC<CreateSkillModalProps> = ({
   isOpen,
   onClose,
-  agents = [],
+  agents,
   onSkillCreated,
   initialTab = 'create',
 }) => {
   const [activeTab, setActiveTab] = useState<'create' | 'import'>(initialTab);
   const [name, setName] = useState('');
-  const [domain, setDomain] = useState('backend');
+  const [domain, setDomain] = useState('administration');
+  const [customDomain, setCustomDomain] = useState('');
   const [description, setDescription] = useState('');
   const [instructions, setInstructions] = useState('');
   const [selectedAgents, setSelectedAgents] = useState<string[]>(['jarvis_master']);
   const [markdownContent, setMarkdownContent] = useState('');
   const [saving, setSaving] = useState(false);
+
+  const availableAgents =
+    agents && agents.length > 0
+      ? agents.map((ag) => ({
+          role: ag.role,
+          name: ag.proper_name ? `${ag.proper_name} · ${ag.name}` : ag.name,
+        }))
+      : ALL_26_AGENTS.map((ag) => ({ role: ag.role, name: ag.name }));
 
   React.useEffect(() => {
     if (isOpen) {
@@ -67,55 +56,62 @@ export const CreateSkillModal: React.FC<CreateSkillModalProps> = ({
     }
   }, [isOpen, initialTab]);
 
-  const applyTemplate = (tpl: (typeof SKILL_TEMPLATES)[0]) => {
+  const applyTemplate = (tpl: SkillQuickTemplate) => {
     setName(tpl.label);
     setDomain(tpl.domain);
+    setCustomDomain('');
     setDescription(tpl.desc);
     setInstructions(tpl.instructions);
-    notify(`Template '${tpl.label}' carregado!`, 'info');
+    notify(`Modelo '${tpl.label}' carregado!`, 'info');
   };
 
   const loadEccExample = () => {
     const example = `---
-name: "Clean Code & Refactoring Guidelines"
-version: "1.2.0"
-domain: "backend"
-license: "Apache-2.0"
-description: "Padrões de refatoração contínua e redução de dívida técnica para microsserviços."
-allowed_tools:
-  - "read_file"
-  - "search_symbols"
+name: "Gestão de Estoque & Curva ABC"
+version: "1.0.0"
+domain: "logistics"
+license: "MIT"
+description: "Diretrizes práticas para controle de estoque mínimo, reposição e análise de fornecedores."
+allowed_tools: []
 ---
 
-# Diretrizes Técnicas
-Ao refatorar métodos com complexidade ciclomática elevada:
-1. Extraia funções pequenas com responsabilidade única.
-2. Evite boolean flags como parâmetros de controle.
-3. Garanta que os testes de regressão existentes continuem passando antes de commitar.
+# Diretrizes da Habilidade
+Ao analisar demandas de estoque ou compras:
+1. Classifique os itens por relevância financeira (Curva ABC).
+2. Calcule o ponto de reposição considerando o prazo de entrega (lead time) e estoque de segurança.
+3. Apresente recomendações objetivas de compra e redução de rupturas.
 `;
     setMarkdownContent(example);
-    notify('Exemplo de Skill ECC carregado no editor!', 'info');
+    notify('Exemplo de Skill carregado no editor!', 'info');
   };
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !instructions.trim()) {
-      notify('Por favor, informe o nome e as diretrizes da skill', 'error');
+      notify('Por favor, informe o nome e as diretrizes da habilidade', 'error');
       return;
     }
+    if (domain === CUSTOM_AREA_VALUE && !customDomain.trim()) {
+      notify('Informe o nome da área personalizada da habilidade.', 'error');
+      return;
+    }
+    const resolvedDomain =
+      domain === CUSTOM_AREA_VALUE ? normalizeCustomAreaId(customDomain) : domain;
+
     setSaving(true);
     try {
       await createUserSkill({
         name: name.trim(),
-        domain,
+        domain: resolvedDomain,
         description: description.trim(),
         instructions: instructions.trim(),
         assigned_agents: selectedAgents,
       });
-      notify(`Skill '${name}' criada e associada aos agentes com sucesso!`, 'success');
+      notify(`Habilidade '${name}' criada e vinculada com sucesso!`, 'success');
       onSkillCreated();
       onClose();
       setName('');
+      setCustomDomain('');
       setDescription('');
       setInstructions('');
     } catch (err: any) {
@@ -155,8 +151,8 @@ Ao refatorar métodos com complexidade ciclomática elevada:
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Adicionar Habilidade ECC & Ponytail"
-      subtitle="Crie diretrizes customizadas para seus especialistas ou importe uma especificação ECC em Markdown."
+      title="Adicionar Nova Habilidade (Skill)"
+      subtitle="Crie habilidades para qualquer área — gestão, negócios, logística, IoT, saúde, estudos, rotina ou tecnologia — ou importe em Markdown."
       icon={<Sparkles size={18} color="var(--accent-light)" />}
       maxWidth="lg"
     >
@@ -170,7 +166,7 @@ Ao refatorar métodos com complexidade ciclomática elevada:
             className={`jarvis-segmented-btn ${activeTab === 'create' ? 'is-active' : ''}`}
             onClick={() => setActiveTab('create')}
           >
-            <Plus size={14} /> Criar Nova Skill
+            <Plus size={14} /> Criar Nova Habilidade
           </button>
           <button
             type="button"
@@ -179,7 +175,7 @@ Ao refatorar métodos com complexidade ciclomática elevada:
             className={`jarvis-segmented-btn ${activeTab === 'import' ? 'is-active' : ''}`}
             onClick={() => setActiveTab('import')}
           >
-            <Upload size={14} /> Importar Skill ECC (Markdown)
+            <Upload size={14} /> Importar Skill (Markdown)
           </button>
         </div>
 
@@ -190,13 +186,13 @@ Ao refatorar métodos com complexidade ciclomática elevada:
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
                 <Sparkles size={13} color="var(--accent-light)" />
                 <span style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                  Modelos Rápidos (1 clique para preencher):
+                  Modelos Rápidos por Área (1 clique para preencher):
                 </span>
               </div>
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                {SKILL_TEMPLATES.map((tpl) => (
+                {SKILL_QUICK_TEMPLATES.map((tpl) => (
                   <button
-                    key={tpl.label}
+                    key={tpl.id}
                     type="button"
                     onClick={() => applyTemplate(tpl)}
                     className="btn btn-secondary btn-xs"
@@ -221,7 +217,7 @@ Ao refatorar métodos com complexidade ciclomática elevada:
                 <input
                   id="skill-name-input"
                   type="text"
-                  placeholder="ex: Microsserviços e Padrão Saga"
+                  placeholder="ex: Roteirização de Entregas, Controle de Estoque, Cardápio Semanal"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="jarvis-input"
@@ -231,7 +227,7 @@ Ao refatorar métodos com complexidade ciclomática elevada:
 
               <div>
                 <label htmlFor="skill-domain-select" className="user-profile-field-label">
-                  Domínio Técnico
+                  Área / Domínio
                 </label>
                 <select
                   id="skill-domain-select"
@@ -239,16 +235,48 @@ Ao refatorar métodos com complexidade ciclomática elevada:
                   onChange={(e) => setDomain(e.target.value)}
                   className="jarvis-select"
                 >
-                  <option value="backend">Backend & APIs</option>
-                  <option value="flutter">Flutter / Mobile</option>
-                  <option value="web">Web & Frontend</option>
-                  <option value="security">Segurança & OWASP</option>
-                  <option value="qa">QA & Testes</option>
-                  <option value="data">Dados & BI</option>
-                  <option value="ops">DevOps & Infra</option>
+                  <optgroup label="Gestão, Negócios & Operações">
+                    {OPERATIONS_DOMAINS.map((dom) => (
+                      <option key={dom.id} value={dom.id}>
+                        {dom.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Pessoal, Estudos & Estilo de Vida">
+                    {PERSONAL_DOMAINS.map((dom) => (
+                      <option key={dom.id} value={dom.id}>
+                        {dom.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="IoT & Tecnologia">
+                    {TECH_DOMAINS.map((dom) => (
+                      <option key={dom.id} value={dom.id}>
+                        {dom.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <option value={CUSTOM_AREA_VALUE}>Outra área (personalizada)...</option>
                 </select>
               </div>
             </div>
+
+            {domain === CUSTOM_AREA_VALUE && (
+              <div>
+                <label htmlFor="skill-custom-domain-input" className="user-profile-field-label">
+                  Nome da área personalizada *
+                </label>
+                <input
+                  id="skill-custom-domain-input"
+                  type="text"
+                  placeholder="Ex: Agronegócio, RH & Recrutamento, Psicologia, Arquitetura..."
+                  value={customDomain}
+                  onChange={(e) => setCustomDomain(e.target.value)}
+                  className="jarvis-input"
+                  required
+                />
+              </div>
+            )}
 
             <div>
               <label htmlFor="skill-desc-input" className="user-profile-field-label">
@@ -257,7 +285,7 @@ Ao refatorar métodos com complexidade ciclomática elevada:
               <input
                 id="skill-desc-input"
                 type="text"
-                placeholder="Breve resumo da finalidade desta habilidade"
+                placeholder="Breve resumo do que esta habilidade ensina o agente a fazer"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 className="jarvis-input"
@@ -266,16 +294,16 @@ Ao refatorar métodos com complexidade ciclomática elevada:
 
             <div>
               <label htmlFor="skill-instructions-textarea" className="user-profile-field-label">
-                Diretrizes de Prompt & Instruções Técnicas *
+                Diretrizes & Instruções da Habilidade *
               </label>
               <textarea
                 id="skill-instructions-textarea"
-                placeholder="Descreva as instruções que serão injetadas no contexto do agente..."
+                placeholder="Descreva em linguagem natural os métodos, critérios ou passos que o especialista deve seguir..."
                 rows={5}
                 value={instructions}
                 onChange={(e) => setInstructions(e.target.value)}
                 className="jarvis-textarea"
-                style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}
+                style={{ fontSize: '0.84rem' }}
                 required
               />
             </div>
@@ -283,22 +311,21 @@ Ao refatorar métodos com complexidade ciclomática elevada:
             {/* Agentes Iniciais */}
             <div>
               <div className="user-profile-field-label jarvis-tabular">
-                Vincular a Especialistas Iniciais ({selectedAgents.length} selecionados)
+                Vincular a Especialistas ({selectedAgents.length} selecionados)
               </div>
               <div
                 className="jarvis-settings-subcard"
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 175px), 1fr))',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 195px), 1fr))',
                   gap: '6px',
-                  maxHeight: '132px',
+                  maxHeight: '148px',
                   overflowY: 'auto',
                   padding: '8px',
                 }}
               >
-                {(agents.length > 0 ? agents : ALL_26_AGENTS).map((ag) => {
+                {availableAgents.map((ag) => {
                   const isChecked = selectedAgents.includes(ag.role);
-                  const displayName = 'proper_name' in ag && ag.proper_name ? `${ag.proper_name} · ${ag.name}` : ag.name;
                   return (
                     <label
                       key={ag.role}
@@ -322,7 +349,7 @@ Ao refatorar métodos com complexidade ciclomática elevada:
                         style={{ accentColor: 'var(--accent-color)' }}
                       />
                       <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {displayName}
+                        {ag.name}
                       </span>
                     </label>
                   );

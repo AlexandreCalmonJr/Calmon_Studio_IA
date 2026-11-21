@@ -38,32 +38,34 @@ export function detectWakeWord(transcript: string, assistantName: string): WakeW
     return { detected: false, triggerPhrase: null, command: '' };
   }
 
-  const cleanAssistant = stripDiacritics(assistantName || 'JARVIS');
+  const displayAssistant = (assistantName || 'JARVIS').trim() || 'JARVIS';
+  const cleanAssistant = stripDiacritics(displayAssistant);
   const escapedName = cleanAssistant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const norm = stripDiacritics(raw);
 
-  // Aceita prefixos naturais em português e inglês: ei, hey, oi, olá, ok, fala
-  const wakeRegex = new RegExp(`^(?:ei|hey|oi|ola|ok|fala)\\s+${escapedName}\\b[,!?:\\s-]*`, 'i');
+  // Aceita prefixos naturais em português e inglês: ei, hey, oi, olá, ok, fala, chama
+  // Também detecta quando a frase de ativação surge após ruído ou conversa ambiente.
+  const wakeRegex = new RegExp(`(?:^|\\s)(?:ei|hey|oi|ola|ok|fala|chama(?:\\s+[oa])?)\\s+${escapedName}\\b[,!?:;\\s-]*`, 'i');
   const match = norm.match(wakeRegex);
 
-  if (match) {
-    const matchedLen = match[0].length;
-    const command = raw.slice(matchedLen).replace(/^[,!?:;\s-]+/, '').trim();
+  if (match && typeof match.index === 'number') {
+    const endIndex = match.index + match[0].length;
+    const command = raw.slice(endIndex).replace(/^[,!?:;\s-]+/, '').trim();
     return {
       detected: true,
-      triggerPhrase: `Ei ${assistantName || 'JARVIS'}`,
+      triggerPhrase: `Ei ${displayAssistant}`,
       command,
     };
   }
 
-  // Também detecta menção direta no início ("JARVIS, ...")
-  const directRegex = new RegExp(`^${escapedName}\\s*[,!?:]\\s*`, 'i');
+  // Também detecta menção direta isolada ou no início ("JARVIS" ou "JARVIS, ...")
+  const directRegex = new RegExp(`^${escapedName}(?:$|\\s*[,!?:]\\s*)`, 'i');
   const directMatch = norm.match(directRegex);
   if (directMatch) {
-    const command = raw.slice(directMatch[0].length).trim();
+    const command = raw.slice(directMatch[0].length).replace(/^[,!?:;\s-]+/, '').trim();
     return {
       detected: true,
-      triggerPhrase: assistantName || 'JARVIS',
+      triggerPhrase: displayAssistant,
       command,
     };
   }

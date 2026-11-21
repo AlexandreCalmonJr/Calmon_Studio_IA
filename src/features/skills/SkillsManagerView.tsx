@@ -13,12 +13,12 @@ import {
   Trash2,
   Upload,
   Plug,
+  GitBranch,
 } from 'lucide-react';
 import {
   fetchSkills,
   toggleSkill,
   fetchAgents,
-  createAgent,
   fetchPonytailStatus,
   savePonytailLevel,
   deleteUserSkill,
@@ -35,12 +35,8 @@ import { Modal } from '../../shared/common/Modal';
 import { PageHeader } from '../../shared/layout/PageHeader';
 import { API_BASE } from '../../services/api/client';
 import { getAccountStorageKey } from '../../services/accountScope';
-import { ALL_26_AGENTS } from '../../data/agentsCatalog';
-import {
-  mapBlueprintToCreatePayload,
-  reconcileStoreBlueprints,
-  ReconciledStoreBlueprint,
-} from '../../services/agentSync';
+import { AGENT_TEMPLATE_LIBRARY } from '../../services/agentTemplates';
+import { AgentTemplateStoreGrid } from '../agents/AgentTemplateStoreGrid';
 
 export interface StoreAppItem {
   id: string;
@@ -181,17 +177,9 @@ const STORE_APPS: StoreAppItem[] = [
   },
 ];
 
-const AGENT_FILTER_TABS = [
-  { id: 'all' as const, label: 'Todas as Áreas' },
-  { id: 'orchestration' as const, label: 'Orquestração' },
-  { id: 'development' as const, label: 'Engenharia & QA' },
-  { id: 'data' as const, label: 'Dados & BI' },
-  { id: 'devops' as const, label: 'DevOps & Infra' },
-  { id: 'security' as const, label: 'Cibersegurança' },
-];
-
 export interface SkillsManagerViewProps {
   initialTab?: 'apps' | 'agents' | 'skills' | 'integrations';
+  onOpenGitHubImport?: () => void;
 }
 
 const normalizePonytailLevel = (raw?: string | null): 'off' | 'lite' | 'senior' | 'ultra' => {
@@ -201,7 +189,10 @@ const normalizePonytailLevel = (raw?: string | null): 'off' | 'lite' | 'senior' 
   return 'senior';
 };
 
-export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({ initialTab = 'apps' }) => {
+export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
+  initialTab = 'apps',
+  onOpenGitHubImport,
+}) => {
   // Aba da Loja: Apps, Agentes, Habilidades ou Integrações & Context Sets
   const [activeStoreTab, setActiveStoreTab] = useState<'apps' | 'agents' | 'skills' | 'integrations'>(initialTab);
 
@@ -250,62 +241,6 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({ initialTab
   const [customAppName, setCustomAppName] = useState('');
   const [customAppType, setCustomAppType] = useState<'mcp' | 'webhook' | 'custom_tool'>('mcp');
   const [customAppEndpoint, setCustomAppEndpoint] = useState('');
-
-  // Estado do Catálogo de Modelos de Agentes (reconciliado com a equipe real)
-  const [agentSearch, setAgentSearch] = useState('');
-  const [agentCategoryFilter, setAgentCategoryFilter] = useState<
-    'all' | 'orchestration' | 'development' | 'data' | 'devops' | 'security'
-  >('all');
-  const [agentInstallFilter, setAgentInstallFilter] = useState<'available' | 'installed' | 'all'>('available');
-  const [installingRole, setInstallingRole] = useState<string | null>(null);
-  const [pinnedDockAgents, setPinnedDockAgents] = useState<string[]>(() => {
-    try {
-      const raw = localStorage.getItem(getAccountStorageKey('jarvis_pinned_dock_agents'));
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed.map(String);
-      }
-    } catch {}
-    return [];
-  });
-
-  const togglePinDockAgent = (agentRole: string, agentName: string) => {
-    let next: string[];
-    if (pinnedDockAgents.includes(agentRole)) {
-      next = pinnedDockAgents.filter((id) => id !== agentRole);
-      notify(`Agente "${agentName}" desafixado do Dock.`, 'info');
-    } else {
-      if (pinnedDockAgents.length >= 8) {
-        notify('O Dock suporta até 8 agentes simultâneos. Desafixe um antes.', 'warning');
-        return;
-      }
-      next = [...pinnedDockAgents, agentRole];
-      notify(`Agente "${agentName}" fixado no Dock!`, 'success');
-    }
-    setPinnedDockAgents(next);
-    try {
-      localStorage.setItem(getAccountStorageKey('jarvis_pinned_dock_agents'), JSON.stringify(next));
-      window.dispatchEvent(new CustomEvent('jarvis:dock-updated'));
-    } catch {}
-  };
-
-  const handleInstallBlueprint = async (item: ReconciledStoreBlueprint) => {
-    setInstallingRole(item.blueprint.role);
-    try {
-      const payload = mapBlueprintToCreatePayload(item);
-      const created = await createAgent(payload);
-      setAgents((prev) => [created, ...prev.filter((a) => a.role !== created.role)]);
-      window.dispatchEvent(new Event('jarvis:agents-updated'));
-      notify(
-        `${created.proper_name || created.name} (${created.handle || ''}) instalado na sua equipe e sincronizado no Chat e Dock!`,
-        'success'
-      );
-    } catch (err: any) {
-      notify(err?.message || 'Não foi possível instalar o modelo de especialista.', 'error');
-    } finally {
-      setInstallingRole(null);
-    }
-  };
 
   const saveConnectedApps = (list: string[]) => {
     try {
@@ -449,8 +384,13 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({ initialTab
         }
       });
     loadData();
+    const onAgentsUpdated = () => {
+      loadData();
+    };
+    window.addEventListener('jarvis:agents-updated', onAgentsUpdated);
     return () => {
       cancelled = true;
+      window.removeEventListener('jarvis:agents-updated', onAgentsUpdated);
     };
   }, []);
 
@@ -707,35 +647,12 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({ initialTab
     [connectedApps]
   );
 
-  // Reconciliação sem duplicidade entre os modelos da loja e a equipe ativa do usuário
-  const reconciledStore = useMemo(
-    () => reconcileStoreBlueprints(ALL_26_AGENTS, agents),
-    [agents]
-  );
-
-  const filteredCatalogAgents = useMemo(() => {
-    const q = agentSearch.toLowerCase().trim();
-    return reconciledStore.items.filter((item) => {
-      if (agentInstallFilter !== 'all' && item.status !== agentInstallFilter) return false;
-      const ag = item.blueprint;
-      const matchesSearch =
-        !q ||
-        ag.name.toLowerCase().includes(q) ||
-        ag.mission.toLowerCase().includes(q) ||
-        ag.categoryLabel.toLowerCase().includes(q) ||
-        item.suggestedProperName.toLowerCase().includes(q) ||
-        (item.installedAgent?.proper_name || '').toLowerCase().includes(q);
-      const matchesCat = agentCategoryFilter === 'all' || ag.category === agentCategoryFilter;
-      return matchesSearch && matchesCat;
-    });
-  }, [reconciledStore, agentSearch, agentCategoryFilter, agentInstallFilter]);
-
   return (
     <div className="jarvis-settings-layout">
       {/* Sub-navegação lateral responsiva da Loja */}
       <aside className="jarvis-settings-nav" aria-label="Navegação da Loja e Habilidades">
         <div className="jarvis-settings-nav__header">
-          <h2 className="jarvis-settings-nav__title">Loja & Catálogo</h2>
+          <h2 className="jarvis-settings-nav__title">Loja & Habilidades</h2>
         </div>
 
         <div className="jarvis-settings-nav__list">
@@ -762,10 +679,10 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({ initialTab
             >
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '10px' }}>
                 <Bot size={15} />
-                <span>Modelos de Agentes</span>
+                <span>Agentes</span>
               </span>
               <span className="jarvis-tabular" style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                +{reconciledStore.availableCount}
+                {AGENT_TEMPLATE_LIBRARY.length}
               </span>
             </button>
 
@@ -977,291 +894,49 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({ initialTab
           </div>
         )}
 
-        {/* VIEW 2: MODELOS DE AGENTES (Sem duplicidade — sincronizado com sua equipe real) */}
+        {/* VIEW 2: AGENTES (Biblioteca Unificada Pronta em 1 Clique) */}
         {activeStoreTab === 'agents' && (
-          <div style={{ maxWidth: '1080px', width: '100%', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <div style={{ maxWidth: '1080px', width: '100%', display: 'flex', flexDirection: 'column', gap: '24px' }}>
             <PageHeader
-              title="Modelos de Especialistas para Instalar"
-              subtitle="Expanda sua equipe sem duplicidade: modelos que você já possui aparecem vinculados ao nome próprio ativo na Central de Agentes; novos modelos podem ser instalados em 1 clique."
+              title="Loja de Agentes IA Prontos"
+              subtitle="Todos os agentes — do dia a dia à engenharia, dados e segurança — já prontos com habilidades configuradas. Instale em 1 clique e desinstale os que não usar."
               icon={<Bot size={16} />}
               meta={[
-                <span key="team" className="jarvis-tabular">
-                  <strong style={{ color: 'var(--text-primary)' }}>{agents.length}</strong> ativos na sua equipe
+                <span key="tpl" className="jarvis-tabular">
+                  {AGENT_TEMPLATE_LIBRARY.length} templates prontos
                 </span>,
-                <span key="avail" className="jarvis-tabular">
-                  {reconciledStore.availableCount} novos modelos disponíveis
-                </span>,
-                <span key="inst" className="jarvis-tabular">
-                  {reconciledStore.installedCount} modelos já ativos
+                <span key="active" className="jarvis-tabular">
+                  {agents.length} instalados na sua equipe
                 </span>,
               ]}
             />
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
-                <div className="jarvis-search-box" style={{ flex: '1 1 260px', maxWidth: '420px' }}>
-                  <Search size={15} />
-                  <input
-                    type="text"
-                    value={agentSearch}
-                    onChange={(e) => setAgentSearch(e.target.value)}
-                    placeholder="Buscar modelo por nome, especialidade ou missão..."
-                    aria-label="Buscar modelo de especialista"
-                    className="jarvis-search-box__input"
-                  />
-                  {agentSearch && (
-                    <button
-                      type="button"
-                      onClick={() => setAgentSearch('')}
-                      className="btn btn-ghost btn-icon-sm"
-                      aria-label="Limpar busca de agentes"
-                      style={{ width: '24px', height: '24px' }}
-                    >
-                      <X size={13} />
-                    </button>
-                  )}
-                </div>
-
-                <div className="jarvis-segmented" role="tablist" aria-label="Status de instalação">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={agentInstallFilter === 'available'}
-                    onClick={() => setAgentInstallFilter('available')}
-                    className={`jarvis-segmented-btn ${agentInstallFilter === 'available' ? 'is-active' : ''}`}
-                  >
-                    Novos para Instalar ({reconciledStore.availableCount})
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={agentInstallFilter === 'installed'}
-                    onClick={() => setAgentInstallFilter('installed')}
-                    className={`jarvis-segmented-btn ${agentInstallFilter === 'installed' ? 'is-active' : ''}`}
-                  >
-                    Já na Equipe ({reconciledStore.installedCount})
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={agentInstallFilter === 'all'}
-                    onClick={() => setAgentInstallFilter('all')}
-                    className={`jarvis-segmented-btn ${agentInstallFilter === 'all' ? 'is-active' : ''}`}
-                  >
-                    Todos ({reconciledStore.items.length})
-                  </button>
-                </div>
-              </div>
-
-              <div
-                className="jarvis-segmented"
-                style={{ overflowX: 'auto', flexWrap: 'nowrap', maxWidth: '100%' }}
-                role="tablist"
-                aria-label="Áreas de especialidade"
-              >
-                {AGENT_FILTER_TABS.map((cat) => (
-                  <button
-                    key={cat.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={agentCategoryFilter === cat.id}
-                    onClick={() => setAgentCategoryFilter(cat.id)}
-                    className={`jarvis-segmented-btn ${agentCategoryFilter === cat.id ? 'is-active' : ''}`}
-                    style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
-                  >
-                    {cat.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {filteredCatalogAgents.length === 0 ? (
-              <div className="jarvis-empty-state">
-                <Bot size={26} color="var(--text-muted)" />
-                <div style={{ fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                  Nenhum modelo encontrado neste filtro
-                </div>
-                <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                  Tente alternar entre "Novos para Instalar", "Já na Equipe" ou limpar a busca.
-                </p>
-              </div>
-            ) : (
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))',
-                  gap: '14px',
-                }}
-              >
-                {filteredCatalogAgents.map((item) => {
-                  const agent = item.blueprint;
-                  const installed = item.installedAgent;
-                  const activeName = installed?.proper_name || item.suggestedProperName;
-                  const activeHandle = installed?.handle || item.suggestedHandle;
-                  const isPinned = installed ? pinnedDockAgents.includes(installed.role) : false;
-                  const isInstalling = installingRole === agent.role;
-
-                  return (
-                    <article
-                      key={agent.id}
-                      className="jarvis-settings-card"
-                      style={{
-                        justifyContent: 'space-between',
-                        gap: '12px',
-                        minWidth: 0,
-                        borderColor: installed ? 'rgba(34, 197, 94, 0.28)' : undefined,
-                      }}
-                    >
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', minWidth: 0 }}>
-                        <div
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            gap: '10px',
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
-                            <div
-                              style={{
-                                width: '38px',
-                                height: '38px',
-                                borderRadius:
-                                  agent.shape === 'diamond' ? '11px' : agent.shape === 'round' ? '50%' : '12px',
-                                backgroundColor: installed?.mascot?.color || agent.color,
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                flexShrink: 0,
-                              }}
-                            >
-                              <div
-                                style={{
-                                  display: 'flex',
-                                  gap: '3px',
-                                  alignItems: 'center',
-                                  transform: agent.expression === 'grumpy' ? 'rotate(-6deg)' : 'none',
-                                }}
-                              >
-                                <span style={{ width: '3.5px', height: '3.5px', borderRadius: '50%', backgroundColor: '#000000' }} />
-                                <span style={{ width: '3.5px', height: '3.5px', borderRadius: '50%', backgroundColor: '#000000' }} />
-                              </div>
-                            </div>
-
-                            <div style={{ minWidth: 0 }}>
-                              <div
-                                style={{
-                                  fontSize: '0.92rem',
-                                  fontWeight: 600,
-                                  color: 'var(--text-primary)',
-                                  whiteSpace: 'nowrap',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                }}
-                              >
-                                {agent.name}
-                              </div>
-                              <div
-                                style={{
-                                  fontSize: '0.73rem',
-                                  color: 'var(--text-secondary)',
-                                  whiteSpace: 'nowrap',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                }}
-                              >
-                                {installed
-                                  ? `Ativo como ${activeName} (${activeHandle})`
-                                  : `Sugestão: ${activeName} (${activeHandle}) · ${agent.categoryLabel}`}
-                              </div>
-                            </div>
-                          </div>
-
-                          <span
-                            style={{
-                              fontSize: '0.64rem',
-                              fontWeight: 700,
-                              fontFamily: 'var(--font-mono)',
-                              letterSpacing: '0.04em',
-                              textTransform: 'uppercase',
-                              padding: '2px 7px',
-                              borderRadius: '6px',
-                              border: `1px solid ${installed ? 'rgba(34, 197, 94, 0.35)' : 'var(--border-accent)'}`,
-                              backgroundColor: installed ? 'rgba(34, 197, 94, 0.12)' : 'var(--accent-soft)',
-                              color: installed ? '#4ade80' : 'var(--accent-light)',
-                              flexShrink: 0,
-                            }}
-                          >
-                            {installed ? 'Na Equipe' : 'Novo'}
-                          </span>
-                        </div>
-
-                        <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
-                          {agent.mission}
-                        </p>
-                      </div>
-
-                      <div style={{ display: 'flex', gap: '8px', paddingTop: '4px' }}>
-                        {installed ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => togglePinDockAgent(installed.role, activeName)}
-                              className={`btn btn-sm btn-block ${isPinned ? 'btn-secondary is-active' : 'btn-secondary'}`}
-                              style={{ flex: 1 }}
-                            >
-                              {isPinned ? <Check size={13} strokeWidth={2.5} /> : <Plus size={13} />}
-                              <span>{isPinned ? 'Fixado no Dock' : 'Fixar no Dock'}</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                window.dispatchEvent(
-                                  new CustomEvent('jarvis:open-agent-chat', {
-                                    detail: { agentId: installed.role, agentName: activeName },
-                                  })
-                                );
-                                notify(`Sessão com ${activeName} iniciada!`, 'info');
-                              }}
-                              className="btn btn-ghost btn-sm"
-                            >
-                              Conversar
-                            </button>
-                          </>
-                        ) : (
-                          <button
-                            type="button"
-                            disabled={isInstalling}
-                            onClick={() => handleInstallBlueprint(item)}
-                            className="btn btn-primary btn-sm btn-block"
-                            style={{ flex: 1 }}
-                          >
-                            <Plus size={13} />
-                            <span>{isInstalling ? 'Instalando...' : `Instalar ${activeName} na Equipe`}</span>
-                          </button>
-                        )}
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
+            <AgentTemplateStoreGrid
+              installedAgents={agents}
+              onRefreshAgents={loadData}
+              onOpenChat={(ag) => {
+                window.dispatchEvent(
+                  new CustomEvent('jarvis:open-agent-chat', {
+                    detail: { agentId: ag.role, agentName: ag.proper_name || ag.name },
+                  })
+                );
+              }}
+            />
           </div>
         )}
 
-        {/* VIEW 3: HABILIDADES (ECC & Políticas Ponytail) */}
+        {/* VIEW 3: HABILIDADES DOS AGENTES */}
         {activeStoreTab === 'skills' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '1100px', width: '100%' }}>
             {!roleLoaded && (
               <div role="status" className="jarvis-callout jarvis-callout--info">
-                A verificar permissões do Gestor de Skills…
+                A verificar permissões do Gestor de Habilidades…
               </div>
             )}
 
             <PageHeader
-              title="Habilidades dos Agentes & Catálogo ECC"
-              subtitle="Capacidades técnicas modulares, ferramentas MCP injetadas e diretrizes especializadas vinculáveis a qualquer agente ativo da sua equipe."
+              title="Habilidades dos Agentes"
+              subtitle="Capacidades modulares, ferramentas e diretrizes especializadas que você pode anexar diretamente aos seus agentes instalados."
               icon={<BookOpen size={16} />}
               meta={[
                 <span key="active" className="jarvis-tabular">
@@ -1271,7 +946,7 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({ initialTab
                   ativas
                 </span>,
                 <span key="spec" className="jarvis-tabular">
-                  {agents.length} agentes na sua equipe
+                  {agents.length} agentes instalados
                 </span>,
               ]}
               actions={
@@ -1299,9 +974,20 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({ initialTab
                         className="btn btn-secondary btn-sm"
                       >
                         <Upload size={14} />
-                        <span>Importar ECC</span>
+                        <span>Importar Habilidade</span>
                       </button>
                     </>
+                  )}
+
+                  {onOpenGitHubImport && (
+                    <button
+                      type="button"
+                      onClick={onOpenGitHubImport}
+                      className="btn btn-secondary btn-sm"
+                    >
+                      <GitBranch size={14} />
+                      <span>Importar do GitHub</span>
+                    </button>
                   )}
 
                   <button
@@ -1508,7 +1194,6 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({ initialTab
                   <SkillCard
                     key={skill.id}
                     skill={skill}
-                    activeAgents={agents}
                     onToggle={handleToggle}
                     onEditAgents={(s) => setEditingSkill(s)}
                     onViewInstructions={(s) => setViewingSkillDetails(s)}

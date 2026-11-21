@@ -35,6 +35,9 @@ import {
   Wrench,
   BookOpen,
   SlidersHorizontal,
+  Wand2,
+  AppWindow,
+  GitBranch,
 } from 'lucide-react';
 import { useAssistantIdentity } from '../../context/AssistantIdentityContext';
 import { getAssistantInitial } from '../../services/assistantIdentity';
@@ -106,6 +109,9 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
     skills: false,
     security: true,
     companion: true,
+    creative_studio: true,
+    app_builder: true,
+    github_import: true,
     executive_report: false,
     advisor: false,
     server_logs: false,
@@ -157,6 +163,8 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
       items: [
         { id: 'overview', label: 'Visão Geral', icon: LayoutDashboard },
         { id: 'chat', label: 'Conversas', icon: MessageSquare },
+        { id: 'creative_studio', label: 'Estúdio Criativo', icon: Wand2 },
+        { id: 'app_builder', label: 'Construtor de Apps', icon: AppWindow },
         { id: 'office', label: 'Escritório Vivo', icon: Building2 },
         { id: 'tasks', label: 'Tarefas', icon: ListTodo },
         { id: 'workflows', label: 'Fluxos', icon: Workflow },
@@ -174,6 +182,7 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
         { id: 'models', label: 'Modelos & Chaves', icon: Cpu },
         { id: 'knowledge', label: 'Conhecimento', icon: Database },
         { id: 'skills', label: 'Habilidades', icon: Layers },
+        { id: 'github_import', label: 'Importar GitHub', icon: GitBranch },
       ],
     },
     {
@@ -199,8 +208,11 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
       items: [
         { id: 'overview', label: 'Início', icon: LayoutDashboard },
         { id: 'chat', label: `Conversar com ${assistantName}`, icon: MessageSquare },
+        { id: 'creative_studio', label: 'Planilhas, Imagens & Vídeos', icon: Wand2 },
+        { id: 'app_builder', label: 'Criar Apps (Android/PC)', icon: AppWindow },
         { id: 'companion', label: 'Voz & Celular (PWA)', icon: Smartphone },
         { id: 'agents', label: 'Meus Agentes', icon: Bot },
+        { id: 'github_import', label: 'Importar do GitHub', icon: GitBranch },
         { id: 'workflows', label: 'Meus Fluxos', icon: Workflow },
         { id: 'tasks', label: 'Tarefas', icon: ListTodo },
         { id: 'knowledge', label: 'Cadernos & Memória', icon: BookOpen },
@@ -596,10 +608,10 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
             type="button"
             onClick={() => onNavigate('store')}
             className={`jarvis-sidebar-item ${activeTab === 'store' ? 'is-active' : ''}`}
-            title="Loja de Apps & Conectores"
+            title="Loja de Agentes, Habilidades & Apps"
           >
             <Store size={16} />
-            {!collapsed && <span>Catálogo & Apps</span>}
+            {!collapsed && <span>Loja & Apps</span>}
           </button>
         )}
 

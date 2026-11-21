@@ -20,10 +20,19 @@ import {
 import { useAssistantIdentity } from '../../context/AssistantIdentityContext';
 import { useOfflineQueue } from '../../shared/pwa/usePWAInstall';
 import { notify } from '../../shared/common/Toast';
+import {
+  getVoiceAutoSpeakPref,
+  setVoiceAutoSpeakPref,
+} from '../../hooks/useWakeWordListener';
 
 interface VoiceLiveHudModalProps {
   isOpen: boolean;
   onClose: () => void;
+  autoListenOnOpen?: boolean;
+  initialCommand?: string | null;
+  onInitialCommandConsumed?: () => void;
+  wakeWordEnabled?: boolean;
+  onToggleWakeWord?: () => void;
 }
 
 interface VoiceTurnItem {
@@ -71,14 +80,23 @@ function speakText(text: string, lang: 'pt-BR' | 'en-US') {
   }
 }
 
-export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({ isOpen, onClose }) => {
+export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({
+  isOpen,
+  onClose,
+  autoListenOnOpen = true,
+  initialCommand = null,
+  onInitialCommandConsumed,
+  wakeWordEnabled = false,
+  onToggleWakeWord,
+}) => {
   const { assistantName } = useAssistantIdentity();
   const { isOnline, addCommand } = useOfflineQueue();
 
   const [briefing, setBriefing] = useState<VoiceBriefingResponse | null>(null);
   const [listening, setListening] = useState(false);
+  const [micHint, setMicHint] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
-  const [speechOutEnabled, setSpeechOutEnabled] = useState(true);
+  const [speechOutEnabled, setSpeechOutEnabled] = useState<boolean>(() => getVoiceAutoSpeakPref());
   const [practiceMode, setPracticeMode] = useState<'general' | 'english'>('general');
   const [inputText, setInputText] = useState('');
   const [attachment, setAttachment] = useState<{ name: string; kind: 'camera_photo' | 'pdf' } | null>(null);
@@ -90,41 +108,24 @@ export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({ isOpen, on
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
+    const syncVoicePref = () => setSpeechOutEnabled(getVoiceAutoSpeakPref());
+    window.addEventListener('jarvis_voice_prefs_changed', syncVoicePref);
+    return () => window.removeEventListener('jarvis_voice_prefs_changed', syncVoicePref);
+  }, []);
+
+  useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [turns.length]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    playJarvisChime();
-    (async () => {
-      try {
-        const data = await fetchVoiceBriefing();
-        setBriefing(data);
-        setTurns((prev) =>
-          prev.length > 0
-            ? prev
-            : [
-                {
-                  id: 'brief_0',
-                  role: 'assistant',
-                  text: `${data.greeting} ${data.briefing_line}`,
-                  meta: `Briefing Diário · ${data.assistant_name}`,
-                  timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-                },
-              ]
-        );
-      } catch {
-        // modo offline fallback
-      }
-    })();
-    return () => {
-      try {
-        recognitionRef.current?.stop();
-      } catch {
-        // ignore
-      }
-    };
-  }, [isOpen]);
+  const stopMicrophone = () => {
+    try {
+      recognitionRef.current?.stop();
+    } catch {
+      // ignore
+    }
+    recognitionRef.current = null;
+    setListening(false);
+  };
 
   const handleSendCommand = async (rawTranscript?: string) => {
     const text = (rawTranscript ?? inputText).trim();
@@ -192,42 +193,47 @@ export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({ isOpen, on
     }
   };
 
-  const toggleMicrophone = () => {
-    if (listening) {
-      try {
-        recognitionRef.current?.stop();
-      } catch {
-        // ignore
-      }
-      setListening(false);
-      return;
-    }
-
+  const startMicrophone = (silentIfUnsupported = false) => {
     const SpeechRecognitionCtor =
       (window as unknown as { SpeechRecognition?: any; webkitSpeechRecognition?: any }).SpeechRecognition ||
       (window as unknown as { webkitSpeechRecognition?: any }).webkitSpeechRecognition;
 
     if (!SpeechRecognitionCtor) {
-      notify('Microfone Web Speech indisponível neste navegador — use os botões rápidos ou digite abaixo.', 'warning');
+      const msg = 'Microfone indisponível neste navegador — digite seu pedido abaixo ou use um atalho.';
+      setMicHint(msg);
+      if (!silentIfUnsupported) notify(msg, 'info');
       return;
     }
 
     try {
-      playJarvisChime();
+      stopMicrophone();
+      setMicHint(null);
       const rec = new SpeechRecognitionCtor();
       rec.lang = practiceMode === 'english' ? 'en-US' : 'pt-BR';
-      rec.interimResults = false;
+      rec.interimResults = true;
       rec.maxAlternatives = 1;
       rec.onresult = (event: any) => {
-        const spoken = event?.results?.[0]?.[0]?.transcript || '';
-        setListening(false);
-        if (spoken.trim()) {
-          void handleSendCommand(spoken);
+        let interim = '';
+        let finalText = '';
+        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+          const chunk = event.results[i]?.[0]?.transcript || '';
+          if (event.results[i]?.isFinal) finalText += chunk;
+          else interim += chunk;
+        }
+        if (interim.trim()) setInputText(interim.trim());
+        if (finalText.trim()) {
+          setListening(false);
+          setInputText('');
+          void handleSendCommand(finalText.trim());
         }
       };
-      rec.onerror = () => {
+      rec.onerror = (ev: any) => {
         setListening(false);
-        notify('Não foi possível captar áudio. Tente novamente ou digite o comando.', 'warning');
+        if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
+          setMicHint('Permita o acesso ao microfone no navegador para falar diretamente.');
+        } else if (!silentIfUnsupported) {
+          setMicHint('Não captei áudio agora — toque no anel laranja para tentar de novo ou digite abaixo.');
+        }
       };
       rec.onend = () => setListening(false);
       recognitionRef.current = rec;
@@ -235,9 +241,65 @@ export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({ isOpen, on
       setListening(true);
     } catch {
       setListening(false);
-      notify('Permissão de microfone indisponível.', 'warning');
+      setMicHint('Toque no anel laranja para liberar o microfone ou digite seu comando abaixo.');
     }
   };
+
+  const toggleMicrophone = () => {
+    if (listening) {
+      stopMicrophone();
+      return;
+    }
+    playJarvisChime();
+    startMicrophone(false);
+  };
+
+  useEffect(() => {
+    if (!isOpen) {
+      stopMicrophone();
+      return;
+    }
+    playJarvisChime();
+    setMicHint(null);
+
+    (async () => {
+      try {
+        const data = await fetchVoiceBriefing();
+        setBriefing(data);
+        setTurns((prev) =>
+          prev.length > 0
+            ? prev
+            : [
+                {
+                  id: 'brief_0',
+                  role: 'assistant',
+                  text: `${data.greeting} ${data.briefing_line}`,
+                  meta: `Briefing Diário · ${data.assistant_name}`,
+                  timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                },
+              ]
+        );
+      } catch {
+        // modo offline fallback
+      }
+    })();
+
+    let timer: number | null = null;
+    if (initialCommand && initialCommand.trim()) {
+      const cmd = initialCommand.trim();
+      onInitialCommandConsumed?.();
+      void handleSendCommand(cmd);
+    } else if (autoListenOnOpen) {
+      timer = window.setTimeout(() => {
+        startMicrophone(true);
+      }, 180);
+    }
+
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+      stopMicrophone();
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -246,8 +308,10 @@ export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({ isOpen, on
     : processing
       ? `${assistantName} processando...`
       : listening
-        ? `Ouvindo ("Ei ${assistantName}...")`
-        : `Pronto · Diga "Ei ${assistantName}"`;
+        ? `Ouvindo agora... pode falar com ${assistantName}`
+        : micHint
+          ? micHint
+          : `Pronto · Diga "Ei ${assistantName}"`;
 
   return (
     <div
@@ -259,19 +323,37 @@ export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({ isOpen, on
       <div style={s.modal}>
         {/* Header */}
         <div style={s.header}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={s.badgeDot} />
-            <div>
-              <h2 style={{ fontSize: '1.02rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                Modo Voz ao Vivo · &ldquo;Ei {assistantName}&rdquo;
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+            <div
+              style={{
+                ...s.badgeDot,
+                backgroundColor: listening ? '#22c55e' : '#f97316',
+                boxShadow: listening ? '0 0 12px #22c55e' : '0 0 12px #f97316',
+              }}
+            />
+            <div style={{ minWidth: 0 }}>
+              <h2 style={{ fontSize: '1.02rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
+                Voz ao Vivo · &ldquo;Ei {assistantName}&rdquo;
               </h2>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+              <div style={{ fontSize: '0.75rem', color: listening ? '#4ade80' : 'var(--text-secondary)' }}>
                 {hudStatus}
               </div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            {onToggleWakeWord && (
+              <button
+                type="button"
+                onClick={onToggleWakeWord}
+                aria-pressed={wakeWordEnabled}
+                className={`btn btn-sm ${wakeWordEnabled ? 'btn-primary' : 'btn-secondary'}`}
+                title={`Quando ativo, basta dizer "Ei ${assistantName}" sem clicar em nada`}
+              >
+                <Mic size={13} />
+                <span>{wakeWordEnabled ? `Ouvindo "Ei ${assistantName}"` : 'Ativar mãos-livres'}</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setPracticeMode((m) => (m === 'general' ? 'english' : 'general'))}
@@ -279,11 +361,15 @@ export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({ isOpen, on
               title="Alternar modo de conversação prática em inglês"
             >
               <Globe size={13} />
-              {practiceMode === 'english' ? 'Prática Inglês: ON' : 'Praticar Inglês'}
+              {practiceMode === 'english' ? 'Inglês: ON' : 'Praticar Inglês'}
             </button>
             <button
               type="button"
-              onClick={() => setSpeechOutEnabled((v) => !v)}
+              onClick={() => {
+                const next = !speechOutEnabled;
+                setSpeechOutEnabled(next);
+                setVoiceAutoSpeakPref(next);
+              }}
               className="btn btn-secondary btn-icon-sm"
               title={speechOutEnabled ? 'Silenciar resposta falada' : 'Ativar resposta falada'}
               aria-label="Alternar áudio de resposta"

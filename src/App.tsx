@@ -14,11 +14,13 @@ import {
   CircleHelp,
   Plus,
   Mic,
+  Radio,
   LayoutDashboard,
   MessageSquare,
   Smartphone,
   ShieldCheck,
 } from 'lucide-react';
+import { useWakeWordListener } from './hooks/useWakeWordListener';
 import { SetupWizardModal } from './shared/common/SetupWizardModal';
 import { InitialPasswordChangeModal } from './shared/common/InitialPasswordChangeModal';
 import { GuidedTour } from './shared/common/GuidedTour';
@@ -108,6 +110,21 @@ const UsageAnalyticsView = lazy(() =>
 const CompanionHubView = lazy(() =>
   import('./features/companion/CompanionHubView').then((m) => ({ default: m.CompanionHubView }))
 );
+const CreativeMediaStudioView = lazy(() =>
+  import('./features/studio/CreativeMediaStudioView').then((m) => ({
+    default: m.CreativeMediaStudioView,
+  }))
+);
+const AppBuilderView = lazy(() =>
+  import('./features/studio/AppBuilderView').then((m) => ({
+    default: m.AppBuilderView,
+  }))
+);
+const GitHubImporterView = lazy(() =>
+  import('./features/github/GitHubImporterView').then((m) => ({
+    default: m.GitHubImporterView,
+  }))
+);
 
 /**
  * Telas que ocupam toda a área útil com layout e cabeçalho internos próprios.
@@ -125,8 +142,8 @@ const TAB_LABELS: Record<string, { section: string; title: string }> = {
   agents: { section: 'Engenharia', title: 'Centro de Agentes' },
   models: { section: 'Engenharia', title: 'Modelos & Provedores' },
   knowledge: { section: 'Engenharia', title: 'Base de Conhecimento' },
-  skills: { section: 'Engenharia', title: 'Habilidades & Catálogo' },
-  store: { section: 'Engenharia', title: 'Catálogo & Apps' },
+  skills: { section: 'Engenharia', title: 'Habilidades dos Agentes' },
+  store: { section: 'Engenharia', title: 'Loja & Apps' },
   approvals: { section: 'Governança', title: 'Central de Aprovações' },
   usage: { section: 'Governança', title: 'Uso & Custos' },
   security: { section: 'Governança', title: 'Segurança & Auditoria' },
@@ -140,6 +157,9 @@ const TAB_LABELS: Record<string, { section: string; title: string }> = {
   learning: { section: 'Suporte', title: 'Central de Ajuda' },
   settings: { section: 'Sistema', title: 'Configurações' },
   companion: { section: 'Ecossistema', title: 'Voz, PWA & Companion' },
+  creative_studio: { section: 'Principal', title: 'Estúdio Criativo (Excel, Imagens & Vídeos)' },
+  app_builder: { section: 'Principal', title: 'Construtor de Apps (Android & Windows)' },
+  github_import: { section: 'Engenharia', title: 'Importar do GitHub' },
   not_found: { section: 'JARVIS', title: 'Página não encontrada' },
 };
 
@@ -263,7 +283,17 @@ const DashboardApp: React.FC = () => {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showVoiceHud, setShowVoiceHud] = useState(false);
+  const [pendingVoiceCommand, setPendingVoiceCommand] = useState<string | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfileData>(getUserProfile);
+
+  const wakeWord = useWakeWordListener({
+    assistantName,
+    paused: showVoiceHud,
+    onWakeDetected: ({ command }) => {
+      setPendingVoiceCommand(command || null);
+      setShowVoiceHud(true);
+    },
+  });
 
   useEffect(() => {
     setUserProfile(identityProfile);
@@ -609,17 +639,40 @@ const DashboardApp: React.FC = () => {
 
               <PWAInstallButton compact />
 
-              <button
-                type="button"
-                onClick={() => setShowVoiceHud(true)}
-                className="btn btn-secondary btn-sm"
-                title={`Ativar Voz ao Vivo ("Ei ${assistantName}")`}
-                aria-label={`Abrir modo voz Ei ${assistantName}`}
-                style={{ borderColor: 'var(--border-accent)', color: 'var(--accent-light)' }}
-              >
-                <Mic size={13} />
-                <span className="hide-mobile">Ei {assistantName}</span>
-              </button>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPendingVoiceCommand(null);
+                    setShowVoiceHud(true);
+                  }}
+                  className="btn btn-secondary btn-sm"
+                  title={`Clique para falar agora com ${assistantName}`}
+                  aria-label={`Falar agora com ${assistantName}`}
+                  style={{ borderColor: 'var(--border-accent)', color: 'var(--accent-light)' }}
+                >
+                  <Mic size={13} />
+                  <span className="hide-mobile">Ei {assistantName}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={wakeWord.toggle}
+                  aria-pressed={wakeWord.enabled}
+                  className={`btn btn-icon-sm ${wakeWord.enabled ? 'btn-primary' : 'btn-ghost'}`}
+                  title={
+                    wakeWord.enabled
+                      ? `Escuta mãos-livres ativa: diga "Ei ${assistantName}" sem clicar`
+                      : `Ativar escuta contínua para chamar "Ei ${assistantName}" sem clicar`
+                  }
+                  aria-label={
+                    wakeWord.enabled
+                      ? `Pausar escuta contínua Ei ${assistantName}`
+                      : `Ativar escuta contínua Ei ${assistantName}`
+                  }
+                >
+                  <Radio size={14} />
+                </button>
+              </div>
 
               <button
                 type="button"
@@ -780,8 +833,18 @@ const DashboardApp: React.FC = () => {
                   {activeTab === 'coding' && <CodingAgentView />}
                   {activeTab === 'workflows' && <WorkflowCanvasView />}
                   {activeTab === 'usage' && <UsageAnalyticsView />}
-                  {activeTab === 'store' && <SkillsManagerView initialTab="apps" />}
-                  {activeTab === 'skills' && <SkillsManagerView initialTab="skills" />}
+                  {activeTab === 'store' && (
+                    <SkillsManagerView
+                      initialTab="apps"
+                      onOpenGitHubImport={() => navigate('github_import')}
+                    />
+                  )}
+                  {activeTab === 'skills' && (
+                    <SkillsManagerView
+                      initialTab="skills"
+                      onOpenGitHubImport={() => navigate('github_import')}
+                    />
+                  )}
                   {chatLoaded && (
                     <div style={{ display: activeTab === 'chat' ? 'block' : 'none', height: '100%' }}>
                       <ChatMaster
@@ -816,7 +879,9 @@ const DashboardApp: React.FC = () => {
                       }}
                     />
                   )}
-                  {activeTab === 'agents' && <AgentCenterView />}
+                  {activeTab === 'agents' && (
+                    <AgentCenterView onOpenGitHubImport={() => navigate('github_import')} />
+                  )}
                   {activeTab === 'tasks' && <TaskManagerView />}
                   {activeTab === 'backend_studio' && <BackendStudioView />}
                   {activeTab === 'quality' && <QualityStudioView />}
@@ -842,6 +907,9 @@ const DashboardApp: React.FC = () => {
                       onNavigate={navigate}
                     />
                   )}
+                  {activeTab === 'creative_studio' && <CreativeMediaStudioView />}
+                  {activeTab === 'app_builder' && <AppBuilderView />}
+                  {activeTab === 'github_import' && <GitHubImporterView onNavigate={navigate} />}
                 </Suspense>
               </ModuleErrorBoundary>
             </div>
@@ -926,7 +994,18 @@ const DashboardApp: React.FC = () => {
         onOpenProfile={() => setShowProfileModal(true)}
       />
 
-      <VoiceLiveHudModal isOpen={showVoiceHud} onClose={() => setShowVoiceHud(false)} />
+      <VoiceLiveHudModal
+        isOpen={showVoiceHud}
+        onClose={() => {
+          setShowVoiceHud(false);
+          setPendingVoiceCommand(null);
+        }}
+        autoListenOnOpen
+        initialCommand={pendingVoiceCommand}
+        onInitialCommandConsumed={() => setPendingVoiceCommand(null)}
+        wakeWordEnabled={wakeWord.enabled}
+        onToggleWakeWord={wakeWord.toggle}
+      />
 
       {/* Navegação Inferior Mobile PWA (visível apenas abaixo de 768px) */}
       <nav className="jarvis-mobile-bottom-nav" aria-label="Navegação mobile rápida">

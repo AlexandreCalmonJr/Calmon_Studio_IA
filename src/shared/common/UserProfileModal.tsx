@@ -1,17 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { Modal } from './Modal';
 import {
-  Sparkles,
   Save,
   Trash2,
   Download,
   Database,
   User,
-  Sliders,
-  KeyRound,
-  Cpu,
+  Mic,
+  Volume2,
   Smartphone,
-  ArrowUpRight,
+  Sparkles,
+  Check,
+  ShieldCheck,
 } from 'lucide-react';
 import { fetchUserProfileApi, saveUserProfileApi, createSystemBackup } from '../../api';
 import { getAccountStorageKey } from '../../services/accountScope';
@@ -26,6 +26,12 @@ import {
   normalizeExperienceMode,
 } from '../../services/assistantIdentity';
 import { useAssistantIdentity } from '../../context/AssistantIdentityContext';
+import {
+  getVoiceAutoSpeakPref,
+  getWakeWordEnabledPref,
+  setVoiceAutoSpeakPref,
+  setWakeWordEnabledPref,
+} from '../../hooks/useWakeWordListener';
 
 export interface UserProfileData {
   displayName: string;
@@ -44,13 +50,13 @@ export interface UserProfileData {
 }
 
 const DEFAULT_PROFILE: UserProfileData = {
-  displayName: 'Desenvolvedor',
-  roleTitle: 'Engenheiro de Software',
-  avatarIcon: '💻',
-  seniorityLevel: 'senior',
-  responseStyle: 'detailed',
-  userBackground: 'Stack principal: Python, TypeScript, Flutter, Docker e SQLite.',
-  responseGuidelines: 'Priorizar código limpo, tipagem estrita, arquitetura modular e segurança OWASP.',
+  displayName: 'Usuário',
+  roleTitle: 'Uso Pessoal & Produtividade',
+  avatarIcon: '🙂',
+  seniorityLevel: 'mid',
+  responseStyle: 'concise',
+  userBackground: '',
+  responseGuidelines: 'Responder em português claro, objetivo e fácil de seguir.',
   huggingfaceToken: '',
   groqApiKey: '',
   geminiApiKey: '',
@@ -91,16 +97,38 @@ export function saveUserProfile(data: UserProfileData): void {
   } catch {}
 }
 
-type ProfileTab = 'profile' | 'instructions' | 'keys' | 'engine' | 'data' | 'devices';
+type ProfileTab = 'identity' | 'voice' | 'data' | 'devices';
 
 const PROFILE_TABS: Array<{ id: ProfileTab; label: string; icon: React.ComponentType<{ size?: number }> }> = [
-  { id: 'profile', label: 'Identidade', icon: User },
-  { id: 'instructions', label: 'Instruções', icon: Sliders },
-  { id: 'keys', label: 'Chaves', icon: KeyRound },
-  { id: 'engine', label: 'Motor Local', icon: Cpu },
-  { id: 'data', label: 'Backup', icon: Database },
+  { id: 'identity', label: 'Identidade', icon: User },
+  { id: 'voice', label: 'Voz & Respostas', icon: Mic },
+  { id: 'data', label: 'Meus Dados', icon: Database },
   { id: 'devices', label: 'Dispositivos', icon: Smartphone },
 ];
+
+const RESPONSE_STYLES: Array<{
+  id: UserProfileData['responseStyle'];
+  label: string;
+  desc: string;
+}> = [
+  {
+    id: 'concise',
+    label: 'Direto ao ponto',
+    desc: 'Respostas curtas, práticas e sem enrolação.',
+  },
+  {
+    id: 'educational',
+    label: 'Explicativo',
+    desc: 'Explica o porquê das coisas com exemplos simples.',
+  },
+  {
+    id: 'detailed',
+    label: 'Passo a passo',
+    desc: 'Respostas completas, estruturadas em etapas.',
+  },
+];
+
+const AVATAR_OPTIONS = ['🙂', '🚀', '🧠', '✨', '🎯', '💻', '🎨', '📚'];
 
 interface UserProfileModalProps {
   isOpen: boolean;
@@ -110,15 +138,30 @@ interface UserProfileModalProps {
   onProfileUpdated?: (profile: UserProfileData) => void;
 }
 
+function previewVoiceGreeting(assistantName: string) {
+  try {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      notify(`Prévia: "Ei ${assistantName}, como posso ajudar?"`, 'info');
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(`Oi! Aqui é ${assistantName}. Como posso ajudar você hoje?`);
+    utter.lang = 'pt-BR';
+    utter.rate = 1.03;
+    window.speechSynthesis.speak(utter);
+  } catch {
+    notify(`Prévia: "Oi! Aqui é ${assistantName}. Como posso ajudar você hoje?"`, 'info');
+  }
+}
+
 export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   isOpen,
   onClose,
-  onNavigate,
   onOpenSetupWizard,
   onProfileUpdated,
 }) => {
   const identity = useAssistantIdentity();
-  const [activeTab, setActiveTab] = useState<ProfileTab>('profile');
+  const [activeTab, setActiveTab] = useState<ProfileTab>('identity');
   const [profile, setProfile] = useState<UserProfileData>(() => ({
     ...getUserProfile(),
     assistantName: identity.assistantName,
@@ -132,6 +175,17 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const [isAdmin, setIsAdmin] = useState(false);
   const [canEditProfile, setCanEditProfile] = useState(false);
   const [experienceMode, setExperienceMode] = useState<WorkspaceExperienceMode>(identity.experienceMode);
+  const [wakeWordEnabled, setWakeWordEnabled] = useState<boolean>(() => getWakeWordEnabledPref());
+  const [autoSpeakEnabled, setAutoSpeakEnabled] = useState<boolean>(() => getVoiceAutoSpeakPref());
+
+  useEffect(() => {
+    const syncVoice = () => {
+      setWakeWordEnabled(getWakeWordEnabledPref());
+      setAutoSpeakEnabled(getVoiceAutoSpeakPref());
+    };
+    window.addEventListener('jarvis_voice_prefs_changed', syncVoice);
+    return () => window.removeEventListener('jarvis_voice_prefs_changed', syncVoice);
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -168,6 +222,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     };
     setProfile(base);
     setExperienceMode(identity.experienceMode);
+    setWakeWordEnabled(getWakeWordEnabledPref());
+    setAutoSpeakEnabled(getVoiceAutoSpeakPref());
     setLoadingProfile(true);
     setSavedSuccess(false);
 
@@ -196,13 +252,15 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     };
   }, [isOpen, identity.assistantName, identity.experienceMode]);
 
+  const previewName = normalizeAssistantName(profile.assistantName);
+
   const handleSave = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!canEditProfile || saving) return;
     setSaving(true);
     const nextProfile: UserProfileData = {
       ...profile,
-      assistantName: normalizeAssistantName(profile.assistantName),
+      assistantName: previewName,
       experienceMode,
     };
     try {
@@ -210,17 +268,14 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       await saveUserProfileApi(nextProfile);
       saveUserProfile(nextProfile);
       setSavedSuccess(true);
-      notify(`Preferências salvas para ${nextProfile.assistantName}.`, 'success');
+      notify(`Perfil atualizado para ${nextProfile.assistantName}.`, 'success');
       onProfileUpdated?.(nextProfile);
       window.setTimeout(() => setSavedSuccess(false), 2500);
     } catch {
       saveUserProfile(nextProfile);
       onProfileUpdated?.(nextProfile);
       setSavedSuccess(false);
-      notify(
-        'Preferências guardadas localmente neste navegador.',
-        'info',
-      );
+      notify('Preferências salvas neste navegador.', 'info');
     } finally {
       setSaving(false);
     }
@@ -237,10 +292,6 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     } finally {
       setBackingUp(false);
     }
-  };
-
-  const handleClearHistory = () => {
-    setConfirmClearOpen(true);
   };
 
   const confirmClearHistory = () => {
@@ -273,10 +324,10 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `jarvis_chat_export_${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = `jarvis_conversas_${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
-      notify('Conversa atual exportada.', 'success');
+      notify('Conversas exportadas com sucesso.', 'success');
     } catch (e: any) {
       notify(`Erro ao exportar dados: ${e.message}`, 'error');
     }
@@ -286,10 +337,66 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Perfil e Preferências da Conta"
+      title="Meu Perfil & Assistente"
       maxWidth="lg"
     >
-      {/* Navegação entre Abas do Perfil */}
+      {/* Cartão Hero de Identidade & Prévia de Voz */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '14px',
+          flexWrap: 'wrap',
+          padding: '14px 16px',
+          borderRadius: '12px',
+          background: 'linear-gradient(135deg, rgba(249,115,22,0.12) 0%, rgba(17,22,33,0.92) 65%)',
+          border: '1px solid var(--border-accent)',
+          marginBottom: '16px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+          <div
+            style={{
+              width: '48px',
+              height: '48px',
+              borderRadius: '12px',
+              backgroundColor: 'var(--bg-primary)',
+              border: '1px solid var(--border-accent)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '1.45rem',
+              flexShrink: 0,
+            }}
+          >
+            {profile.avatarIcon || '🙂'}
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: '0.96rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+              {profile.displayName || 'Usuário'}
+            </div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+              Assistente: <strong style={{ color: 'var(--accent-light)' }}>{previewName}</strong> ·{' '}
+              {experienceMode === 'simple' ? 'Modo Dia a Dia' : 'Modo Avançado'}
+            </div>
+            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '3px' }}>
+              Saudação por voz: &ldquo;Ei {previewName}, como posso ajudar?&rdquo;
+            </div>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => previewVoiceGreeting(previewName)}
+          className="btn btn-secondary btn-sm"
+        >
+          <Volume2 size={14} color="var(--accent-light)" />
+          <span>Ouvir prévia</span>
+        </button>
+      </div>
+
+      {/* Navegação Limpa em 4 Abas */}
       <div className="jarvis-profile-tabs" role="tablist" aria-label="Seções do perfil">
         {PROFILE_TABS.map((tab) => {
           const Icon = tab.icon;
@@ -311,34 +418,29 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       </div>
 
       {savedSuccess && (
-        <div className="jarvis-callout jarvis-callout--success" style={{ marginBottom: '16px' }} role="status">
-          Preferências sincronizadas com o banco de dados e núcleo do JARVIS.
+        <div className="jarvis-callout jarvis-callout--success" style={{ marginBottom: '14px' }} role="status">
+          <Check size={14} style={{ display: 'inline', marginRight: '6px' }} />
+          Alterações salvas e sincronizadas com {previewName}.
         </div>
       )}
 
-      {/* Aba: Identidade & Experiência */}
-      {activeTab === 'profile' && (
+      {/* Aba 1: Identidade & Modo de Uso */}
+      {activeTab === 'identity' && (
         <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div className="jarvis-settings-subcard" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <div>
               <label
                 htmlFor="profile-assistant-name"
-                style={{
-                  fontSize: '0.86rem',
-                  fontWeight: 600,
-                  color: 'var(--text-primary)',
-                  display: 'block',
-                  marginBottom: '4px',
-                }}
+                style={{ fontSize: '0.86rem', fontWeight: 600, color: 'var(--text-primary)', display: 'block', marginBottom: '4px' }}
               >
-                Nome do seu Assistente Principal
+                Como você quer chamar seu assistente?
               </label>
-              <p style={{ fontSize: '0.77rem', color: 'var(--text-secondary)', margin: '0 0 10px 0', lineHeight: 1.45 }}>
-                O padrão é JARVIS, mas cada pessoa pode batizar o assistente como preferir (ex.: João, Maria, Luna). O nome atualiza toda a interface em tempo real.
+              <p style={{ fontSize: '0.77rem', color: 'var(--text-secondary)', margin: '0 0 10px', lineHeight: 1.45 }}>
+                Você pode usar JARVIS ou dar qualquer nome que preferir (ex.: Luna, Maria, João). Esse nome funciona no chat e na chamada por voz.
               </p>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' }}>
                 {ASSISTANT_NAME_PRESETS.map((preset) => {
-                  const isSelected = normalizeAssistantName(profile.assistantName) === preset.name;
+                  const isSelected = previewName === preset.name;
                   return (
                     <button
                       key={preset.name}
@@ -358,36 +460,28 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 value={profile.assistantName || DEFAULT_ASSISTANT_NAME}
                 onChange={(e) => setProfile({ ...profile, assistantName: e.target.value })}
                 className="jarvis-input"
-                placeholder="Ex: JARVIS, João ou Maria"
+                placeholder="Ex: JARVIS, Luna, João ou Maria"
               />
             </div>
 
             <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '12px' }}>
-              <label
-                style={{
-                  fontSize: '0.84rem',
-                  fontWeight: 600,
-                  color: 'var(--text-primary)',
-                  display: 'block',
-                  marginBottom: '4px',
-                }}
-              >
-                Modo da Interface
+              <label style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-primary)', display: 'block', marginBottom: '4px' }}>
+                Modo de Uso
               </label>
-              <p style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', margin: '0 0 10px 0', lineHeight: 1.45 }}>
-                Escolha entre uma experiência limpa para rotina/estudos ou o painel técnico completo de engenharia.
+              <p style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', margin: '0 0 10px', lineHeight: 1.45 }}>
+                Alterne a qualquer momento sem perder seus agentes ou conversas.
               </p>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '8px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
                 {[
                   {
                     id: 'simple' as const,
-                    label: 'Modo Simples (Pessoal & Estudos)',
-                    desc: 'Menu enxuto: Início, Conversar, Meus Agentes, Fluxos, Tarefas e Cadernos.',
+                    label: 'Modo Dia a Dia (Simples)',
+                    desc: 'Visual limpo e intuitivo: Início, Conversas, Meus Agentes, Fluxos, Tarefas e Cadernos.',
                   },
                   {
                     id: 'engineering' as const,
-                    label: 'Modo Completo (Engenharia & Segurança)',
-                    desc: 'Acesso total a Coding Agent, Estúdios, Aprovações, Governança e Logs.',
+                    label: 'Modo Avançado (Engenharia)',
+                    desc: 'Libera Coding Agent, Estúdios, Governança, Logs e ferramentas técnicas completas.',
                   },
                 ].map((mode) => (
                   <button
@@ -401,33 +495,27 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     }}
                     className={`jarvis-choice-card ${experienceMode === mode.id ? 'is-active' : ''}`}
                   >
-                    <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)' }}>{mode.label}</div>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', lineHeight: 1.38 }}>{mode.desc}</div>
+                    <div style={{ fontSize: '0.83rem', fontWeight: 600, color: 'var(--text-primary)' }}>{mode.label}</div>
+                    <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>{mode.desc}</div>
                   </button>
                 ))}
               </div>
             </div>
           </div>
 
-          {!canEditProfile && (
-            <div role="status" className="jarvis-callout">
-              Perfil em modo de consulta. A edição exige a permissão <code>profile:write</code>.
-            </div>
-          )}
-
           <fieldset
             disabled={!canEditProfile}
             style={{ border: 0, padding: 0, margin: 0, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '14px' }}
           >
             <div className="user-profile-avatar-section">
-              <label className="user-profile-field-label">Ícone do perfil</label>
-              <div className="user-profile-avatar-options" role="group" aria-label="Escolher ícone do perfil">
-                {['💻', '🧑‍💻', '👨‍💼', '👩‍💻', '🛠️', '🧠', '🚀', '🤖'].map((avatar) => (
+              <label className="user-profile-field-label">Seu avatar</label>
+              <div className="user-profile-avatar-options" role="group" aria-label="Escolher avatar do perfil">
+                {AVATAR_OPTIONS.map((avatar) => (
                   <button
                     key={avatar}
                     type="button"
                     className={`user-profile-avatar-option ${profile.avatarIcon === avatar ? 'is-active' : ''}`}
-                    aria-label={`Selecionar ícone ${avatar}`}
+                    aria-label={`Selecionar avatar ${avatar}`}
                     aria-pressed={profile.avatarIcon === avatar}
                     onClick={() => setProfile({ ...profile, avatarIcon: avatar })}
                   >
@@ -440,7 +528,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             <div className="user-profile-grid">
               <div>
                 <label className="user-profile-field-label" htmlFor="profile-display-name">
-                  Nome de Exibição
+                  Seu nome
                 </label>
                 <input
                   id="profile-display-name"
@@ -448,14 +536,14 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                   value={profile.displayName}
                   onChange={(e) => setProfile({ ...profile, displayName: e.target.value })}
                   className="jarvis-input"
-                  placeholder="Ex: Carlos Silva"
+                  placeholder="Ex: Ana Souza"
                   required
                 />
               </div>
 
               <div>
                 <label className="user-profile-field-label" htmlFor="profile-role-title">
-                  Cargo / Especialidade Técnica
+                  Seu foco principal (opcional)
                 </label>
                 <input
                   id="profile-role-title"
@@ -463,44 +551,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                   value={profile.roleTitle}
                   onChange={(e) => setProfile({ ...profile, roleTitle: e.target.value })}
                   className="jarvis-input"
-                  placeholder="Ex: Desenvolvedor Fullstack"
-                  required
+                  placeholder="Ex: Estudos, Negócios, Casa ou Tecnologia"
                 />
-              </div>
-            </div>
-
-            <div className="user-profile-grid">
-              <div>
-                <label className="user-profile-field-label" htmlFor="profile-seniority">
-                  Nível de Senioridade
-                </label>
-                <select
-                  id="profile-seniority"
-                  value={profile.seniorityLevel}
-                  onChange={(e) => setProfile({ ...profile, seniorityLevel: e.target.value as any })}
-                  className="jarvis-select"
-                >
-                  <option value="junior">Estudante / Júnior (Explicações didáticas)</option>
-                  <option value="mid">Pleno (Código limpo, padrões e testes)</option>
-                  <option value="senior">Sênior / Tech Lead (Respostas avançadas e concisas)</option>
-                  <option value="architect">Arquiteto de Software (Escalabilidade e ADR)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="user-profile-field-label" htmlFor="profile-response-style">
-                  Estilo de Resposta do JARVIS
-                </label>
-                <select
-                  id="profile-response-style"
-                  value={profile.responseStyle}
-                  onChange={(e) => setProfile({ ...profile, responseStyle: e.target.value as any })}
-                  className="jarvis-select"
-                >
-                  <option value="concise">Direto ao Ponto (Mais rápido, foco no essencial)</option>
-                  <option value="detailed">Técnico & Completo (Código completo com testes)</option>
-                  <option value="educational">Educacional & Explicativo (Passo a passo didático)</option>
-                </select>
               </div>
             </div>
           </fieldset>
@@ -509,186 +561,152 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '4px' }}>
               <button type="submit" disabled={saving || loadingProfile} className="btn btn-primary btn-sm">
                 <Save size={14} />
-                <span>{saving ? 'Salvando…' : 'Salvar Perfil'}</span>
+                <span>{saving ? 'Salvando…' : 'Salvar Alterações'}</span>
               </button>
             </div>
           )}
         </form>
       )}
 
-      {/* Aba: Instruções Personalizadas */}
-      {activeTab === 'instructions' && (
-        <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {!canEditProfile && (
-            <div role="status" className="jarvis-callout">
-              Instruções personalizadas em modo de consulta. A edição exige a permissão <code>profile:write</code>.
+      {/* Aba 2: Voz & Preferências de Resposta */}
+      {activeTab === 'voice' && (
+        <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div className="jarvis-settings-subcard" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div className="jarvis-setting-row">
+              <div className="jarvis-setting-row__info">
+                <div className="jarvis-setting-row__title">
+                  Escuta contínua por nome (&ldquo;Ei {previewName}&rdquo;)
+                </div>
+                <div className="jarvis-setting-row__desc">
+                  Mantém o navegador atento ao nome escolhido. Ao chamar &ldquo;Ei {previewName}&rdquo;, o painel de voz abre sozinho sem precisar clicar.
+                </div>
+              </div>
+              <div className="jarvis-setting-row__control">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={wakeWordEnabled}
+                  aria-label={`Ativar escuta contínua Ei ${previewName}`}
+                  onClick={() => {
+                    const next = !wakeWordEnabled;
+                    setWakeWordEnabled(next);
+                    setWakeWordEnabledPref(next);
+                    notify(
+                      next
+                        ? `Escuta mãos-livres ativada para "Ei ${previewName}".`
+                        : 'Escuta mãos-livres desativada.',
+                      'info'
+                    );
+                  }}
+                  className={`jarvis-switch ${wakeWordEnabled ? 'is-checked' : ''}`}
+                >
+                  <span className="jarvis-switch__thumb" />
+                </button>
+              </div>
             </div>
-          )}
+
+            <div className="jarvis-setting-row" style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '12px' }}>
+              <div className="jarvis-setting-row__info">
+                <div className="jarvis-setting-row__title">Responder falando em voz alta</div>
+                <div className="jarvis-setting-row__desc">
+                  Quando você usa o microfone ou chama &ldquo;Ei {previewName}&rdquo;, o assistente lê a resposta em voz alta automaticamente.
+                </div>
+              </div>
+              <div className="jarvis-setting-row__control">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={autoSpeakEnabled}
+                  aria-label="Ativar resposta falada automática"
+                  onClick={() => {
+                    const next = !autoSpeakEnabled;
+                    setAutoSpeakEnabled(next);
+                    setVoiceAutoSpeakPref(next);
+                  }}
+                  className={`jarvis-switch ${autoSpeakEnabled ? 'is-checked' : ''}`}
+                >
+                  <span className="jarvis-switch__thumb" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="jarvis-settings-subcard" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <label style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+              Como {previewName} deve responder?
+            </label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '8px' }}>
+              {RESPONSE_STYLES.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  aria-pressed={profile.responseStyle === opt.id}
+                  onClick={() => setProfile((prev) => ({ ...prev, responseStyle: opt.id }))}
+                  className={`jarvis-choice-card ${profile.responseStyle === opt.id ? 'is-active' : ''}`}
+                >
+                  <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)' }}>{opt.label}</div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', lineHeight: 1.38 }}>{opt.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
 
           <fieldset
             disabled={!canEditProfile}
-            style={{ border: 0, padding: 0, margin: 0, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '16px' }}
+            style={{ border: 0, padding: 0, margin: 0, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '12px' }}
           >
             <div>
-              <label
-                htmlFor="profile-user-background"
-                style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-primary)', display: 'block', marginBottom: '4px' }}
-              >
-                O que o JARVIS deve saber sobre você para fornecer respostas melhores?
+              <label htmlFor="profile-user-background" className="user-profile-field-label">
+                O que {previewName} deve lembrar sobre você? (opcional)
               </label>
-              <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', margin: '0 0 8px 0' }}>
-                Ex: Suas linguagens preferidas, frameworks que você utiliza no dia a dia, projetos em andamento.
-              </p>
               <textarea
                 id="profile-user-background"
-                rows={3}
+                rows={2}
                 value={profile.userBackground}
                 onChange={(e) => setProfile({ ...profile, userBackground: e.target.value })}
                 className="jarvis-textarea"
                 style={{ resize: 'vertical' }}
-                placeholder="Ex: Trabalho principalmente com Python (FastAPI), Flutter para mobile e PostgreSQL."
+                placeholder="Ex: Sou empreendedor(a), estudo inglês toda manhã e gosto de listas práticas."
               />
             </div>
 
             <div>
-              <label
-                htmlFor="profile-response-guidelines"
-                style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-primary)', display: 'block', marginBottom: '4px' }}
-              >
-                Como você gostaria que o JARVIS respondesse e formatasse o código?
+              <label htmlFor="profile-response-guidelines" className="user-profile-field-label">
+                Regras extras de preferência (opcional)
               </label>
-              <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', margin: '0 0 8px 0' }}>
-                Ex: Padrões arquiteturais favoritos (Clean Architecture, SOLID, BLoC), comentários ou testes unitários.
-              </p>
               <textarea
                 id="profile-response-guidelines"
-                rows={3}
+                rows={2}
                 value={profile.responseGuidelines}
                 onChange={(e) => setProfile({ ...profile, responseGuidelines: e.target.value })}
                 className="jarvis-textarea"
                 style={{ resize: 'vertical' }}
-                placeholder="Ex: Sempre forneça código completo pronto para copiar. Use tipagem estrita no TypeScript."
+                placeholder="Ex: Prefiro explicações sem jargão técnico e com resumo no final."
               />
             </div>
           </fieldset>
 
           {canEditProfile && (
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '4px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
               <button type="submit" disabled={saving} className="btn btn-primary btn-sm">
                 <Save size={14} />
-                <span>{saving ? 'Salvando…' : 'Salvar Instruções'}</span>
+                <span>{saving ? 'Salvando…' : 'Salvar Preferências'}</span>
               </button>
             </div>
           )}
         </form>
       )}
 
-      {/* Aba: Cofre de Chaves */}
-      {activeTab === 'keys' && (
-        <section style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div className="jarvis-callout jarvis-callout--warning" role="status">
-            <strong style={{ color: 'var(--text-primary)', display: 'block', marginBottom: '6px' }}>
-              Gerenciamento centralizado no Cofre de Chaves
-            </strong>
-            As credenciais de provedores em nuvem são armazenadas de forma cifrada no módulo{' '}
-            <strong style={{ color: 'var(--text-primary)' }}>Gestor de Modelos</strong>. Nunca insira tokens ou senhas
-            nas instruções personalizadas.
-          </div>
-
-          {onNavigate && (
-            <div className="jarvis-settings-subcard">
-              <div className="jarvis-setting-row">
-                <div className="jarvis-setting-row__info">
-                  <div className="jarvis-setting-row__title">Cofre de Chaves & Provedores</div>
-                  <div className="jarvis-setting-row__desc">
-                    Configure chaves da OpenAI, Anthropic, Gemini, Groq ou OpenRouter e valide conectividade.
-                  </div>
-                </div>
-                <div className="jarvis-setting-row__control">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      onNavigate('models');
-                    }}
-                    className="btn btn-primary btn-sm"
-                  >
-                    <KeyRound size={14} />
-                    <span>Abrir Gestor de Modelos</span>
-                    <ArrowUpRight size={13} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* Aba: Motor & Setup */}
-      {activeTab === 'engine' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div className="jarvis-callout jarvis-callout--info">
-            <div className="jarvis-setting-row">
-              <div className="jarvis-setting-row__info">
-                <div
-                  style={{
-                    fontSize: '0.7rem',
-                    fontWeight: 600,
-                    letterSpacing: '0.05em',
-                    textTransform: 'uppercase',
-                    color: 'var(--accent-light)',
-                    marginBottom: '4px',
-                  }}
-                >
-                  Configuração centralizada
-                </div>
-                <strong style={{ fontSize: '0.92rem', color: 'var(--text-primary)', display: 'block' }}>
-                  Preferências de execução e modelos
-                </strong>
-                <p style={{ fontSize: '0.79rem', color: 'var(--text-secondary)', margin: '4px 0 0 0', lineHeight: 1.48 }}>
-                  A seleção efetiva de modelos e provedores é controlada pelo Gestor de Modelos e pelas políticas de execução.
-                </p>
-              </div>
-
-              {onOpenSetupWizard && (
-                <div className="jarvis-setting-row__control">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      onOpenSetupWizard();
-                    }}
-                    className="btn btn-primary btn-sm"
-                  >
-                    <Sparkles size={14} />
-                    <span>Abrir Assistente de Setup</span>
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="jarvis-settings-subcard">
-            <div className="jarvis-setting-row__title" style={{ marginBottom: '4px' }}>
-              Privacidade e políticas de dados
-            </div>
-            <div className="jarvis-setting-row__desc">
-              A proteção de dados depende das políticas e integrações efetivamente ativas. Consulte Segurança e o Gestor de Modelos para verificar os controles disponíveis nesta instalação.
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Aba: Dados & Backup */}
+      {/* Aba 3: Meus Dados & Backup */}
       {activeTab === 'data' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {isAdmin && (
             <div className="jarvis-settings-subcard">
               <div className="jarvis-setting-row">
                 <div className="jarvis-setting-row__info">
-                  <div className="jarvis-setting-row__title">Backup do sistema</div>
+                  <div className="jarvis-setting-row__title">Backup completo do Hub</div>
                   <div className="jarvis-setting-row__desc">
-                    Gera uma cópia do banco de dados SQLite do servidor. Disponível apenas para administradores.
+                    Cria uma cópia de segurança dos seus agentes, habilidades, fluxos e histórico no servidor.
                   </div>
                 </div>
                 <div className="jarvis-setting-row__control">
@@ -699,7 +717,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     className="btn btn-secondary btn-sm"
                   >
                     <Database size={14} color="var(--accent-light)" />
-                    <span>{backingUp ? 'Gerando Backup...' : 'Criar Backup SQLite'}</span>
+                    <span>{backingUp ? 'Gerando Backup...' : 'Fazer Backup'}</span>
                   </button>
                 </div>
               </div>
@@ -709,9 +727,9 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           <div className="jarvis-settings-subcard">
             <div className="jarvis-setting-row">
               <div className="jarvis-setting-row__info">
-                <div className="jarvis-setting-row__title">Exportar Conversa Atual</div>
+                <div className="jarvis-setting-row__title">Exportar minhas conversas</div>
                 <div className="jarvis-setting-row__desc">
-                  Exporta as mensagens da conversa atual guardadas neste navegador em formato JSON.
+                  Baixa um arquivo JSON com as mensagens salvas neste navegador.
                 </div>
               </div>
               <div className="jarvis-setting-row__control">
@@ -723,6 +741,32 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             </div>
           </div>
 
+          {onOpenSetupWizard && (
+            <div className="jarvis-settings-subcard">
+              <div className="jarvis-setting-row">
+                <div className="jarvis-setting-row__info">
+                  <div className="jarvis-setting-row__title">Assistente de Configuração Inicial</div>
+                  <div className="jarvis-setting-row__desc">
+                    Reabra o passo a passo guiado para revisar provedores e preferências iniciais.
+                  </div>
+                </div>
+                <div className="jarvis-setting-row__control">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenSetupWizard();
+                    }}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    <Sparkles size={14} />
+                    <span>Abrir Assistente</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="jarvis-callout jarvis-callout--danger">
             <div className="jarvis-setting-row">
               <div className="jarvis-setting-row__info">
@@ -730,11 +774,11 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                   Limpar Histórico Local
                 </div>
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '3px' }}>
-                  Apaga o histórico de conversas e o catálogo de sessões guardados neste navegador para esta conta.
+                  Remove as conversas guardadas localmente neste navegador para a sua conta.
                 </div>
               </div>
               <div className="jarvis-setting-row__control">
-                <button type="button" onClick={handleClearHistory} className="btn btn-danger btn-sm">
+                <button type="button" onClick={() => setConfirmClearOpen(true)} className="btn btn-danger btn-sm">
                   <Trash2 size={14} />
                   <span>Limpar Dados</span>
                 </button>
@@ -744,24 +788,15 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
         </div>
       )}
 
-      {/* Aba: Dispositivos Móveis & Acessos */}
+      {/* Aba 4: Dispositivos & Celular */}
       {activeTab === 'devices' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div>
-            <h4 style={{ fontSize: '0.96rem', fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 4px 0' }}>
-              Conexão com App Mobile / Android
-            </h4>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.48 }}>
-              Conecte seu smartphone Android ao JARVIS Hub para enviar comandos de voz e receber notificações sincronizadas.
-            </p>
-          </div>
-
           <div className="jarvis-settings-subcard">
             <div className="jarvis-setting-row">
               <div className="jarvis-setting-row__info">
-                <div className="jarvis-setting-row__title">Emparelhar Celular Android</div>
+                <div className="jarvis-setting-row__title">Conectar Celular Android</div>
                 <div className="jarvis-setting-row__desc">
-                  Gera um token exclusivo para a sua conta, isolado dos dados de outros usuários.
+                  Pareie seu smartphone com QR Code para falar com {previewName} de qualquer lugar com acesso exclusivo à sua conta.
                 </div>
               </div>
               <div className="jarvis-setting-row__control">
@@ -774,7 +809,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                   className="btn btn-primary btn-sm"
                 >
                   <Smartphone size={14} />
-                  <span>Conectar Android</span>
+                  <span>Conectar Celular</span>
                 </button>
               </div>
             </div>
@@ -783,9 +818,9 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           <div className="jarvis-settings-subcard">
             <div className="jarvis-setting-row">
               <div className="jarvis-setting-row__info">
-                <div className="jarvis-setting-row__title">Gestão de Acessos & Usuários</div>
+                <div className="jarvis-setting-row__title">Contas e Permissões</div>
                 <div className="jarvis-setting-row__desc">
-                  Gerencie contas, tokens de administrador e permissões de acesso ao servidor.
+                  Gerencie quem tem acesso ao servidor e revogue dispositivos conectados quando precisar.
                 </div>
               </div>
               <div className="jarvis-setting-row__control">
@@ -797,7 +832,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                   }}
                   className="btn btn-secondary btn-sm"
                 >
-                  <span>Gerir Acessos</span>
+                  <ShieldCheck size={14} />
+                  <span>Gerenciar Acessos</span>
                 </button>
               </div>
             </div>
@@ -808,7 +844,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       <ConfirmDialog
         isOpen={confirmClearOpen}
         title="Limpar histórico local"
-        description="Tem certeza de que deseja apagar todo o histórico de conversas locais? Esta ação não pode ser desfeita."
+        description="Tem certeza de que deseja apagar o histórico de conversas salvo neste navegador? Esta ação não pode ser desfeita."
         confirmLabel="Apagar histórico"
         tone="danger"
         onConfirm={confirmClearHistory}

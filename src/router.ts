@@ -30,6 +30,9 @@ export const TAB_PATHS: Record<string, string> = {
   learning: '/learning',
   settings: '/settings',
   companion: '/companion',
+  creative_studio: '/creative-studio',
+  app_builder: '/app-builder',
+  github_import: '/github-import',
 };
 
 const PATH_TABS: Record<string, string> = {
@@ -78,6 +81,19 @@ const PATH_TABS: Record<string, string> = {
   companion: 'companion',
   voice: 'companion',
   pwa: 'companion',
+  'creative-studio': 'creative_studio',
+  creative_studio: 'creative_studio',
+  planilhas: 'creative_studio',
+  excel: 'creative_studio',
+  midia: 'creative_studio',
+  media: 'creative_studio',
+  'app-builder': 'app_builder',
+  app_builder: 'app_builder',
+  construtor: 'app_builder',
+  apps: 'app_builder',
+  'github-import': 'github_import',
+  github_import: 'github_import',
+  github: 'github_import',
 };
 
 export const KNOWN_TABS = new Set(Object.keys(TAB_PATHS));

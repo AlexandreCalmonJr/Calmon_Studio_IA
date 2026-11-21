@@ -1,11 +1,12 @@
 import React from 'react';
 import { Users, CheckCircle, XCircle, Trash2, BookOpen, Wrench } from 'lucide-react';
-import { AgentInfo, SkillInfo } from '../../types';
+import { SkillInfo, AgentInfo } from '../../types';
 import { ALL_26_AGENTS } from '../../data/agentsCatalog';
+import { resolveSkillDomainLabel } from '../../services/domainCatalog';
 
 interface SkillCardProps {
   skill: SkillInfo;
-  activeAgents?: AgentInfo[];
+  agents?: AgentInfo[];
   onToggle: (id: string) => void;
   onEditAgents: (skill: SkillInfo) => void;
   onViewInstructions?: (skill: SkillInfo) => void;
@@ -14,19 +15,9 @@ interface SkillCardProps {
   isAdmin?: boolean;
 }
 
-const DOMAIN_LABELS: Record<string, string> = {
-  flutter: 'Flutter',
-  web: 'Web',
-  backend: 'Backend',
-  security: 'Segurança & OWASP',
-  qa: 'QA & Testes',
-  data: 'Dados & BI',
-  ops: 'DevOps & Infra',
-};
-
 export const SkillCard: React.FC<SkillCardProps> = ({
   skill,
-  activeAgents = [],
+  agents = [],
   onToggle,
   onEditAgents,
   onViewInstructions,
@@ -41,7 +32,7 @@ export const SkillCard: React.FC<SkillCardProps> = ({
     skill.id.startsWith('user_');
   const canManageThisSkill = canManageSkills && (isAdmin || isPrivateSkill);
 
-  const domainLabel = DOMAIN_LABELS[skill.domain.toLowerCase()] || skill.domain.toUpperCase();
+  const domainLabel = resolveSkillDomainLabel(skill.domain);
   const originLabel =
     skill.origin && (skill.origin.includes('github') || skill.origin === 'imported_ecc')
       ? 'ECC Oficial'
@@ -50,13 +41,13 @@ export const SkillCard: React.FC<SkillCardProps> = ({
         : null;
 
   const assigned = (skill.assigned_agents || []).map((role) => {
-    const real = activeAgents.find((a) => a.role === role);
-    if (real) {
+    const liveAg = agents.find((a) => a.role === role);
+    if (liveAg) {
       return {
-        role: real.role,
-        name: real.proper_name ? `${real.proper_name} (${real.name})` : real.name,
-        color: real.mascot?.color || '#f97316',
-        categoryLabel: real.handle || 'Especialista',
+        role: liveAg.role,
+        name: liveAg.proper_name || liveAg.name,
+        color: liveAg.mascot?.color || 'var(--accent-color)',
+        categoryLabel: liveAg.name || 'Especialista',
       };
     }
     const ag = ALL_26_AGENTS.find((a) => a.role === role);

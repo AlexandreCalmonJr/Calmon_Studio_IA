@@ -28,6 +28,7 @@ import {
 } from '../../services/mascots';
 import { MascotAvatar } from '../../shared/common/MascotAvatar';
 import { notify } from '../../shared/common/Toast';
+import { canUninstallAgent } from '../../services/agentTemplates';
 
 interface AgentCreatorModalProps {
   isOpen: boolean;
@@ -172,7 +173,6 @@ export const AgentCreatorModal: React.FC<AgentCreatorModalProps> = ({
         await createAgent(payload);
         notify(`Especialista ${cleanProper} (${payload.handle}) criado com sucesso!`, 'success');
       }
-      window.dispatchEvent(new Event('jarvis:agents-updated'));
       await onSaved();
       onClose();
     } catch (err: any) {
@@ -189,7 +189,6 @@ export const AgentCreatorModal: React.FC<AgentCreatorModalProps> = ({
     try {
       await rollbackAgentVersion(editingAgent.role, version);
       notify(`Versão v${version} de ${editingAgent.proper_name || editingAgent.name} restaurada!`, 'success');
-      window.dispatchEvent(new Event('jarvis:agents-updated'));
       await onSaved();
       onClose();
     } catch (err: any) {
@@ -200,17 +199,16 @@ export const AgentCreatorModal: React.FC<AgentCreatorModalProps> = ({
   };
 
   const handleDelete = async () => {
-    if (!editingAgent?.is_custom) return;
+    if (!editingAgent || !canUninstallAgent(editingAgent)) return;
     setSaving(true);
     setError(null);
     try {
       await deleteAgent(editingAgent.role);
-      notify(`Especialista ${editingAgent.proper_name || editingAgent.name} removido.`, 'info');
-      window.dispatchEvent(new Event('jarvis:agents-updated'));
+      notify(`Especialista ${editingAgent.proper_name || editingAgent.name} desinstalado.`, 'info');
       await onSaved();
       onClose();
     } catch (err: any) {
-      setError(err instanceof Error ? err.message : 'Não foi possível excluir este especialista.');
+      setError(err instanceof Error ? err.message : 'Não foi possível desinstalar este especialista.');
     } finally {
       setSaving(false);
     }
@@ -755,7 +753,7 @@ export const AgentCreatorModal: React.FC<AgentCreatorModalProps> = ({
               }}
             >
               <div>
-                {editingAgent?.is_custom && (
+                {editingAgent && canUninstallAgent(editingAgent) && (
                   <button
                     type="button"
                     disabled={saving}
@@ -764,7 +762,7 @@ export const AgentCreatorModal: React.FC<AgentCreatorModalProps> = ({
                     style={{ color: '#f87171' }}
                   >
                     <Trash2 size={14} />
-                    <span>Excluir</span>
+                    <span>Desinstalar</span>
                   </button>
                 )}
               </div>

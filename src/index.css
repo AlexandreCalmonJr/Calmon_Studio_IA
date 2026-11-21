@@ -1122,7 +1122,7 @@ textarea {
 }
 
 .openbot-session-card .openbot-card-delete-btn {
-  opacity: 0;
+  opacity: 0.62;
   color: var(--text-muted);
   transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
 }

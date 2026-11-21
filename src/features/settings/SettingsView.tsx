@@ -41,6 +41,12 @@ import {
   DEFAULT_ASSISTANT_NAME,
   normalizeAssistantName,
 } from '../../services/assistantIdentity';
+import {
+  getVoiceAutoSpeakPref,
+  getWakeWordEnabledPref,
+  setVoiceAutoSpeakPref,
+  setWakeWordEnabledPref,
+} from '../../hooks/useWakeWordListener';
 
 interface SettingsViewProps {
   initialSubTab?: string;
@@ -120,6 +126,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     experienceMode: identity.experienceMode,
   }));
   const [savingProfile, setSavingProfile] = useState(false);
+  const [wakeWordEnabled, setWakeWordEnabled] = useState<boolean>(() => getWakeWordEnabledPref());
+  const [autoSpeakEnabled, setAutoSpeakEnabled] = useState<boolean>(() => getVoiceAutoSpeakPref());
+
+  useEffect(() => {
+    const syncVoice = () => {
+      setWakeWordEnabled(getWakeWordEnabledPref());
+      setAutoSpeakEnabled(getVoiceAutoSpeakPref());
+    };
+    window.addEventListener('jarvis_voice_prefs_changed', syncVoice);
+    return () => window.removeEventListener('jarvis_voice_prefs_changed', syncVoice);
+  }, []);
 
   useEffect(() => {
     setProfile((prev) => ({
@@ -719,8 +736,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <>
               <PageHeader
                 icon={<User size={18} />}
-                title="Perfil e Identidade"
-                subtitle="Personalize como os agentes chamam você e as diretrizes permanentes de código."
+                title="Perfil & Identidade do Assistente"
+                subtitle="Personalize seu nome, como chamar o assistente por voz e o estilo ideal de resposta."
                 actions={
                   <button
                     type="button"
@@ -734,13 +751,81 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 }
               />
 
-              <section className="jarvis-settings-card" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {/* Cartão Resumo + Prévia de Voz */}
+              <section
+                className="jarvis-settings-card"
+                style={{
+                  background: 'linear-gradient(135deg, rgba(249,115,22,0.11) 0%, rgba(17,22,33,0.95) 68%)',
+                  borderColor: 'var(--border-accent)',
+                }}
+              >
+                <div className="jarvis-setting-row">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                    <div
+                      style={{
+                        width: '52px',
+                        height: '52px',
+                        borderRadius: '14px',
+                        backgroundColor: 'var(--bg-primary)',
+                        border: '1px solid var(--border-accent)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '1.55rem',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {profile.avatarIcon || '🙂'}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                        {profile.displayName || 'Usuário'}
+                      </div>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                        Assistente ativo:{' '}
+                        <strong style={{ color: 'var(--accent-light)' }}>
+                          {normalizeAssistantName(profile.assistantName)}
+                        </strong>{' '}
+                        · {identity.experienceMode === 'simple' ? 'Modo Dia a Dia' : 'Modo Avançado'}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '3px' }}>
+                        Comando de voz: &ldquo;Ei {normalizeAssistantName(profile.assistantName)}, como posso ajudar?&rdquo;
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const clean = normalizeAssistantName(profile.assistantName);
+                      try {
+                        if ('speechSynthesis' in window) {
+                          window.speechSynthesis.cancel();
+                          const utter = new SpeechSynthesisUtterance(`Oi! Aqui é ${clean}. Como posso ajudar você hoje?`);
+                          utter.lang = 'pt-BR';
+                          window.speechSynthesis.speak(utter);
+                        } else {
+                          notify(`Prévia: "Ei ${clean}, como posso ajudar?"`, 'info');
+                        }
+                      } catch {
+                        notify(`Prévia: "Ei ${clean}, como posso ajudar?"`, 'info');
+                      }
+                    }}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    <Volume2 size={14} color="var(--accent-light)" />
+                    <span>Ouvir saudação</span>
+                  </button>
+                </div>
+              </section>
+
+              <section className="jarvis-settings-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <div>
                   <label className="user-profile-field-label" htmlFor="settings-assistant-name">
                     Nome do seu Assistente Principal
                   </label>
                   <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '0 0 10px' }}>
-                    Personalize como você chama seu assistente (ex.: JARVIS, João, Maria). Atualiza o menu, saudação e chat instantaneamente.
+                    Escolha o nome que você quer falar para chamar o assistente (ex.: JARVIS, Luna, Maria, João).
                   </p>
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' }}>
                     {ASSISTANT_NAME_PRESETS.map((preset) => (
@@ -771,7 +856,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       onChange={(e) => setProfile({ ...profile, assistantName: e.target.value })}
                       className="jarvis-input"
                       style={{ flex: 1, minWidth: '200px' }}
-                      placeholder="Ex: JARVIS, João, Maria..."
+                      placeholder="Ex: JARVIS, Luna, João, Maria..."
                     />
                     <button
                       type="button"
@@ -787,19 +872,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </div>
                 </div>
 
-                <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '12px' }}>
-                  <label className="user-profile-field-label">Modo da Interface</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px' }}>
+                <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '14px' }}>
+                  <label className="user-profile-field-label">Modo de Uso do Hub</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
                     {[
                       {
                         id: 'simple' as const,
-                        label: 'Modo Simples (Pessoal & Estudos)',
-                        desc: 'Menu enxuto sem termos técnicos.',
+                        label: 'Modo Dia a Dia (Simples e Intuitivo)',
+                        desc: 'Interface limpa com Início, Conversas, Meus Agentes, Fluxos, Tarefas e Cadernos.',
                       },
                       {
                         id: 'engineering' as const,
-                        label: 'Modo Completo (Engenharia & Segurança)',
-                        desc: 'Acesso completo a estúdios, governança e código.',
+                        label: 'Modo Avançado (Engenharia & Segurança)',
+                        desc: 'Acesso completo a Coding Agent, Estúdios, Governança e diagnósticos.',
                       },
                     ].map((opt) => (
                       <button
@@ -811,28 +896,102 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           void identity.setExperienceMode(opt.id);
                           notify(
                             opt.id === 'simple'
-                              ? 'Modo Simples ativado.'
-                              : 'Modo Completo (Engenharia) ativado.',
+                              ? 'Modo Dia a Dia (Simples) ativado.'
+                              : 'Modo Avançado (Engenharia) ativado.',
                             'info',
                           );
                         }}
                         className={`jarvis-choice-card ${identity.experienceMode === opt.id ? 'is-active' : ''}`}
                       >
-                        <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                        <div style={{ fontSize: '0.83rem', fontWeight: 600, color: 'var(--text-primary)' }}>
                           {opt.label}
                         </div>
-                        <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)' }}>{opt.desc}</div>
+                        <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>{opt.desc}</div>
                       </button>
                     ))}
                   </div>
                 </div>
               </section>
 
-              <section className="jarvis-settings-card">
+              {/* Voz & Preferências de Resposta */}
+              <section className="jarvis-settings-card" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div className="jarvis-setting-row">
+                  <div className="jarvis-setting-row__info">
+                    <div className="jarvis-setting-row__title">
+                      Ouvir &ldquo;Ei {normalizeAssistantName(profile.assistantName)}&rdquo; automaticamente
+                    </div>
+                    <div className="jarvis-setting-row__desc">
+                      Permite chamar seu assistente por voz sem precisar clicar no botão do microfone.
+                    </div>
+                  </div>
+                  <div className="jarvis-setting-row__control">
+                    {renderToggle(
+                      wakeWordEnabled,
+                      () => {
+                        const next = !wakeWordEnabled;
+                        setWakeWordEnabled(next);
+                        setWakeWordEnabledPref(next);
+                        notify(
+                          next
+                            ? `Escuta mãos-livres ativada para "Ei ${normalizeAssistantName(profile.assistantName)}".`
+                            : 'Escuta mãos-livres pausada.',
+                          'info',
+                        );
+                      },
+                      'Ativar escuta contínua por nome',
+                    )}
+                  </div>
+                </div>
+
+                <div className="jarvis-setting-row" style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '12px' }}>
+                  <div className="jarvis-setting-row__info">
+                    <div className="jarvis-setting-row__title">Responder falando em voz alta</div>
+                    <div className="jarvis-setting-row__desc">
+                      Reproduz as respostas em áudio automaticamente durante conversas por voz.
+                    </div>
+                  </div>
+                  <div className="jarvis-setting-row__control">
+                    {renderToggle(
+                      autoSpeakEnabled,
+                      () => {
+                        const next = !autoSpeakEnabled;
+                        setAutoSpeakEnabled(next);
+                        setVoiceAutoSpeakPref(next);
+                      },
+                      'Ativar resposta falada automática',
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '12px' }}>
+                  <label className="user-profile-field-label">Estilo de resposta preferido</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(175px, 1fr))', gap: '8px' }}>
+                    {[
+                      { id: 'concise' as const, label: 'Direto ao ponto', desc: 'Curto, claro e prático.' },
+                      { id: 'educational' as const, label: 'Explicativo', desc: 'Didático com exemplos simples.' },
+                      { id: 'detailed' as const, label: 'Passo a passo', desc: 'Completo e bem detalhado.' },
+                    ].map((st) => (
+                      <button
+                        key={st.id}
+                        type="button"
+                        aria-pressed={profile.responseStyle === st.id}
+                        onClick={() => setProfile((prev) => ({ ...prev, responseStyle: st.id }))}
+                        className={`jarvis-choice-card ${profile.responseStyle === st.id ? 'is-active' : ''}`}
+                      >
+                        <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)' }}>{st.label}</div>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{st.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </section>
+
+              {/* Seus Dados Pessoais & Contexto */}
+              <section className="jarvis-settings-card" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 <div className="user-profile-grid">
                   <div>
                     <label className="user-profile-field-label" htmlFor="settings-display-name">
-                      Nome de exibição
+                      Seu nome
                     </label>
                     <input
                       id="settings-display-name"
@@ -840,13 +999,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       value={profile.displayName}
                       onChange={(e) => setProfile({ ...profile, displayName: e.target.value })}
                       className="jarvis-input"
-                      placeholder="Ex: Carlos Silva"
+                      placeholder="Ex: Ana Souza"
                     />
                   </div>
 
                   <div>
                     <label className="user-profile-field-label" htmlFor="settings-role-title">
-                      Cargo / Especialidade
+                      Seu foco principal (opcional)
                     </label>
                     <input
                       id="settings-role-title"
@@ -854,36 +1013,38 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       value={profile.roleTitle}
                       onChange={(e) => setProfile({ ...profile, roleTitle: e.target.value })}
                       className="jarvis-input"
-                      placeholder="Ex: Engenheiro de Software"
+                      placeholder="Ex: Estudos, Negócios, Casa ou Tecnologia"
                     />
                   </div>
                 </div>
 
                 <div>
                   <label className="user-profile-field-label" htmlFor="settings-user-bg">
-                    Contexto profissional & Stack
+                    Sobre você e sua rotina (opcional)
                   </label>
                   <textarea
                     id="settings-user-bg"
                     value={profile.userBackground}
                     onChange={(e) => setProfile({ ...profile, userBackground: e.target.value })}
-                    rows={3}
+                    rows={2}
                     className="jarvis-textarea"
                     style={{ resize: 'vertical' }}
+                    placeholder="Ex: Quero organizar finanças da casa, estudar inglês e criar planilhas rapidamente."
                   />
                 </div>
 
                 <div>
                   <label className="user-profile-field-label" htmlFor="settings-guidelines">
-                    Regras Mandatórias de Resposta
+                    Preferências extras de resposta (opcional)
                   </label>
                   <textarea
                     id="settings-guidelines"
                     value={profile.responseGuidelines}
                     onChange={(e) => setProfile({ ...profile, responseGuidelines: e.target.value })}
-                    rows={3}
+                    rows={2}
                     className="jarvis-textarea"
                     style={{ resize: 'vertical' }}
+                    placeholder="Ex: Evite termos complicados e destaque sempre os próximos passos."
                   />
                 </div>
               </section>

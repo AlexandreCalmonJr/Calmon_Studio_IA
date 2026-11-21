@@ -31,6 +31,8 @@ export interface AgentUpsertPayload {
   delegation_targets?: string[];
   assigned_key_id?: string;
   mascot?: AgentMascotMeta;
+  template_id?: string;
+  installed_skills?: string[];
   change_summary?: string;
 }
 
@@ -57,6 +59,21 @@ export async function deleteAgent(role: string): Promise<{ deleted: boolean }> {
     method: 'DELETE',
   });
   return handleApiResponse<{ deleted: boolean }>(res, 'Falha ao remover especialista.');
+}
+
+export async function updateAgentSkills(
+  role: string,
+  skillIds: string[]
+): Promise<{ agent: AgentInfo; attached_skill_ids: string[] }> {
+  const res = await apiFetch(`${API_BASE}/agents/${encodeURIComponent(role)}/skills`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ skill_ids: skillIds }),
+  });
+  return handleApiResponse<{ agent: AgentInfo; attached_skill_ids: string[] }>(
+    res,
+    'Falha ao atualizar habilidades vinculadas ao agente.'
+  );
 }
 
 export async function fetchAgentVersions(role: string): Promise<AgentVersionSnapshot[]> {

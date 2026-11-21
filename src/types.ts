@@ -136,6 +136,8 @@ export interface AgentInfo {
   assigned_key_id?: string;
   mascot?: AgentMascotMeta;
   is_custom?: boolean;
+  template_id?: string;
+  installed_skills?: string[];
   version?: number;
   updated_at?: string;
 }

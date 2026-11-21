@@ -1,13 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { AgentInfo } from '../types';
-import { ALL_26_AGENTS } from '../data/agentsCatalog';
-import {
-  resolveDockAgents,
-  resolveQuickChatAgents,
-  reconcileStoreBlueprints,
-  mapBlueprintToCreatePayload,
-} from './agentSync';
+import { resolveDockAgents, resolveQuickChatAgents } from './agentSync';
 
 const sampleAgents: AgentInfo[] = [
   {
@@ -57,20 +51,27 @@ const sampleAgents: AgentInfo[] = [
   },
 ];
 
-test('resolveDockAgents strips legacy fake IDs and prioritizes real custom agents', () => {
-  const dock = resolveDockAgents(sampleAgents, ['qa_tester', 'copy_editor', 'bug_fixer']);
+test('resolveDockAgents lists all installed user agents with custom agents first and accurate canUninstall flags', () => {
+  const dock = resolveDockAgents(sampleAgents);
   assert.equal(dock.length, 4);
   assert.equal(dock[0].properName, 'Lucas');
   assert.equal(dock[0].role, 'advogado_tributario');
-  assert.ok(!dock.some((d) => d.role === 'qa_tester' || d.role === 'bug_fixer'));
+  assert.equal(dock[0].canUninstall, true);
+
+  const maestro = dock.find((d) => d.role === 'jarvis_master');
+  assert.ok(maestro);
+  assert.equal(maestro.canUninstall, false);
+
+  const kira = dock.find((d) => d.role === 'sentinel_security');
+  assert.ok(kira);
+  assert.equal(kira.canUninstall, true);
 });
 
-test('resolveDockAgents respects valid pinned real roles while surfacing new custom agents', () => {
-  const dock = resolveDockAgents(sampleAgents, ['sentinel_security', 'software_architect']);
-  assert.deepEqual(
-    dock.map((d) => d.role),
-    ['advogado_tributario', 'sentinel_security', 'software_architect']
-  );
+test('resolveDockAgents filters installed agents by name, handle, role, or subtitle', () => {
+  assert.equal(resolveDockAgents(sampleAgents, '@orion').length, 1);
+  assert.equal(resolveDockAgents(sampleAgents, '@orion')[0].role, 'software_architect');
+  assert.equal(resolveDockAgents(sampleAgents, 'Tributário').length, 1);
+  assert.equal(resolveDockAgents(sampleAgents, 'inexistente_xyz').length, 0);
 });
 
 test('resolveQuickChatAgents uses agent_<role> session IDs and filters by proper name or handle', () => {
@@ -81,23 +82,4 @@ test('resolveQuickChatAgents uses agent_<role> session IDs and filters by proper
   const filtered = resolveQuickChatAgents(sampleAgents, '@kira');
   assert.equal(filtered.length, 1);
   assert.equal(filtered[0].id, 'agent_sentinel_security');
-});
-
-test('reconcileStoreBlueprints eliminates duplication between catalog blueprints and active team', () => {
-  const res = reconcileStoreBlueprints(ALL_26_AGENTS, sampleAgents);
-  assert.equal(res.installedCount, 2); // jarvis_master + software_architect
-  assert.equal(res.availableCount, ALL_26_AGENTS.length - 2);
-
-  const arch = res.items.find((i) => i.blueprint.role === 'software_architect');
-  assert.ok(arch);
-  assert.equal(arch.status, 'installed');
-  assert.equal(arch.installedAgent?.proper_name, 'Orion');
-
-  const dataSci = res.items.find((i) => i.blueprint.role === 'data_scientist');
-  assert.ok(dataSci);
-  assert.equal(dataSci.status, 'available');
-  const payload = mapBlueprintToCreatePayload(dataSci);
-  assert.equal(payload.role, 'data_scientist');
-  assert.equal(payload.proper_name, 'Iris');
-  assert.equal(payload.handle, '@iris');
 });

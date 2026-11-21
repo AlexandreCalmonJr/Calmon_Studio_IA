@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { notify } from '../../shared/common/Toast';
 import {
+  fetchAgents,
   fetchWorkflowsHub,
   generateWorkflowFromPrompt,
   saveWorkflowRecord,
@@ -31,6 +32,7 @@ import {
   executeWorkflowNow,
   subscribeJarvisRealtime,
 } from '../../api';
+import type { AgentInfo } from '../../types';
 import type {
   SavedWorkflowRecord,
   WorkflowRunRecord,
@@ -99,6 +101,7 @@ export const WorkflowCanvasView: React.FC = () => {
   const [workflows, setWorkflows] = useState<SavedWorkflowRecord[]>([]);
   const [templates, setTemplates] = useState<WorkflowTemplateItem[]>([]);
   const [runs, setRuns] = useState<WorkflowRunRecord[]>([]);
+  const [installedAgents, setInstalledAgents] = useState<AgentInfo[]>([]);
   const [activeWorkflowId, setActiveWorkflowId] = useState<string | null>(null);
 
   const [workflowTitle, setWorkflowTitle] = useState('Rotina Proativa Inteligente');
@@ -178,6 +181,23 @@ export const WorkflowCanvasView: React.FC = () => {
       });
     return () => {
       active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const loadAgents = () => {
+      fetchAgents()
+        .then((list) => {
+          if (active && Array.isArray(list)) setInstalledAgents(list);
+        })
+        .catch(() => {});
+    };
+    loadAgents();
+    window.addEventListener('jarvis:agents-updated', loadAgents);
+    return () => {
+      active = false;
+      window.removeEventListener('jarvis:agents-updated', loadAgents);
     };
   }, []);
 
@@ -372,7 +392,8 @@ export const WorkflowCanvasView: React.FC = () => {
     type: WorkflowNode['type'],
     title: string,
     subtitle: string,
-    iconName: WorkflowNode['iconName']
+    iconName: WorkflowNode['iconName'],
+    agentRole?: string
   ) => {
     const id = `node-${Date.now().toString(36)}`;
     const lastNode = nodes[nodes.length - 1];
@@ -385,6 +406,7 @@ export const WorkflowCanvasView: React.FC = () => {
       x: lastNode ? lastNode.x + 310 : 120,
       y: lastNode ? lastNode.y : 180,
       status: 'idle',
+      agentRole,
     };
     setNodes((prev) => [...prev, newNode]);
     const connectFrom = selectedNodeId || lastNode?.id;
@@ -393,15 +415,24 @@ export const WorkflowCanvasView: React.FC = () => {
     }
     setSelectedNodeId(id);
     setAddNodeMenuOpen(false);
-    notify(`Nó "${title}" adicionado ao fluxo.`, 'info');
+    notify(`Passo "${title}" adicionado ao fluxo.`, 'info');
   };
+
+  const handleUpdateSelectedNode = (patch: Partial<WorkflowNode>) => {
+    if (!selectedNodeId) return;
+    setNodes((prev) =>
+      prev.map((n) => (n.id === selectedNodeId ? { ...n, ...patch } : n))
+    );
+  };
+
+  const selectedNode = nodes.find((n) => n.id === selectedNodeId) || null;
 
   const handleDeleteSelected = () => {
     if (!selectedNodeId) return;
     setNodes((prev) => prev.filter((n) => n.id !== selectedNodeId));
     setConnections((prev) => prev.filter((c) => c.fromNodeId !== selectedNodeId && c.toNodeId !== selectedNodeId));
     setSelectedNodeId(null);
-    notify('Nó removido do fluxo.', 'info');
+    notify('Passo removido do fluxo.', 'info');
   };
 
   const getNodeCenter = (id: string) => {
@@ -970,12 +1001,12 @@ export const WorkflowCanvasView: React.FC = () => {
               {addNodeMenuOpen && (
                 <div
                   className="jarvis-popover"
-                  style={{ position: 'absolute', bottom: '44px', right: 0, width: '240px', zIndex: 60 }}
+                  style={{ position: 'absolute', bottom: '44px', right: 0, width: '260px', maxHeight: '320px', overflowY: 'auto', zIndex: 60 }}
                 >
                   <div className="jarvis-popover__label">Adicionar ao fluxo</div>
                   <button
                     type="button"
-                    onClick={() => handleAddNode('trigger', 'Agendamento Cron', `Rotina automática (${scheduleCron})`, 'clock')}
+                    onClick={() => handleAddNode('trigger', 'Agendamento Automático', `Executa conforme agenda (${scheduleCron})`, 'clock')}
                     className="btn btn-ghost btn-sm btn-block btn-start"
                   >
                     <Clock size={14} color="var(--accent-light)" />
@@ -983,33 +1014,197 @@ export const WorkflowCanvasView: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleAddNode('agent', 'Atlas · Pesquisa & Arquitetura', 'Investiga fontes e consolida plano', 'bot')}
-                    className="btn btn-ghost btn-sm btn-block btn-start"
-                  >
-                    <Bot size={14} color="var(--accent-light)" />
-                    <span>Especialista: Atlas</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleAddNode('agent', 'Kira · Sentinela Segurança', 'Audita riscos e valida permissões', 'bot')}
-                    className="btn btn-ghost btn-sm btn-block btn-start"
-                  >
-                    <Bot size={14} color="#ef4444" />
-                    <span>Especialista: Kira</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleAddNode('action', 'Gerar Entregável (Slides / PDF)', 'Produz artefato pronto e salva no Cérebro', 'sparkles')}
+                    onClick={() => handleAddNode('action', 'Salvar Resultado & Avisar', 'Gera entregável e salva no seu Cérebro', 'sparkles')}
                     className="btn btn-ghost btn-sm btn-block btn-start"
                   >
                     <Sparkles size={14} color="#fbbf24" />
-                    <span>Ação: Artefato + Cérebro</span>
+                    <span>Ação: Entregável + Notificação</span>
                   </button>
+                  <div className="jarvis-popover__label" style={{ marginTop: '6px' }}>
+                    Agentes instalados ({installedAgents.length})
+                  </div>
+                  {(installedAgents.length > 0 ? installedAgents.slice(0, 10) : []).map((ag) => (
+                    <button
+                      key={ag.role}
+                      type="button"
+                      onClick={() =>
+                        handleAddNode(
+                          'agent',
+                          ag.name || ag.role,
+                          ag.mission || 'Executa a etapa com a especialidade deste agente',
+                          'bot',
+                          ag.role
+                        )
+                      }
+                      className="btn btn-ghost btn-sm btn-block btn-start"
+                    >
+                      <Bot size={14} color="var(--accent-light)" />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {ag.name || ag.role}
+                      </span>
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
           </div>
         </div>
+
+        {/* Right Node Editor Drawer (appears when a node is selected and Run Log is closed) */}
+        {selectedNode && !showRunLog && (
+          <aside
+            data-testid="workflow-node-editor"
+            aria-label="Editor do Passo Selecionado"
+            style={{
+              width: '340px',
+              maxWidth: '90vw',
+              backgroundColor: 'var(--bg-secondary)',
+              borderLeft: '1px solid var(--border-color)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflowY: 'auto',
+              flexShrink: 0,
+            }}
+          >
+            <div
+              style={{
+                padding: '12px 14px',
+                borderBottom: '1px solid var(--border-color)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <strong style={{ fontSize: '0.86rem', color: 'var(--text-primary)' }}>Editar Passo do Fluxo</strong>
+              <button
+                type="button"
+                onClick={() => setSelectedNodeId(null)}
+                className="btn btn-ghost btn-icon-sm"
+                aria-label="Fechar editor de passo"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            <div style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label
+                  htmlFor="wf-node-type"
+                  style={{ display: 'block', fontSize: '0.74rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}
+                >
+                  Tipo de etapa
+                </label>
+                <select
+                  id="wf-node-type"
+                  className="jarvis-select"
+                  value={selectedNode.type}
+                  onChange={(e) => {
+                    const nextType = e.target.value as WorkflowNode['type'];
+                    const iconByType: Record<WorkflowNode['type'], WorkflowNode['iconName']> = {
+                      trigger: 'clock',
+                      agent: 'bot',
+                      condition: 'zap',
+                      action: 'sparkles',
+                      note: 'note',
+                    };
+                    handleUpdateSelectedNode({ type: nextType, iconName: iconByType[nextType] });
+                  }}
+                >
+                  <option value="trigger">Gatilho (Quando iniciar)</option>
+                  <option value="agent">Agente Instalado</option>
+                  <option value="action">Ação / Entrega</option>
+                  <option value="condition">Condição / Verificação</option>
+                  <option value="note">Anotação</option>
+                </select>
+              </div>
+
+              {selectedNode.type === 'agent' && (
+                <div>
+                  <label
+                    htmlFor="wf-node-agent"
+                    style={{ display: 'block', fontSize: '0.74rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}
+                  >
+                    Agente responsável ({installedAgents.length} instalados)
+                  </label>
+                  <select
+                    id="wf-node-agent"
+                    className="jarvis-select"
+                    value={selectedNode.agentRole || ''}
+                    onChange={(e) => {
+                      const role = e.target.value;
+                      const chosen = installedAgents.find((a) => a.role === role);
+                      handleUpdateSelectedNode({
+                        agentRole: role || undefined,
+                        title: chosen ? chosen.name || chosen.role : selectedNode.title,
+                      });
+                    }}
+                  >
+                    <option value="">Escolher agente instalado…</option>
+                    {installedAgents.map((ag) => (
+                      <option key={ag.role} value={ag.role}>
+                        {ag.name || ag.role}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label
+                  htmlFor="wf-node-title"
+                  style={{ display: 'block', fontSize: '0.74rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}
+                >
+                  Nome do passo
+                </label>
+                <input
+                  id="wf-node-title"
+                  type="text"
+                  className="jarvis-input"
+                  value={selectedNode.title}
+                  onChange={(e) => handleUpdateSelectedNode({ title: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="wf-node-subtitle"
+                  style={{ display: 'block', fontSize: '0.74rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}
+                >
+                  O que este passo deve fazer?
+                </label>
+                <textarea
+                  id="wf-node-subtitle"
+                  rows={4}
+                  className="jarvis-textarea"
+                  value={selectedNode.subtitle}
+                  onChange={(e) => handleUpdateSelectedNode({ subtitle: e.target.value })}
+                  placeholder="Descreva a ação ou instrução desejada..."
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', paddingTop: '6px', borderTop: '1px solid var(--border-subtle)' }}>
+                <button
+                  type="button"
+                  onClick={handleSaveWorkflow}
+                  disabled={savingFlow}
+                  className="btn btn-primary btn-sm"
+                  style={{ flex: 1 }}
+                >
+                  <Save size={13} />
+                  <span>Salvar Fluxo</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteSelected}
+                  className="btn btn-danger-ghost btn-sm"
+                  aria-label="Excluir passo selecionado"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            </div>
+          </aside>
+        )}
 
         {/* Right Execution Log Drawer */}
         {showRunLog && (

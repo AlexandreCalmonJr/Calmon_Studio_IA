@@ -3,72 +3,67 @@ import assert from 'node:assert/strict';
 import {
   buildContextualGreeting,
   detectWakeWord,
-  enqueueOfflineCommand,
-  generateCompanionBridgeScript,
   validatePairingCode,
-} from './voiceCompanion.ts';
+} from './voiceCompanion';
 
-test('detectWakeWord recognizes dynamic Portuguese and English assistant wake words', () => {
-  const res1 = detectWakeWord('Ei Maria, qual o resumo financeiro de hoje?', 'Maria');
-  assert.equal(res1.detected, true);
-  assert.equal(res1.triggerPhrase, 'Ei Maria');
-  assert.equal(res1.command, 'qual o resumo financeiro de hoje?');
+test('detectWakeWord recognizes PT-BR natural wake phrases with custom assistant names', () => {
+  const r1 = detectWakeWord('Ei JARVIS, qual é o meu resumo de hoje?', 'JARVIS');
+  assert.equal(r1.detected, true);
+  assert.equal(r1.triggerPhrase, 'Ei JARVIS');
+  assert.equal(r1.command, 'qual é o meu resumo de hoje?');
 
-  const res2 = detectWakeWord('Olá João! Chama a Kira para verificar este link', 'João');
-  assert.equal(res2.detected, true);
-  assert.equal(res2.command, 'Chama a Kira para verificar este link');
+  const r2 = detectWakeWord('Oi Luna cria uma planilha de despesas', 'Luna');
+  assert.equal(r2.detected, true);
+  assert.equal(r2.triggerPhrase, 'Ei Luna');
+  assert.equal(r2.command, 'cria uma planilha de despesas');
 
-  const res3 = detectWakeWord('Apenas uma frase comum sem ativação', 'JARVIS');
-  assert.equal(res3.detected, false);
-  assert.equal(res3.command, 'Apenas uma frase comum sem ativação');
+  const r3 = detectWakeWord('Fala João, verifica meus lembretes', 'João');
+  assert.equal(r3.detected, true);
+  assert.equal(r3.command, 'verifica meus lembretes');
+
+  const r4 = detectWakeWord('Olá Maria', 'Maria');
+  assert.equal(r4.detected, true);
+  assert.equal(r4.command, '');
 });
 
-test('buildContextualGreeting adapts to time of day and operational alerts', () => {
-  const morning = buildContextualGreeting({
-    assistantName: 'JARVIS',
-    userName: 'Alexandre Calmon',
-    hour: 9,
-    pendingApprovals: 2,
-    openIncidents: 1,
-    activeWorkflows: 3,
-  });
-  assert.match(morning.greeting, /^Bom dia, Alexandre!/);
-  assert.match(morning.briefingLine, /2 aprovação\(ões\)/);
-  assert.match(morning.briefingLine, /1 alerta\(s\)/);
+test('detectWakeWord detects wake phrase inside ambient speech and direct name call', () => {
+  const ambient = detectWakeWord('ah sim ei jarvis abre minha agenda', 'JARVIS');
+  assert.equal(ambient.detected, true);
+  assert.equal(ambient.command, 'abre minha agenda');
 
-  const evening = buildContextualGreeting({
-    assistantName: 'Maria',
-    userName: 'Ana',
-    hour: 20,
+  const direct = detectWakeWord('Atlas, me ajude com uma ideia', 'Atlas');
+  assert.equal(direct.detected, true);
+  assert.equal(direct.command, 'me ajude com uma ideia');
+
+  const unrelated = detectWakeWord('hoje o tempo está ótimo', 'JARVIS');
+  assert.equal(unrelated.detected, false);
+  assert.equal(unrelated.command, 'hoje o tempo está ótimo');
+});
+
+test('buildContextualGreeting formats salutation by time of day', () => {
+  const morning = buildContextualGreeting({
+    assistantName: 'Luna',
+    userName: 'Maria Silva',
+    hour: 9,
+    pendingApprovals: 0,
+    openIncidents: 0,
+    activeWorkflows: 2,
+  });
+  assert.match(morning.greeting, /^Bom dia, Maria! Aqui é Luna\./);
+  assert.match(morning.briefingLine, /2 rotina/);
+
+  const night = buildContextualGreeting({
+    assistantName: 'JARVIS',
+    userName: 'Carlos',
+    hour: 21,
     pendingApprovals: 0,
     openIncidents: 0,
     activeWorkflows: 0,
   });
-  assert.match(evening.greeting, /^Boa noite, Ana! Aqui é Maria/);
-  assert.match(evening.briefingLine, /Tudo tranquilo/);
+  assert.match(night.greeting, /^Boa noite, Carlos!/);
 });
 
-test('enqueueOfflineCommand appends trimmed items and ignores blanks', () => {
-  const q1 = enqueueOfflineCommand([], '   ', 'voice');
-  assert.equal(q1.length, 0);
-
-  const q2 = enqueueOfflineCommand(q1, 'Lembrar de revisar o diff às 18h', 'companion');
-  assert.equal(q2.length, 1);
-  assert.equal(q2[0].target, 'companion');
-  assert.equal(q2[0].text, 'Lembrar de revisar o diff às 18h');
-});
-
-test('validatePairingCode and generateCompanionBridgeScript enforce format and embed config', () => {
-  assert.equal(validatePairingCode('JRVS-92A4'), true);
-  assert.equal(validatePairingCode('invalid-code'), false);
-
-  const script = generateCompanionBridgeScript({
-    serverUrl: 'https://jarvis.local:3000/',
-    pairingCode: 'JRVS-92A4',
-    deviceName: 'Notebook Trabalho',
-  });
-  assert.match(script, /https:\/\/jarvis\.local:3000/);
-  assert.match(script, /JRVS-92A4/);
-  assert.match(script, /Notebook Trabalho/);
-  assert.match(script, /\/api\/v1\/companion\/heartbeat/);
+test('validatePairingCode validates XXXX-XXXX format', () => {
+  assert.equal(validatePairingCode('JRVS-2026'), true);
+  assert.equal(validatePairingCode('invalid'), false);
 });

@@ -10,6 +10,7 @@ import {
 } from './ChatHistoryDrawer';
 import { getAccountStorageKey } from '../../services/accountScope';
 import { resolveQuickChatAgents } from '../../services/agentSync';
+import { canDeleteConversationCard, filterOutDeletedSession } from '../../services/sessionHelpers';
 import { ConfirmDialog } from '../../shared/common/ConfirmDialog';
 import { notify } from '../../shared/common/Toast';
 
@@ -148,18 +149,19 @@ export const OpenBotConversationRail: React.FC<OpenBotConversationRailProps> = (
     setSessionToDelete(null);
 
     try {
+      window.dispatchEvent(new CustomEvent('jarvis:session-deleted', { detail: { sessionId: sid } }));
+      if (activeSessionId === sid) {
+        onNewChat();
+      }
       try {
         await deleteChatSession(sid);
       } catch (backendErr) {
         console.warn('Aviso ao excluir sessão no backend:', backendErr);
       }
       removeSessionLocally(sid);
+      setRemoteSessions((prev) => filterOutDeletedSession(prev, sid));
+      setLocalCatalog((prev) => filterOutDeletedSession(prev, sid));
       refreshCatalog();
-      setRemoteSessions((prev) => prev.filter((s) => s.session_id !== sid));
-      setLocalCatalog((prev) => prev.filter((s) => s.id !== sid));
-      if (activeSessionId === sid) {
-        onNewChat();
-      }
       notify('Conversa excluída com sucesso.', 'success');
     } catch (e: any) {
       setHistoryError(e?.message || 'Falha ao excluir a conversa');
@@ -213,7 +215,7 @@ export const OpenBotConversationRail: React.FC<OpenBotConversationRailProps> = (
     }));
   }, [activeAgents, searchTerm]);
 
-  const renderCard = (session: DisplaySession) => {
+  const renderCard = (session: DisplaySession, isQuickShortcut = false) => {
     const isActive = activeSessionId === session.id;
     const initials = session.title
       .trim()
@@ -222,6 +224,8 @@ export const OpenBotConversationRail: React.FC<OpenBotConversationRailProps> = (
       .map((w) => w[0])
       .join('')
       .toUpperCase() || 'CH';
+
+    const canDelete = canDeleteConversationCard({ id: session.id, isQuickShortcut });
 
     return (
       <div
@@ -281,7 +285,7 @@ export const OpenBotConversationRail: React.FC<OpenBotConversationRailProps> = (
           </div>
         </div>
 
-        {!session.id.startsWith('agent-') && !session.id.startsWith('agent_') && (
+        {canDelete && (
           <button
             type="button"
             onClick={(e) => {
@@ -430,7 +434,7 @@ export const OpenBotConversationRail: React.FC<OpenBotConversationRailProps> = (
           {/* Se há conversas reais do usuário */}
           {userSessions.length > 0 && (
             <>
-              {userSessions.map((session) => renderCard(session))}
+              {userSessions.map((session) => renderCard(session, false))}
 
               {/* Se o modo for 'always' (Seção Separada), exibe os especialistas abaixo com toggle */}
               {agentsMode === 'always' && (
@@ -460,7 +464,7 @@ export const OpenBotConversationRail: React.FC<OpenBotConversationRailProps> = (
                     />
                   </div>
 
-                  {!specialistsCollapsed && filteredSpecialists.map((agent) => renderCard(agent))}
+                  {!specialistsCollapsed && filteredSpecialists.map((agent) => renderCard(agent, true))}
                 </div>
               )}
             </>
@@ -497,7 +501,7 @@ export const OpenBotConversationRail: React.FC<OpenBotConversationRailProps> = (
                       ? `Meus Agentes ativos (${filteredSpecialists.length}) — clique para conversar:`
                       : `Meus Agentes (${filteredSpecialists.length}):`}
                   </div>
-                  {filteredSpecialists.map((agent) => renderCard(agent))}
+                  {filteredSpecialists.map((agent) => renderCard(agent, true))}
                 </>
               )}
             </>

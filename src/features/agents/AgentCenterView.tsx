@@ -1,25 +1,34 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Bot, Pin, Play, Plus, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react';
+import { BookOpen, Bot, GitBranch, Play, Plus, RefreshCw, Search, SlidersHorizontal, Sparkles, Store, Trash2, X } from 'lucide-react';
 import { AgentInfo, getAgentLabel, getModelLabel } from '../../types';
-import { fetchAgents, updateAgentConfig } from '../../api';
+import { deleteAgent, fetchAgents, updateAgentConfig } from '../../api';
 import { notify } from '../../shared/common/Toast';
+import { ConfirmDialog } from '../../shared/common/ConfirmDialog';
 import { AgentActionsModal } from './AgentActionsModal';
 import { AgentCreatorModal } from './AgentCreatorModal';
 import { AgentPlayground } from './AgentPlayground';
 import { AgentRouteModal } from './AgentRouteModal';
+import { AgentSkillsModal } from './AgentSkillsModal';
+import { AgentTemplateStoreGrid } from './AgentTemplateStoreGrid';
 import { PageHeader } from '../../shared/layout/PageHeader';
 import { MascotAvatar } from '../../shared/common/MascotAvatar';
 import { useAssistantIdentity } from '../../context/AssistantIdentityContext';
-import { getAccountStorageKey } from '../../services/accountScope';
+import { AGENT_TEMPLATE_LIBRARY, canUninstallAgent } from '../../services/agentTemplates';
 
 type AgentCategory = 'all' | 'studies' | 'creative' | 'security' | 'business' | 'dev';
+type AgentCenterSection = 'installed' | 'store';
 
-export const AgentCenterView: React.FC = () => {
+interface AgentCenterViewProps {
+  onOpenGitHubImport?: () => void;
+}
+
+export const AgentCenterView: React.FC<AgentCenterViewProps> = ({ onOpenGitHubImport }) => {
   const { assistantName, experienceMode } = useAssistantIdentity();
   const isSimpleMode = experienceMode === 'simple';
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [section, setSection] = useState<AgentCenterSection>('installed');
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<AgentCategory>('all');
 
@@ -28,6 +37,26 @@ export const AgentCenterView: React.FC = () => {
   const [selectedPlaygroundAgent, setSelectedPlaygroundAgent] = useState<AgentInfo | null>(null);
   const [selectedActionsAgent, setSelectedActionsAgent] = useState<AgentInfo | null>(null);
   const [selectedRouteAgent, setSelectedRouteAgent] = useState<AgentInfo | null>(null);
+  const [selectedSkillsAgent, setSelectedSkillsAgent] = useState<AgentInfo | null>(null);
+  const [pendingUninstall, setPendingUninstall] = useState<AgentInfo | null>(null);
+  const [uninstalling, setUninstalling] = useState(false);
+
+  const handleConfirmUninstall = async () => {
+    if (!pendingUninstall) return;
+    setUninstalling(true);
+    try {
+      const label = pendingUninstall.proper_name || pendingUninstall.name || getAgentLabel(pendingUninstall.role);
+      await deleteAgent(pendingUninstall.role);
+      notify(`${label} foi desinstalado da sua equipe.`, 'info');
+      setPendingUninstall(null);
+      await loadAgents();
+      window.dispatchEvent(new CustomEvent('jarvis:agents-updated'));
+    } catch (err: any) {
+      notify(err?.message || 'Não foi possível desinstalar este agente.', 'error');
+    } finally {
+      setUninstalling(false);
+    }
+  };
 
   const handleResetAgentToHybrid = async (role: string) => {
     try {
@@ -56,59 +85,13 @@ export const AgentCenterView: React.FC = () => {
     }
   };
 
-  const [pinnedDockRoles, setPinnedDockRoles] = useState<string[]>(() => {
-    try {
-      const raw = localStorage.getItem(getAccountStorageKey('jarvis_pinned_dock_agents'));
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed.map(String);
-      }
-    } catch {}
-    return [];
-  });
-
-  const handleTogglePinDock = (agent: AgentInfo) => {
-    const displayName = agent.proper_name || agent.name;
-    const currentlyPinned = pinnedDockRoles.includes(agent.role);
-    let next: string[];
-    if (currentlyPinned) {
-      next = pinnedDockRoles.filter((r) => r !== agent.role);
-      notify(`${displayName} removido do Dock lateral.`, 'info');
-    } else {
-      if (pinnedDockRoles.length >= 8) {
-        notify('O Dock lateral suporta até 8 agentes fixados simultaneamente.', 'warning');
-        return;
-      }
-      next = [...pinnedDockRoles, agent.role];
-      notify(`${displayName} fixado no Dock lateral!`, 'success');
-    }
-    setPinnedDockRoles(next);
-    try {
-      localStorage.setItem(getAccountStorageKey('jarvis_pinned_dock_agents'), JSON.stringify(next));
-      window.dispatchEvent(new CustomEvent('jarvis:dock-updated'));
-    } catch {}
-  };
-
   useEffect(() => {
     void loadAgents();
     const onAgentsUpdated = () => {
       void loadAgents();
     };
-    const onDockUpdated = () => {
-      try {
-        const raw = localStorage.getItem(getAccountStorageKey('jarvis_pinned_dock_agents'));
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) setPinnedDockRoles(parsed.map(String));
-        }
-      } catch {}
-    };
     window.addEventListener('jarvis:agents-updated', onAgentsUpdated);
-    window.addEventListener('jarvis:dock-updated', onDockUpdated);
-    return () => {
-      window.removeEventListener('jarvis:agents-updated', onAgentsUpdated);
-      window.removeEventListener('jarvis:dock-updated', onDockUpdated);
-    };
+    return () => window.removeEventListener('jarvis:agents-updated', onAgentsUpdated);
   }, []);
 
   const filteredAgents = useMemo(() => {
@@ -143,18 +126,18 @@ export const AgentCenterView: React.FC = () => {
     <div className="jarvis-page-shell">
       <PageHeader
         icon={<Bot size={18} />}
-        title={isSimpleMode ? `Equipe de ${assistantName}` : 'Central de Agentes & Estúdio de Mascotes'}
+        title={isSimpleMode ? `Equipe de ${assistantName}` : 'Central de Agentes & Loja de Templates'}
         subtitle={
           isSimpleMode
-            ? `Crie especialistas com nome próprio e mascote, e chame qualquer um na conversa (ex.: "chama a Clara" ou "@newton").`
-            : 'Gerencie nomes próprios, mascotes, foco estrito, roteamento Local/Online, delegação e histórico com rollback em 1 clique.'
+            ? `Instale agentes prontos com habilidades configuradas em 1 clique ou remova os que você não usa — sem precisar preencher formulários.`
+            : 'Instale templates prontos com habilidades pré-configuradas, desinstale agentes que não usa ou crie especialistas sob medida com mascote e roteamento.'
         }
         meta={[
-          `${agents.length} especialista(s) ativos`,
-          filteredAgents.length !== agents.length ? `${filteredAgents.length} exibido(s)` : 'Invocação por nome ativa',
+          `${agents.length} especialista(s) instalados`,
+          `${AGENT_TEMPLATE_LIBRARY.length} templates prontos na loja`,
         ]}
         actions={
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
             <button
               type="button"
               onClick={loadAgents}
@@ -164,13 +147,58 @@ export const AgentCenterView: React.FC = () => {
               <RefreshCw size={14} className={loading ? 'spin' : ''} />
               <span>{loading ? 'Atualizando…' : 'Atualizar'}</span>
             </button>
-            <button type="button" onClick={openCreateModal} className="btn btn-primary btn-sm">
+            <button type="button" onClick={openCreateModal} className="btn btn-secondary btn-sm">
               <Plus size={14} />
-              <span>Criar especialista</span>
+              <span>Criar do zero</span>
+            </button>
+            {onOpenGitHubImport && (
+              <button type="button" onClick={onOpenGitHubImport} className="btn btn-secondary btn-sm">
+                <GitBranch size={14} />
+                <span>Importar do GitHub</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setSection(section === 'store' ? 'installed' : 'store')}
+              className="btn btn-primary btn-sm"
+            >
+              <Store size={14} />
+              <span>
+                {section === 'store' ? 'Ver meus instalados' : 'Loja de Agentes Prontos'}
+              </span>
             </button>
           </div>
         }
       />
+
+      {/* Alternador Principal: Meus Agentes Instalados vs Loja de Agentes Prontos */}
+      <div
+        className="jarvis-segmented"
+        role="tablist"
+        aria-label="Seções da central de agentes"
+        style={{ alignSelf: 'flex-start' }}
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={section === 'installed'}
+          onClick={() => setSection('installed')}
+          className={`jarvis-segmented-btn ${section === 'installed' ? 'is-active' : ''}`}
+        >
+          <Bot size={13} />
+          <span>Meus Agentes Instalados ({agents.length})</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={section === 'store'}
+          onClick={() => setSection('store')}
+          className={`jarvis-segmented-btn ${section === 'store' ? 'is-active' : ''}`}
+        >
+          <Sparkles size={13} />
+          <span>Loja de Agentes Prontos ({AGENT_TEMPLATE_LIBRARY.length})</span>
+        </button>
+      </div>
 
       {loadError && (
         <div role="alert" className="jarvis-error-banner" style={{ justifyContent: 'space-between' }}>
@@ -181,83 +209,106 @@ export const AgentCenterView: React.FC = () => {
         </div>
       )}
 
-      {/* Barra Unificada de Busca e Categorias */}
-      <div className="jarvis-filter-bar">
-        <div className="jarvis-search-box" style={{ flex: '1 1 240px', maxWidth: '380px' }}>
-          <Search size={14} />
-          <input
-            type="text"
-            placeholder="Buscar por nome próprio (Kira, Clara, Newton...), @handle ou missão..."
-            aria-label="Filtrar especialistas"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="jarvis-search-box__input"
-          />
-          {search && (
-            <button
-              type="button"
-              onClick={() => setSearch('')}
-              className="btn btn-ghost btn-icon-sm"
-              aria-label="Limpar busca"
-              style={{ width: '22px', height: '22px', padding: 0 }}
-            >
-              <X size={12} />
-            </button>
+      {section === 'store' ? (
+        <AgentTemplateStoreGrid
+          installedAgents={agents}
+          onRefreshAgents={loadAgents}
+          onOpenChat={(ag) => {
+            window.dispatchEvent(
+              new CustomEvent('jarvis:open-agent-chat', {
+                detail: { agentId: ag.role, agentName: ag.proper_name || ag.name },
+              })
+            );
+          }}
+        />
+      ) : (
+        <>
+          {/* Barra Unificada de Busca e Categorias */}
+          <div className="jarvis-filter-bar">
+            <div className="jarvis-search-box" style={{ flex: '1 1 240px', maxWidth: '380px' }}>
+              <Search size={14} />
+              <input
+                type="text"
+                placeholder="Buscar por nome próprio (Kira, Clara, Newton...), @handle ou missão..."
+                aria-label="Filtrar especialistas"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="jarvis-search-box__input"
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  className="btn btn-ghost btn-icon-sm"
+                  aria-label="Limpar busca"
+                  style={{ width: '22px', height: '22px', padding: 0 }}
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+
+            <div className="jarvis-segmented" role="tablist" aria-label="Categorias de agentes" style={{ flexWrap: 'wrap' }}>
+              {[
+                { id: 'all', label: `Todos (${agents.length})` },
+                { id: 'studies', label: 'Estudos & Pesquisa' },
+                { id: 'creative', label: 'Criativo & Docs' },
+                { id: 'security', label: 'Segurança' },
+                { id: 'business', label: 'Finanças' },
+                { id: 'dev', label: 'Engenharia' },
+              ].map((cat) => (
+                <button
+                  key={cat.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={categoryFilter === cat.id}
+                  onClick={() => setCategoryFilter(cat.id as AgentCategory)}
+                  className={`jarvis-segmented-btn ${categoryFilter === cat.id ? 'is-active' : ''}`}
+                >
+                  {cat.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {filteredAgents.length === 0 && !loading && !loadError && (
+            <div role="status" className="jarvis-empty-state">
+              <Bot size={22} color="var(--text-muted)" />
+              <p style={{ margin: 0, fontSize: '0.86rem', color: 'var(--text-secondary)' }}>
+                {agents.length === 0
+                  ? 'Nenhum especialista encontrado.'
+                  : 'Nenhum especialista corresponde aos filtros selecionados.'}
+              </p>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearch('');
+                    setCategoryFilter('all');
+                  }}
+                  className="btn btn-secondary btn-xs"
+                >
+                  Limpar filtros
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSection('store')}
+                  className="btn btn-primary btn-xs"
+                >
+                  Explorar Loja de Agentes Prontos
+                </button>
+              </div>
+            </div>
           )}
-        </div>
 
-        <div className="jarvis-segmented" role="tablist" aria-label="Categorias de agentes" style={{ flexWrap: 'wrap' }}>
-          {[
-            { id: 'all', label: `Todos (${agents.length})` },
-            { id: 'studies', label: 'Estudos & Pesquisa' },
-            { id: 'creative', label: 'Criativo & Docs' },
-            { id: 'security', label: 'Segurança' },
-            { id: 'business', label: 'Finanças' },
-            { id: 'dev', label: 'Engenharia' },
-          ].map((cat) => (
-            <button
-              key={cat.id}
-              type="button"
-              role="tab"
-              aria-selected={categoryFilter === cat.id}
-              onClick={() => setCategoryFilter(cat.id as AgentCategory)}
-              className={`jarvis-segmented-btn ${categoryFilter === cat.id ? 'is-active' : ''}`}
-            >
-              {cat.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {filteredAgents.length === 0 && !loading && !loadError && (
-        <div role="status" className="jarvis-empty-state">
-          <Bot size={22} color="var(--text-muted)" />
-          <p style={{ margin: 0, fontSize: '0.86rem', color: 'var(--text-secondary)' }}>
-            {agents.length === 0
-              ? 'Nenhum especialista encontrado.'
-              : 'Nenhum especialista corresponde aos filtros selecionados.'}
-          </p>
-          <button
-            type="button"
-            onClick={() => {
-              setSearch('');
-              setCategoryFilter('all');
+          {/* Grid de Especialistas com Mascotes */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))',
+              gap: '14px',
             }}
-            className="btn btn-secondary btn-xs"
           >
-            Limpar filtros
-          </button>
-        </div>
-      )}
-
-      {/* Grid de Especialistas com Mascotes */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))',
-          gap: '14px',
-        }}
-      >
         {filteredAgents.map((agent) => {
           const isOnlineModel =
             agent.routing_policy === 'online_only' ||
@@ -311,22 +362,6 @@ export const AgentCenterView: React.FC = () => {
                       >
                         {handleLabel}
                       </span>
-                      {agent.is_custom && (
-                        <span
-                          style={{
-                            fontSize: '0.64rem',
-                            fontFamily: 'var(--font-mono)',
-                            textTransform: 'uppercase',
-                            padding: '1px 6px',
-                            borderRadius: '4px',
-                            backgroundColor: 'var(--accent-soft)',
-                            border: '1px solid var(--border-accent)',
-                            color: 'var(--accent-light)',
-                          }}
-                        >
-                          Personalizado
-                        </span>
-                      )}
                     </div>
                     <div
                       style={{
@@ -341,23 +376,6 @@ export const AgentCenterView: React.FC = () => {
                       {agent.name || getAgentLabel(agent.role)}
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleTogglePinDock(agent)}
-                    className={`btn btn-icon-sm ${pinnedDockRoles.includes(agent.role) ? 'btn-primary' : 'btn-ghost'}`}
-                    title={
-                      pinnedDockRoles.includes(agent.role)
-                        ? `Desafixar ${properName} do Dock lateral`
-                        : `Fixar ${properName} no Dock lateral`
-                    }
-                    aria-label={
-                      pinnedDockRoles.includes(agent.role)
-                        ? `Desafixar ${properName} do Dock lateral`
-                        : `Fixar ${properName} no Dock lateral`
-                    }
-                  >
-                    <Pin size={13} />
-                  </button>
                 </div>
 
                 <p
@@ -370,6 +388,56 @@ export const AgentCenterView: React.FC = () => {
                 >
                   {agent.mission}
                 </p>
+
+                {(() => {
+                  const matchedTpl = AGENT_TEMPLATE_LIBRARY.find(
+                    (t) =>
+                      t.templateId === agent.template_id ||
+                      t.role === agent.role ||
+                      t.handle.toLowerCase() === handleLabel.toLowerCase()
+                  );
+                  const skillLabels =
+                    agent.installed_skills && agent.installed_skills.length > 0
+                      ? agent.installed_skills
+                      : matchedTpl
+                        ? matchedTpl.skills.map((sk) => sk.name)
+                        : [];
+                  if (skillLabels.length === 0) return null;
+                  return (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '10px' }}>
+                      {skillLabels.slice(0, 3).map((label) => (
+                        <span
+                          key={label}
+                          style={{
+                            fontSize: '0.7rem',
+                            padding: '2px 7px',
+                            borderRadius: '6px',
+                            backgroundColor: 'var(--bg-primary)',
+                            border: '1px solid var(--border-subtle)',
+                            color: 'var(--text-secondary)',
+                          }}
+                        >
+                          {label}
+                        </span>
+                      ))}
+                      {skillLabels.length > 3 && (
+                        <span
+                          style={{
+                            fontSize: '0.7rem',
+                            padding: '2px 7px',
+                            borderRadius: '6px',
+                            backgroundColor: 'var(--accent-soft)',
+                            border: '1px solid var(--border-accent)',
+                            color: 'var(--accent-light)',
+                            fontWeight: 600,
+                          }}
+                        >
+                          +{skillLabels.length - 3} habilidades
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               <div
@@ -421,33 +489,84 @@ export const AgentCenterView: React.FC = () => {
 
               <div
                 style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
-                  gap: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
                   paddingTop: '2px',
+                  flexWrap: 'wrap',
                 }}
               >
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
+                  style={{ flex: '1 1 88px' }}
+                  onClick={() => setSelectedSkillsAgent(agent)}
+                >
+                  <BookOpen size={13} />
+                  <span>Habilidades</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ flex: '1 1 78px' }}
                   onClick={() => openEditModal(agent)}
                 >
                   <SlidersHorizontal size={13} />
-                  <span>Editar & Mascote</span>
+                  <span>Editar</span>
                 </button>
                 <button
                   type="button"
                   className="btn btn-primary btn-sm"
+                  style={{ flex: '1 1 78px' }}
                   onClick={() => setSelectedPlaygroundAgent(agent)}
                 >
                   <Play size={13} />
-                  <span>Testar agora</span>
+                  <span>Testar</span>
                 </button>
+                {canUninstallAgent(agent) && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-icon-sm"
+                    style={{
+                      color: '#f87171',
+                      borderColor: 'rgba(239, 68, 68, 0.28)',
+                      flexShrink: 0,
+                    }}
+                    title={`Desinstalar ${properName}`}
+                    aria-label={`Desinstalar ${properName}`}
+                    onClick={() => setPendingUninstall(agent)}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </div>
             </article>
           );
         })}
       </div>
+        </>
+      )}
+
+      <ConfirmDialog
+        isOpen={Boolean(pendingUninstall)}
+        title={`Desinstalar ${pendingUninstall?.proper_name || pendingUninstall?.name || 'agente'}?`}
+        description={
+          <>
+            O especialista{' '}
+            <strong style={{ color: 'var(--text-primary)' }}>
+              {pendingUninstall?.proper_name || pendingUninstall?.name}
+            </strong>{' '}
+            será removido da sua equipe ativa. Se quiser usar novamente depois, basta reinstalá-lo em
+            1 clique na aba <strong>Loja de Agentes Prontos</strong>.
+          </>
+        }
+        confirmLabel="Desinstalar agente"
+        cancelLabel="Cancelar"
+        tone="danger"
+        isLoading={uninstalling}
+        onCancel={() => setPendingUninstall(null)}
+        onConfirm={handleConfirmUninstall}
+      />
 
       {creatorOpen && (
         <AgentCreatorModal
@@ -486,6 +605,15 @@ export const AgentCenterView: React.FC = () => {
           isOpen={true}
           agent={selectedRouteAgent}
           onClose={() => setSelectedRouteAgent(null)}
+          onSaved={loadAgents}
+        />
+      )}
+
+      {selectedSkillsAgent && (
+        <AgentSkillsModal
+          isOpen={true}
+          agent={selectedSkillsAgent}
+          onClose={() => setSelectedSkillsAgent(null)}
           onSaved={loadAgents}
         />
       )}

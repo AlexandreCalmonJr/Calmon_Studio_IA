@@ -68,6 +68,40 @@ import {
   detectWakeWord,
   generateCompanionBridgeScript,
 } from './src/services/voiceCompanion.ts';
+import {
+  SPREADSHEET_PRESETS,
+  SpreadsheetPresetInfo,
+  SpreadsheetSpec,
+  spreadsheetToCsv,
+} from './src/services/spreadsheetEngine.ts';
+import {
+  generateSpreadsheetSpec,
+  renderSpreadsheetToXlsxBuffer,
+} from './server/spreadsheetServer.ts';
+import {
+  GeneratedImageAsset,
+  VideoJobStoreEntry,
+  generateStudioImage,
+  startStudioVideoJob,
+} from './server/mediaEngine.ts';
+import {
+  APP_BUILDER_PRESETS,
+  AppBlueprintSpec,
+  AppPresetId,
+  AppTargetPlatform,
+  GeneratedProjectFile,
+} from './src/services/appBuilderEngine.ts';
+import {
+  generateAppBlueprint,
+  packageProjectToZipBuffer,
+} from './server/appBuilderServer.ts';
+import {
+  CURATED_GITHUB_EXAMPLES,
+  GitHubIncorporationMode,
+  GitHubRepoInspection,
+  buildGitHubKnowledgeMarkdown,
+} from './src/services/githubImporterEngine.ts';
+import { inspectGitHubRepository as inspectGitHubRepoDetailed } from './server/githubImporterServer.ts';
 
 const realtimeClients = new Set<WebSocket>();
 function broadcastRealtimeEvent(type: string, payload: unknown) {
@@ -436,6 +470,8 @@ interface AgentServerRecord {
   system_prompt: string;
   mascot: { id: string; color: string; accessory: string; mood: string };
   is_custom?: boolean;
+  template_id?: string;
+  installed_skills?: string[];
   version: number;
   updated_at: string;
 }
@@ -899,6 +935,132 @@ const projectMemories = new Map<string, Array<Record<string, unknown>>>([
 
 let skillsList = [
   {
+    id: 'skill_antiphishing',
+    name: 'Detector de Links & Golpes',
+    version: '1.3.0',
+    origin: 'builtin',
+    license: 'MIT',
+    description: 'Analisa links suspeitos, mensagens de golpe, boletos adulterados e sinais de phishing.',
+    domain: 'security',
+    allowed_tools: ['threat_scanner', 'pdf_inspector'],
+    required_permissions: ['security:read'],
+    assigned_agents: ['sentinel_security', 'cybersecurity_engineer'],
+    content_hash: 'sha256:7d31a0c9f1',
+    is_approved: true,
+    is_revoked: false,
+    instructions: 'Classifique links, boletos e anexos em Seguro, Atenção ou Perigo explicando os indícios em português simples.',
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  },
+  {
+    id: 'skill_english_roleplay',
+    name: 'Conversação Guiada em Inglês',
+    version: '1.1.0',
+    origin: 'builtin',
+    license: 'MIT',
+    description: 'Simula situações reais (viagem, entrevistas, reuniões) com correção gentil e natural.',
+    domain: 'studies',
+    allowed_tools: ['roleplay_english', 'grammar_coach'],
+    required_permissions: ['chat:read'],
+    assigned_agents: ['english_tutor'],
+    content_hash: 'sha256:6b21f8d3e4',
+    is_approved: true,
+    is_revoked: false,
+    instructions: 'Conduza diálogos curtos em inglês adaptados ao nível do aluno e explique correções com empatia.',
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  },
+  {
+    id: 'skill_step_solver',
+    name: 'Resolução Passo a Passo',
+    version: '1.1.0',
+    origin: 'builtin',
+    license: 'MIT',
+    description: 'Desmembra problemas de matemática, lógica e estudos em etapas didáticas claras.',
+    domain: 'studies',
+    allowed_tools: ['step_solver', 'quiz_generator'],
+    required_permissions: ['chat:read'],
+    assigned_agents: ['math_tutor'],
+    content_hash: 'sha256:5e18c9a1b3',
+    is_approved: true,
+    is_revoked: false,
+    instructions: 'Mostre cada passo do raciocínio com exemplos cotidianos antes de entregar a resposta final.',
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  },
+  {
+    id: 'skill_web_research',
+    name: 'Busca Web com Fontes',
+    version: '1.2.0',
+    origin: 'builtin',
+    license: 'MIT',
+    description: 'Pesquisa informações atualizadas, compara opções lado a lado e resume com fontes.',
+    domain: 'research',
+    allowed_tools: ['web_search', 'brain_save'],
+    required_permissions: ['chat:read'],
+    assigned_agents: ['research_analyst', 'jarvis_master'],
+    content_hash: 'sha256:3c94e2f7a0',
+    is_approved: true,
+    is_revoked: false,
+    instructions: 'Apresente comparações objetivas com prós, contras e conclusão clara para decisão rápida.',
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  },
+  {
+    id: 'skill_slides_docs',
+    name: 'Criador de Slides & Documentos',
+    version: '1.2.0',
+    origin: 'builtin',
+    license: 'MIT',
+    description: 'Estrutura apresentações (.pptx), relatórios (.pdf) e textos prontos para compartilhar.',
+    domain: 'creative',
+    allowed_tools: ['generate_pptx', 'generate_pdf'],
+    required_permissions: ['studios:read'],
+    assigned_agents: ['presentation_creator', 'document_specialist'],
+    content_hash: 'sha256:8a44b7c2d9',
+    is_approved: true,
+    is_revoked: false,
+    instructions: 'Organize títulos curtos, narrativa visual limpa e notas claras de apresentação ou revisão.',
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  },
+  {
+    id: 'skill_finance_sheets',
+    name: 'Planilhas & Análise Financeira',
+    version: '1.1.0',
+    origin: 'builtin',
+    license: 'MIT',
+    description: 'Monta orçamentos, projeções de fluxo de caixa, fórmulas de Excel e KPIs.',
+    domain: 'business',
+    allowed_tools: ['sheet_formula_builder', 'pricing_calculator'],
+    required_permissions: ['chat:read'],
+    assigned_agents: ['finance_business'],
+    content_hash: 'sha256:2f77d1e6c5',
+    is_approved: true,
+    is_revoked: false,
+    instructions: 'Use tabelas legíveis, fórmulas prontas para Excel/Sheets e linguagem acessível.',
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  },
+  {
+    id: 'skill_workflow_builder',
+    name: 'Orquestração de Fluxos Automáticos',
+    version: '1.0.0',
+    origin: 'builtin',
+    license: 'MIT',
+    description: 'Converte descrições em português em rotinas agendadas com múltiplos agentes.',
+    domain: 'automation',
+    allowed_tools: ['workflow_builder', 'cron_scheduler'],
+    required_permissions: ['studios:read'],
+    assigned_agents: ['flow_architect', 'jarvis_master'],
+    content_hash: 'sha256:1b85f4a9e7',
+    is_approved: true,
+    is_revoked: false,
+    instructions: 'Quebre rotinas em gatilho, etapas de agentes e ação final clara com agendamento confiável.',
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  },
+  {
     id: 'skill_secure_patch',
     name: 'Auditoria de Patch Seguro',
     version: '1.2.0',
@@ -908,7 +1070,7 @@ let skillsList = [
     domain: 'security',
     allowed_tools: ['inspect_diff', 'scan_secrets', 'run_linter'],
     required_permissions: ['security:read'],
-    assigned_agents: ['cybersecurity_engineer', 'code_reviewer'],
+    assigned_agents: ['cybersecurity_engineer', 'code_reviewer', 'backend_developer'],
     content_hash: 'sha256:9f82b1c4e0',
     is_approved: true,
     is_revoked: false,
@@ -926,7 +1088,7 @@ let skillsList = [
     domain: 'frontend',
     allowed_tools: ['read_file', 'propose_patch', 'run_linter'],
     required_permissions: ['workspace:write'],
-    assigned_agents: ['frontend_mobile_developer'],
+    assigned_agents: ['frontend_mobile_developer', 'ux_ui_designer'],
     content_hash: 'sha256:4a17d3e9f2',
     is_approved: true,
     is_revoked: false,
@@ -935,6 +1097,19 @@ let skillsList = [
     updated_at: nowIso(),
   },
 ];
+
+function syncAgentInstalledSkillsFromSkillList() {
+  for (const agent of agentsList) {
+    const linkedNames = skillsList
+      .filter((sk) => sk.is_approved && Array.isArray(sk.assigned_agents) && sk.assigned_agents.includes(agent.role))
+      .map((sk) => sk.name);
+    if (linkedNames.length > 0) {
+      const merged = Array.from(new Set([...(agent.installed_skills || []), ...linkedNames]));
+      agent.installed_skills = merged;
+    }
+  }
+}
+syncAgentInstalledSkillsFromSkillList();
 
 let knowledgeDocs = [
   {
@@ -1146,7 +1321,7 @@ function buildAssistantReply(prompt: string, model?: string): string {
 
 function buildApiRouter() {
   const api = express.Router();
-  api.use(express.json({ limit: '4mb' }));
+  api.use(express.json({ limit: '15mb' }));
 
   // --- AUTH ---
   api.get('/auth/me', (req, res) => {
@@ -2204,11 +2379,54 @@ function buildApiRouter() {
         mood: String(req.body?.mascot?.mood || 'idle'),
       },
       is_custom: true,
+      template_id: req.body?.template_id ? String(req.body.template_id) : undefined,
+      installed_skills: Array.isArray(req.body?.installed_skills)
+        ? req.body.installed_skills.map(String)
+        : undefined,
       version: 1,
       updated_at: nowIso(),
     };
     agentsList.unshift(created);
-    recordAgentVersion(created, 'Criação do especialista');
+    // Garante que as habilidades instaladas do agente apareçam na página Habilidades já vinculadas a ele
+    if (Array.isArray(created.installed_skills) && created.installed_skills.length > 0) {
+      created.installed_skills.forEach((skillName, idx) => {
+        const cleanName = String(skillName).trim();
+        if (!cleanName) return;
+        const existing = skillsList.find((s) => s.name.toLowerCase() === cleanName.toLowerCase());
+        if (existing) {
+          if (!existing.assigned_agents.includes(created.role)) {
+            existing.assigned_agents.push(created.role);
+            existing.updated_at = nowIso();
+          }
+        } else {
+          const slug = cleanName
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9]+/g, '_')
+            .replace(/^_+|_+$/g, '');
+          skillsList.unshift({
+            id: `skill_${slug || Date.now()}_${idx}`,
+            name: cleanName,
+            version: '1.0.0',
+            origin: 'agent_template',
+            license: 'MIT',
+            description: `Habilidade ativa instalada junto com ${created.proper_name || created.name}.`,
+            domain: created.category || 'general',
+            allowed_tools: created.allowed_tools.length > 0 ? [created.allowed_tools[idx] || created.allowed_tools[0]] : ['read_file'],
+            required_permissions: ['skills:read'],
+            assigned_agents: [created.role],
+            content_hash: `sha256:${crypto.randomBytes(6).toString('hex')}`,
+            is_approved: true,
+            is_revoked: false,
+            instructions: `Habilidade "${cleanName}" vinculada ao especialista ${created.proper_name || created.name}.`,
+            created_at: nowIso(),
+            updated_at: nowIso(),
+          });
+        }
+      });
+    }
+    recordAgentVersion(created, String(req.body?.change_summary || 'Criação do especialista'));
     res.status(201).json(created);
   });
 
@@ -2246,19 +2464,69 @@ function buildApiRouter() {
     res.json(updated);
   });
 
+  api.put('/agents/:role/skills', requireAuth, (req, res) => {
+    const idx = agentsList.findIndex((a) => a.role === req.params.role);
+    if (idx === -1) {
+      res.status(404).json({ detail: 'Especialista não encontrado.' });
+      return;
+    }
+    const agent = agentsList[idx];
+    const selectedIds = new Set(
+      Array.isArray(req.body?.skill_ids) ? req.body.skill_ids.map(String) : []
+    );
+
+    const attachedNames: string[] = [];
+    const attachedTools = new Set<string>(agent.allowed_tools || []);
+
+    for (const sk of skillsList) {
+      const hasRole = sk.assigned_agents.includes(agent.role);
+      const shouldHave = selectedIds.has(sk.id);
+      if (shouldHave) {
+        if (!hasRole) {
+          sk.assigned_agents.push(agent.role);
+          sk.updated_at = nowIso();
+        }
+        attachedNames.push(sk.name);
+        (sk.allowed_tools || []).forEach((t) => attachedTools.add(t));
+      } else if (hasRole) {
+        sk.assigned_agents = sk.assigned_agents.filter((r) => r !== agent.role);
+        sk.updated_at = nowIso();
+      }
+    }
+
+    const updated: AgentServerRecord = {
+      ...agent,
+      installed_skills: attachedNames,
+      allowed_tools: Array.from(attachedTools),
+      version: (agent.version || 1) + 1,
+      updated_at: nowIso(),
+    };
+    agentsList[idx] = updated;
+    recordAgentVersion(updated, `Habilidades atualizadas (${attachedNames.length} vinculadas)`);
+    res.json({ agent: updated, attached_skill_ids: Array.from(selectedIds) });
+  });
+
   api.delete('/agents/:role', requireAuth, (req, res) => {
     const target = agentsList.find((a) => a.role === req.params.role);
     if (!target) {
       res.status(404).json({ detail: 'Especialista não encontrado.' });
       return;
     }
-    if (!target.is_custom) {
-      res.status(400).json({ detail: 'Agentes nativos não podem ser excluídos, apenas editados.' });
+    if (target.role === 'jarvis_master') {
+      res.status(400).json({
+        detail: 'O Maestro Orquestrador principal não pode ser desinstalado, pois coordena o hub.',
+      });
       return;
     }
     agentsList = agentsList.filter((a) => a.role !== req.params.role);
     agentVersions.delete(req.params.role);
-    res.json({ deleted: true });
+    for (const sk of skillsList) {
+      if (sk.assigned_agents.includes(target.role)) {
+        sk.assigned_agents = sk.assigned_agents.filter((r) => r !== target.role);
+        sk.updated_at = nowIso();
+      }
+    }
+    res.json({ deleted: true, role: target.role, name: target.proper_name || target.name });
   });
 
   api.get('/agents/:role/versions', requireAuth, (req, res) => {
@@ -2775,7 +3043,20 @@ function buildApiRouter() {
       res.status(404).json({ detail: 'Habilidade não encontrada.' });
       return;
     }
-    s.assigned_agents = Array.isArray(req.body?.agent_roles) ? req.body.agent_roles : [];
+    const nextRoles: string[] = Array.isArray(req.body?.agent_roles)
+      ? Array.from(new Set(req.body.agent_roles.map(String)))
+      : [];
+    s.assigned_agents = nextRoles;
+    s.updated_at = nowIso();
+
+    // Sincronização bidirecional: reflete imediatamente nos agentes instalados
+    for (const ag of agentsList) {
+      const linked = skillsList
+        .filter((sk) => sk.is_approved && sk.assigned_agents.includes(ag.role))
+        .map((sk) => sk.name);
+      ag.installed_skills = linked;
+    }
+
     res.json(s);
   });
   api.get('/skills/ponytail', requireAuth, (_req, res) => res.json(ponytailState));
@@ -3523,48 +3804,57 @@ function buildApiRouter() {
 
   const workflowTemplates = [
     {
-      id: 'tpl-daily-english',
-      name: 'Aula Diária de Inglês com Clara',
-      category: 'Estudos',
-      description: 'Todo dia às 08h, prepara 5 expressões naturais de inglês com pronúncia e salva no Cérebro.',
-      schedule_cron: '0 8 * * *',
-      schedule_label: 'Diariamente às 08:00',
-      prompt_seed: 'Todo dia às 8h quero que a Clara prepare 5 expressões práticas de inglês para viagem com tradução e salve no cérebro',
+      id: 'tpl-morning-briefing',
+      name: 'Resumo Matinal do Dia',
+      category: 'Dia a Dia',
+      description: 'Todo dia às 07h30 reúne prioridades, compromissos, lembretes e um resumo rápido para começar o dia.',
+      schedule_cron: '30 7 * * 1-5',
+      schedule_label: 'Seg-Sex às 07:30',
+      prompt_seed: 'Todo dia útil às 7h30 quero um resumo matinal com minhas prioridades, tarefas do dia e lembretes salvo no cérebro',
     },
     {
-      id: 'tpl-weekly-finance',
-      name: 'Resumo Semanal de Finanças',
-      category: 'Finanças & Casa',
-      description: 'Todo domingo às 19h consolida metas, gastos prioritários e alertas da semana.',
+      id: 'tpl-kira-audit',
+      name: 'Verificador de Links & Golpes',
+      category: 'Segurança',
+      description: 'Kira inspeciona links, boletos e PDFs recentes em busca de golpes, phishing e vazamento de dados pessoais.',
+      schedule_cron: '0 18 * * 5',
+      schedule_label: 'Toda sexta às 18:00',
+      prompt_seed: 'Toda sexta às 18h a Kira verifica links suspeitos, golpes e PDFs recentes e registra o relatório de proteção no cérebro',
+    },
+    {
+      id: 'tpl-spreadsheet-report',
+      name: 'Gerador de Relatório em Planilha',
+      category: 'Finanças & Planilhas',
+      description: 'Iris consolida receitas, despesas e indicadores semanais em uma planilha organizada com totais.',
       schedule_cron: '0 19 * * 0',
       schedule_label: 'Todo domingo às 19:00',
-      prompt_seed: 'Todo domingo às 19h quero um resumo semanal de finanças e metas da casa salvo na memória compartilhada',
+      prompt_seed: 'Todo domingo às 19h a Iris consolida meus gastos e metas em um relatório de planilha organizado e salva no cérebro',
+    },
+    {
+      id: 'tpl-daily-english',
+      name: 'Monitor de Estudos & Inglês',
+      category: 'Estudos',
+      description: 'Clara prepara revisões curtas, 5 expressões práticas de inglês e acompanha sua evolução diária.',
+      schedule_cron: '0 8 * * *',
+      schedule_label: 'Diariamente às 08:00',
+      prompt_seed: 'Todo dia às 8h quero que a Clara prepare um bloco de estudos com 5 expressões práticas de inglês e revisão rápida salvo no cérebro',
     },
     {
       id: 'tpl-research-pptx',
       name: 'Pesquisa Web + Slides PowerPoint',
       category: 'Produtividade',
-      description: 'Atlas pesquisa tendências atualizadas e Dante gera um deck executivo .pptx pronto.',
+      description: 'Atlas pesquisa tendências atualizadas e Dante gera uma apresentação executiva .pptx pronta.',
       schedule_cron: '0 9 * * 1',
       schedule_label: 'Toda segunda às 09:00',
       prompt_seed: 'Toda segunda às 9h chama o Atlas para pesquisar tendências de IA e o Dante para montar slides PowerPoint',
-    },
-    {
-      id: 'tpl-kira-audit',
-      name: 'Auditoria Preventiva de PDFs & Links',
-      category: 'Segurança',
-      description: 'Kira analisa arquivos recentes em busca de links suspeitos, phishing e vazamento de segredos.',
-      schedule_cron: '0 18 * * 5',
-      schedule_label: 'Toda sexta às 18:00',
-      prompt_seed: 'Toda sexta às 18h a Kira faz auditoria de segurança em PDFs e links e registra no cérebro',
     },
   ];
 
   let savedWorkflows = [
     {
       id: 'wf_daily_english_clara',
-      ...parseWorkflowPromptToGraph(workflowTemplates[0].prompt_seed),
-      title: 'Aula Diária de Inglês · Clara (08:00)',
+      ...parseWorkflowPromptToGraph(workflowTemplates[3].prompt_seed),
+      title: 'Monitor de Estudos · Clara (08:00)',
       last_run_at: nowIso(),
       last_run_status: 'success' as 'idle' | 'running' | 'success' | 'error',
       created_at: nowIso(),
@@ -3572,7 +3862,7 @@ function buildApiRouter() {
     },
     {
       id: 'wf_research_slides_dante',
-      ...parseWorkflowPromptToGraph(workflowTemplates[2].prompt_seed),
+      ...parseWorkflowPromptToGraph(workflowTemplates[4].prompt_seed),
       title: 'Pesquisa Web + Deck PowerPoint · Atlas & Dante',
       last_run_at: null as string | null,
       last_run_status: 'idle' as 'idle' | 'running' | 'success' | 'error',
@@ -5785,6 +6075,534 @@ ${original}
 }`,
     };
     res.json({ type, code: templates[type] || templates.navbar });
+  });
+
+  // ==================== ESTÚDIO CRIATIVO: PLANILHAS EXCEL (.XLSX/.CSV) & MÍDIA GEMINI ====================
+  const spreadsheetStore = new Map<string, { spec: SpreadsheetSpec; xlsxBuffer: Buffer }>();
+  const imageGallery: GeneratedImageAsset[] = [];
+  const videoJobStore = new Map<string, VideoJobStoreEntry>();
+
+  api.get('/spreadsheets', requireAuth, (_req, res) => {
+    const items = Array.from(spreadsheetStore.values())
+      .map((entry) => entry.spec)
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+    res.json({ presets: SPREADSHEET_PRESETS, items });
+  });
+
+  api.post('/spreadsheets/generate', requireAuth, async (req, res) => {
+    try {
+      const body = (req.body || {}) as {
+        prompt?: string;
+        presetId?: SpreadsheetPresetInfo['id'];
+        title?: string;
+        useAi?: boolean;
+      };
+      const spec = await generateSpreadsheetSpec({
+        prompt: body.prompt,
+        presetId: body.presetId,
+        title: body.title,
+        useAi: Boolean(body.useAi),
+      });
+      const xlsxBuffer = await renderSpreadsheetToXlsxBuffer(spec);
+      spreadsheetStore.set(spec.id, { spec, xlsxBuffer });
+
+      // Keep latest 25 spreadsheets in memory
+      if (spreadsheetStore.size > 25) {
+        const oldestKey = spreadsheetStore.keys().next().value;
+        if (oldestKey) spreadsheetStore.delete(oldestKey);
+      }
+
+      res.json({
+        spreadsheet: spec,
+        download_xlsx_url: `/api/v1/spreadsheets/${spec.id}/download?format=xlsx`,
+        download_csv_url: `/api/v1/spreadsheets/${spec.id}/download?format=csv`,
+      });
+    } catch (err: any) {
+      res.status(400).json({
+        error: err?.message || 'Não foi possível gerar a planilha Excel.',
+      });
+    }
+  });
+
+  api.get('/spreadsheets/:id/download', requireAuth, (req, res) => {
+    const id = String(req.params.id || '');
+    const format = String(req.query.format || 'xlsx').toLowerCase();
+    const sheetIndex = Math.max(0, Number(req.query.sheet || 0) || 0);
+    const entry = spreadsheetStore.get(id);
+    if (!entry) {
+      res.status(404).json({ error: 'Planilha não encontrada ou expirada.' });
+      return;
+    }
+
+    const safeSlug =
+      entry.spec.title
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 48) || 'planilha-iris';
+
+    if (format === 'csv') {
+      const targetSheet = entry.spec.sheets[sheetIndex] || entry.spec.sheets[0];
+      const csv = spreadsheetToCsv(targetSheet);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${safeSlug}.csv"`);
+      res.send(csv);
+      return;
+    }
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${safeSlug}.xlsx"`);
+    res.send(entry.xlsxBuffer);
+  });
+
+  api.delete('/spreadsheets/:id', requireAuth, (req, res) => {
+    const id = String(req.params.id || '');
+    const deleted = spreadsheetStore.delete(id);
+    res.json({ deleted, id });
+  });
+
+  api.get('/media/assets', requireAuth, (_req, res) => {
+    const videos = Array.from(videoJobStore.values())
+      .map((entry) => entry.job)
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+    res.json({
+      gemini_configured: isGeminiApiConfigured(),
+      images: imageGallery,
+      videos,
+    });
+  });
+
+  api.post('/media/images', requireAuth, async (req, res) => {
+    try {
+      const body = (req.body || {}) as {
+        prompt?: string;
+        model?: 'gemini-3.1-flash-lite-image' | 'gemini-nano-banana-2.1';
+        aspectRatio?: '1:1' | '16:9' | '9:16' | '4:3' | '3:4';
+        imageSize?: '1K' | '2K' | '4K';
+        referenceImageBase64?: string;
+        referenceMimeType?: string;
+      };
+      const asset = await generateStudioImage({
+        prompt: String(body.prompt || ''),
+        model: body.model,
+        aspectRatio: body.aspectRatio,
+        imageSize: body.imageSize,
+        referenceImageBase64: body.referenceImageBase64,
+        referenceMimeType: body.referenceMimeType,
+      });
+      imageGallery.unshift(asset);
+      if (imageGallery.length > 24) imageGallery.pop();
+      res.json({ asset });
+    } catch (err: any) {
+      res.status(400).json({
+        error: err?.message || 'Falha ao gerar imagem com o modelo Gemini.',
+      });
+    }
+  });
+
+  api.post('/media/videos', requireAuth, (req, res) => {
+    try {
+      const body = (req.body || {}) as {
+        prompt?: string;
+        aspectRatio?: '16:9' | '9:16';
+        duration?: '5s' | '8s' | '10s';
+        resolution?: '720p' | '1080p';
+        referenceImageBase64?: string;
+        referenceMimeType?: string;
+        previousInteractionId?: string;
+      };
+      const job = startStudioVideoJob(videoJobStore, {
+        prompt: String(body.prompt || ''),
+        aspectRatio: body.aspectRatio,
+        duration: body.duration,
+        resolution: body.resolution,
+        referenceImageBase64: body.referenceImageBase64,
+        referenceMimeType: body.referenceMimeType,
+        previousInteractionId: body.previousInteractionId,
+      });
+
+      if (videoJobStore.size > 12) {
+        const oldestKey = videoJobStore.keys().next().value;
+        if (oldestKey) videoJobStore.delete(oldestKey);
+      }
+
+      res.status(202).json({ job });
+    } catch (err: any) {
+      res.status(400).json({
+        error: err?.message || 'Não foi possível iniciar a geração de vídeo.',
+      });
+    }
+  });
+
+  api.get('/media/videos/:jobId', requireAuth, (req, res) => {
+    const jobId = String(req.params.jobId || '');
+    const entry = videoJobStore.get(jobId);
+    if (!entry) {
+      res.status(404).json({ error: 'Tarefa de vídeo não encontrada.' });
+      return;
+    }
+    res.json({ job: entry.job });
+  });
+
+  api.get('/media/videos/:jobId/file', requireAuth, (req, res) => {
+    const jobId = String(req.params.jobId || '');
+    const entry = videoJobStore.get(jobId);
+    if (!entry || !entry.buffer) {
+      res.status(404).json({ error: 'Arquivo de vídeo ainda não disponível.' });
+      return;
+    }
+    res.setHeader('Content-Type', entry.job.mimeType || 'video/mp4');
+    res.setHeader('Content-Disposition', `inline; filename="jarvis-video-${jobId}.mp4"`);
+    res.send(entry.buffer);
+  });
+
+  api.delete('/media/assets/:id', requireAuth, (req, res) => {
+    const id = String(req.params.id || '');
+    const imgIdx = imageGallery.findIndex((i) => i.id === id);
+    if (imgIdx >= 0) {
+      imageGallery.splice(imgIdx, 1);
+      res.json({ deleted: true, id, kind: 'image' });
+      return;
+    }
+    const deletedVideo = videoJobStore.delete(id);
+    res.json({ deleted: deletedVideo, id, kind: 'video' });
+  });
+
+  // ==================== CONSTRUTOR DE APLICATIVOS ANDROID & WINDOWS (.ZIP) ====================
+  const appProjectStore = new Map<
+    string,
+    { blueprint: AppBlueprintSpec; files: GeneratedProjectFile[]; zipBuffer: Buffer }
+  >();
+
+  api.get('/apps', requireAuth, (_req, res) => {
+    const items = Array.from(appProjectStore.values())
+      .map((entry) => ({
+        blueprint: entry.blueprint,
+        files: entry.files,
+        preview_html: entry.files.find((f) => f.path === 'www/index.html')?.content || '',
+        download_zip_url: `/api/v1/apps/${entry.blueprint.id}/download`,
+        zip_size_bytes: entry.zipBuffer.length,
+      }))
+      .sort((a, b) => (a.blueprint.createdAt < b.blueprint.createdAt ? 1 : -1));
+    res.json({ presets: APP_BUILDER_PRESETS, items });
+  });
+
+  api.post('/apps/scaffold', requireAuth, async (req, res) => {
+    try {
+      const body = (req.body || {}) as {
+        prompt?: string;
+        presetId?: AppPresetId;
+        name?: string;
+        platform?: AppTargetPlatform;
+        accentColor?: string;
+        useAi?: boolean;
+      };
+      const { blueprint, files } = await generateAppBlueprint({
+        prompt: body.prompt,
+        presetId: body.presetId,
+        name: body.name,
+        platform: body.platform || 'both',
+        accentColor: body.accentColor,
+        useAi: Boolean(body.useAi),
+      });
+      const zipBuffer = await packageProjectToZipBuffer(blueprint.slug, files);
+      appProjectStore.set(blueprint.id, { blueprint, files, zipBuffer });
+
+      if (appProjectStore.size > 15) {
+        const oldestKey = appProjectStore.keys().next().value;
+        if (oldestKey) appProjectStore.delete(oldestKey);
+      }
+
+      res.json({
+        blueprint,
+        files,
+        preview_html: files.find((f) => f.path === 'www/index.html')?.content || '',
+        download_zip_url: `/api/v1/apps/${blueprint.id}/download`,
+        zip_size_bytes: zipBuffer.length,
+      });
+    } catch (err: any) {
+      res.status(400).json({
+        error: err?.message || 'Não foi possível gerar o projeto do aplicativo.',
+      });
+    }
+  });
+
+  api.get('/apps/:id/download', requireAuth, (req, res) => {
+    const id = String(req.params.id || '');
+    const entry = appProjectStore.get(id);
+    if (!entry) {
+      res.status(404).json({ error: 'Projeto de aplicativo não encontrado.' });
+      return;
+    }
+    const filename = `${entry.blueprint.slug}-${entry.blueprint.platform}.zip`;
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(entry.zipBuffer);
+  });
+
+  api.delete('/apps/:id', requireAuth, (req, res) => {
+    const id = String(req.params.id || '');
+    const deleted = appProjectStore.delete(id);
+    res.json({ deleted, id });
+  });
+
+  // ==================== FASE 6: IMPORTADOR DE REPOSITÓRIOS DO GITHUB ====================
+  const githubInspectionStore = new Map<string, GitHubRepoInspection>();
+
+  api.get('/github/history', requireAuth, (_req, res) => {
+    const items = Array.from(githubInspectionStore.values()).sort((a, b) =>
+      a.inspectedAt < b.inspectedAt ? 1 : -1
+    );
+    res.json({ examples: CURATED_GITHUB_EXAMPLES, items });
+  });
+
+  api.post('/github/inspect', requireAuth, async (req, res) => {
+    try {
+      const url = String(req.body?.url || '').trim();
+      const useAi = Boolean(req.body?.useAi);
+      const inspection = await inspectGitHubRepoDetailed({ url, useAi });
+      githubInspectionStore.set(inspection.id, inspection);
+
+      if (githubInspectionStore.size > 25) {
+        const oldestKey = githubInspectionStore.keys().next().value;
+        if (oldestKey) githubInspectionStore.delete(oldestKey);
+      }
+
+      res.json(inspection);
+    } catch (err: any) {
+      res.status(400).json({
+        error: err?.message || 'Não foi possível analisar este repositório do GitHub.',
+      });
+    }
+  });
+
+  api.post('/github/incorporate', requireAuth, (req, res) => {
+    const inspectionId = String(req.body?.inspectionId || '').trim();
+    const mode = String(req.body?.mode || '') as GitHubIncorporationMode;
+    const approvedByUser = req.body?.approvedByUser === true;
+    const customName = String(req.body?.customName || '').trim();
+    const requestedAgents: string[] = Array.isArray(req.body?.assignedAgents)
+      ? Array.from(new Set(req.body.assignedAgents.map(String)))
+      : [];
+
+    if (!approvedByUser) {
+      res.status(400).json({
+        error: 'É necessária a confirmação explícita do usuário antes de incorporar o repositório.',
+      });
+      return;
+    }
+
+    const inspection = githubInspectionStore.get(inspectionId);
+    if (!inspection) {
+      res.status(404).json({
+        error: 'Análise do repositório não encontrada. Faça a leitura do link do GitHub novamente.',
+      });
+      return;
+    }
+
+    if (mode !== 'skill' && mode !== 'agent' && mode !== 'knowledge') {
+      res.status(400).json({ error: 'Modo de incorporação inválido. Use skill, agent ou knowledge.' });
+      return;
+    }
+
+    if (mode === 'skill') {
+      const skillName = customName || inspection.suggestedSkillName;
+      const validAgentRoles = requestedAgents.filter((role) => agentsList.some((a) => a.role === role));
+      const slug = skillName
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+
+      const instructions = [
+        `Origem GitHub (somente leitura): ${inspection.canonicalUrl}`,
+        `Resumo: ${inspection.summaryPtBr}`,
+        `Como aplicar no JARVIS: ${inspection.howItBoostsJarvis}`,
+        inspection.detectedCapabilities.length
+          ? `Capacidades detectadas:\n${inspection.detectedCapabilities.map((c) => `- ${c.title}: ${c.description}`).join('\n')}`
+          : '',
+        inspection.detectedScripts.length
+          ? `Comandos/Scripts de referência: ${inspection.detectedScripts.join(', ')}`
+          : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+
+      const createdSkill = {
+        id: `skill_gh_${slug || Date.now()}_${Date.now().toString(36).slice(-4)}`,
+        name: skillName,
+        version: '1.0.0',
+        origin: 'github',
+        license: inspection.license || 'Open Source',
+        description: inspection.summaryPtBr,
+        domain: inspection.suggestedCategory,
+        allowed_tools: ['read_file', 'web_search'],
+        required_permissions: ['skills:read'],
+        assigned_agents: validAgentRoles,
+        content_hash: `sha256:${crypto.randomBytes(6).toString('hex')}`,
+        is_approved: true,
+        is_revoked: false,
+        instructions,
+        created_at: nowIso(),
+        updated_at: nowIso(),
+      };
+      skillsList.unshift(createdSkill);
+
+      // Sincronização bidirecional com os agentes selecionados
+      for (const ag of agentsList) {
+        if (validAgentRoles.includes(ag.role)) {
+          const current = Array.isArray(ag.installed_skills) ? ag.installed_skills : [];
+          if (!current.includes(createdSkill.name)) {
+            ag.installed_skills = [...current, createdSkill.name];
+          }
+        }
+      }
+
+      if (!inspection.incorporatedModes.includes('skill')) {
+        inspection.incorporatedModes.push('skill');
+      }
+      res.status(201).json({
+        mode: 'skill',
+        inspection,
+        created: createdSkill,
+        message:
+          validAgentRoles.length > 0
+            ? `Habilidade "${createdSkill.name}" criada e vinculada a ${validAgentRoles.length} agente(s).`
+            : `Habilidade "${createdSkill.name}" criada na página de Habilidades.`,
+      });
+      return;
+    }
+
+    if (mode === 'agent') {
+      const displayName = customName || inspection.suggestedAgentName;
+      const rawSlug = `gh_${inspection.repo}`
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+      const role = agentsList.some((a) => a.role === rawSlug)
+        ? `${rawSlug}_${Date.now().toString(36).slice(-4)}`
+        : rawSlug || `gh_agent_${Date.now().toString(36)}`;
+
+      const colorByCat: Record<string, string> = {
+        dev: '#38bdf8',
+        business: '#f97316',
+        creative: '#a855f7',
+        security: '#10b981',
+        studies: '#eab308',
+      };
+      const linkedSkillName = inspection.suggestedSkillName;
+
+      const createdAgent: AgentServerRecord = {
+        role,
+        name: displayName,
+        proper_name: displayName,
+        handle: inspection.suggestedAgentHandle,
+        category: inspection.suggestedCategory,
+        mission: inspection.suggestedMission,
+        preferred_model: 'gemini-4-hydrogen',
+        routing_policy: 'auto_hybrid',
+        autonomy_level: 'ask_approval',
+        is_read_only: false,
+        strict_focus: false,
+        strict_topic: inspection.fullName,
+        delegation_targets: [],
+        allowed_tools: ['read_file', 'web_search'],
+        system_prompt: [
+          `Você é ${displayName}, especialista incorporado a partir do repositório GitHub ${inspection.fullName} (${inspection.canonicalUrl}).`,
+          `Resumo do projeto: ${inspection.summaryPtBr}`,
+          `Capacidades principais: ${inspection.detectedCapabilities.map((c) => c.title).join('; ')}.`,
+          `Sempre responda em português do Brasil claro e prático, aplicando as convenções e soluções desse projeto para ajudar o usuário.`,
+        ].join('\n'),
+        mascot: {
+          id: 'maestro_slime',
+          color: colorByCat[inspection.suggestedCategory] || '#f97316',
+          accessory: 'glasses',
+          mood: 'idle',
+        },
+        is_custom: true,
+        installed_skills: [linkedSkillName],
+        version: 1,
+        updated_at: nowIso(),
+      };
+      agentsList.unshift(createdAgent);
+      recordAgentVersion(createdAgent, `Incorporado do GitHub (${inspection.fullName})`);
+
+      // Garante a habilidade vinculada ao novo especialista
+      const existingSkill = skillsList.find(
+        (s) => s.name.toLowerCase() === linkedSkillName.toLowerCase()
+      );
+      if (existingSkill) {
+        if (!existingSkill.assigned_agents.includes(createdAgent.role)) {
+          existingSkill.assigned_agents.push(createdAgent.role);
+          existingSkill.updated_at = nowIso();
+        }
+      } else {
+        skillsList.unshift({
+          id: `skill_gh_agent_${Date.now().toString(36)}`,
+          name: linkedSkillName,
+          version: '1.0.0',
+          origin: 'github',
+          license: inspection.license || 'Open Source',
+          description: inspection.summaryPtBr,
+          domain: inspection.suggestedCategory,
+          allowed_tools: ['read_file', 'web_search'],
+          required_permissions: ['skills:read'],
+          assigned_agents: [createdAgent.role],
+          content_hash: `sha256:${crypto.randomBytes(6).toString('hex')}`,
+          is_approved: true,
+          is_revoked: false,
+          instructions: `Conhecimento e capacidades incorporados de ${inspection.canonicalUrl}.`,
+          created_at: nowIso(),
+          updated_at: nowIso(),
+        });
+      }
+
+      if (!inspection.incorporatedModes.includes('agent')) {
+        inspection.incorporatedModes.push('agent');
+      }
+      res.status(201).json({
+        mode: 'agent',
+        inspection,
+        created: createdAgent,
+        message: `Especialista "${createdAgent.name}" (${createdAgent.handle}) incorporado ao Dock e ao Chat.`,
+      });
+      return;
+    }
+
+    // mode === 'knowledge'
+    const markdown = buildGitHubKnowledgeMarkdown(inspection);
+    const docName = customName
+      ? `${customName.replace(/\.md$/i, '')}.md`
+      : `github-${inspection.owner}-${inspection.repo}.md`;
+
+    const createdDoc = {
+      name: docName,
+      category: 'github',
+      chunks: Math.max(1, Math.ceil(markdown.length / 650)),
+      size_bytes: Buffer.byteLength(markdown, 'utf8'),
+      file_type: 'md',
+      indexed_at: nowIso(),
+      content: markdown,
+    };
+    knowledgeDocs = [createdDoc, ...knowledgeDocs.filter((d) => d.name !== createdDoc.name)];
+
+    if (!inspection.incorporatedModes.includes('knowledge')) {
+      inspection.incorporatedModes.push('knowledge');
+    }
+    res.status(201).json({
+      mode: 'knowledge',
+      inspection,
+      created: createdDoc,
+      message: `Documentação "${createdDoc.name}" indexada na Base de Conhecimento.`,
+    });
   });
 
   // Fallback for any other unmapped API endpoints so the UI receives clean JSON instead of HTML

@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Modal } from '../../shared/common/Modal';
 import { Users, Search, Check, RefreshCw, CheckSquare, Square, X } from 'lucide-react';
 import { SkillInfo, AgentInfo } from '../../types';
 import { assignSkillAgents } from '../../api';
 import { notify } from '../../shared/common/Toast';
-import { ALL_26_AGENTS } from '../../data/agentsCatalog';
+import { sortAgentsCustomFirst } from '../../services/agentSync';
+import { buildAgentFilterTabs, resolveAgentCategoryLabel } from '../../services/domainCatalog';
 
 interface SkillAgentModalProps {
   isOpen: boolean;
@@ -14,26 +15,16 @@ interface SkillAgentModalProps {
   onSaved: () => void;
 }
 
-const AGENT_CATEGORIES = [
-  { id: 'all' as const, label: `Todos (${ALL_26_AGENTS.length})` },
-  { id: 'orchestration' as const, label: 'Orquestração' },
-  { id: 'development' as const, label: 'Dev & QA' },
-  { id: 'data' as const, label: 'Dados & BI' },
-  { id: 'devops' as const, label: 'DevOps & Infra' },
-  { id: 'security' as const, label: 'Segurança' },
-];
-
 export const SkillAgentModal: React.FC<SkillAgentModalProps> = ({
   isOpen,
   onClose,
   skill,
+  agents,
   onSaved,
 }) => {
   const [selectedAgents, setSelectedAgents] = useState<string[]>(skill?.assigned_agents || []);
   const [search, setSearch] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState<
-    'all' | 'orchestration' | 'development' | 'data' | 'devops' | 'security'
-  >('all');
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -44,6 +35,19 @@ export const SkillAgentModal: React.FC<SkillAgentModalProps> = ({
     }
   }, [skill]);
 
+  const normalizedAgents = useMemo(() => {
+    return sortAgentsCustomFirst(agents || []).map((ag) => ({
+      role: ag.role,
+      name: ag.proper_name ? `${ag.proper_name} (${ag.name})` : ag.name,
+      category: (ag.category || 'dev').trim().toLowerCase(),
+      categoryLabel: resolveAgentCategoryLabel(ag.category, true),
+      mission: ag.mission || '',
+      color: ag.mascot?.color || '#f97316',
+    }));
+  }, [agents]);
+
+  const categoryTabs = useMemo(() => buildAgentFilterTabs(normalizedAgents), [normalizedAgents]);
+
   if (!skill) return null;
 
   const toggleAgent = (role: string) => {
@@ -52,7 +56,7 @@ export const SkillAgentModal: React.FC<SkillAgentModalProps> = ({
     );
   };
 
-  const filteredAgents = ALL_26_AGENTS.filter((a) => {
+  const filteredAgents = normalizedAgents.filter((a) => {
     const q = search.toLowerCase();
     const matchSearch =
       a.name.toLowerCase().includes(q) ||
@@ -78,7 +82,8 @@ export const SkillAgentModal: React.FC<SkillAgentModalProps> = ({
     setSaving(true);
     try {
       await assignSkillAgents(skill.id, selectedAgents);
-      notify(`Especialistas vinculados com sucesso à skill "${skill.name}"!`, 'success');
+      notify(`Agentes vinculados com sucesso à habilidade "${skill.name}"!`, 'success');
+      window.dispatchEvent(new CustomEvent('jarvis:agents-updated'));
       onSaved();
       onClose();
     } catch (e: any) {
@@ -93,7 +98,7 @@ export const SkillAgentModal: React.FC<SkillAgentModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title={`Vincular Especialistas: ${skill.name}`}
-      subtitle="Defina quais dos 26 agentes de IA terão acesso às diretrizes e ferramentas desta habilidade"
+      subtitle="Defina quais especialistas (padrão ou personalizados de qualquer área) terão acesso a esta habilidade"
       icon={<Users size={18} color="var(--accent-light)" />}
       maxWidth="lg"
       footer={
@@ -110,7 +115,7 @@ export const SkillAgentModal: React.FC<SkillAgentModalProps> = ({
           <span className="jarvis-tabular" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
             Selecionados:{' '}
             <strong style={{ color: 'var(--accent-light)' }}>{selectedAgents.length}</strong> de{' '}
-            {ALL_26_AGENTS.length} agentes
+            {normalizedAgents.length} especialistas
           </span>
 
           <div style={{ display: 'flex', gap: '8px' }}>
@@ -166,7 +171,7 @@ export const SkillAgentModal: React.FC<SkillAgentModalProps> = ({
             }}
           >
             <div className="jarvis-segmented" style={{ flexWrap: 'wrap' }} role="tablist" aria-label="Filtrar especialistas por categoria">
-              {AGENT_CATEGORIES.map((cat) => (
+              {categoryTabs.map((cat) => (
                 <button
                   key={cat.id}
                   type="button"

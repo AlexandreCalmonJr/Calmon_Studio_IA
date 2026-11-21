@@ -77,12 +77,25 @@ export function useChatStream(
     return newId;
   });
 
+  const deletedSessionsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const onDeleted = (ev: Event) => {
+      const sid = (ev as CustomEvent<{ sessionId?: string }>).detail?.sessionId;
+      if (sid) deletedSessionsRef.current.add(sid);
+    };
+    window.addEventListener('jarvis:session-deleted', onDeleted);
+    return () => window.removeEventListener('jarvis:session-deleted', onDeleted);
+  }, []);
+
   // Persistência automática otimizada (apenas quando inativo para não bloquear a thread em streaming)
   useEffect(() => {
-    if (loading) return;
+    if (loading || deletedSessionsRef.current.has(sessionId)) return;
     try {
       localStorage.setItem(getAccountStorageKey(STORAGE_MESSAGES_KEY), JSON.stringify(messages));
-      saveSessionMessagesLocally(sessionId, messages);
+      if (messages.length > 0) {
+        saveSessionMessagesLocally(sessionId, messages);
+      }
     } catch (e) {
       console.warn('Falha ao salvar mensagens no localStorage:', e);
     }
