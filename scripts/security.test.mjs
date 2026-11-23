@@ -36,8 +36,8 @@ test('websocket upgrades require an active, unexpired cookie session', () => {
 });
 
 test('realtime broadcasts fail closed unless an owner is specified', () => {
-  assert.match(source, /if \(!ownerUserId\) return/);
-  assert.match(source, /clientOwner === ownerUserId/);
+  assert.match(source, /if \(!eventOwner\) return/);
+  assert.match(source, /clientOwner === eventOwner/);
 });
 
 test('Firebase session exchange verifies a signed ID token server-side', () => {
