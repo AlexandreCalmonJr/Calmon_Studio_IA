@@ -269,50 +269,14 @@ function permissionsForRole(role: 'admin' | 'developer' | 'auditor'): string[] {
 }
 
 // Seeded local accounts
-const users = new Map<string, UserAccount>([
-  ['admin', makeAccount('admin', 'Administrador', 'Jarvis@2026!Admin', 'admin', false)],
-  ['dev', makeAccount('dev', 'Desenvolvedor', 'Jarvis@2026!Dev', 'developer', false)],
-]);
+const users = new Map<string, UserAccount>();
 
-const VALID_ADMIN_TOKENS = new Set([
-  process.env.JARVIS_ADMIN_TOKEN || 'jarvis-admin-2026',
-]);
-const VALID_BOOTSTRAP_TOKENS = new Set([
-  process.env.JARVIS_BOOTSTRAP_TOKEN || 'jarvis-bootstrap-2026',
-]);
+const VALID_ADMIN_TOKENS = new Set<string>(process.env.JARVIS_ADMIN_TOKEN ? [process.env.JARVIS_ADMIN_TOKEN] : []);
+const VALID_BOOTSTRAP_TOKENS = new Set<string>(process.env.JARVIS_BOOTSTRAP_TOKEN ? [process.env.JARVIS_BOOTSTRAP_TOKEN] : []);
 
 const sessions = new Map<string, SessionRecord>();
 
-const userProfiles = new Map<string, Record<string, string>>([
-  [
-    'admin',
-    {
-      displayName: 'Administrador',
-      avatarIcon: 'J',
-      developerRole: 'Arquiteto de Sistemas & IA',
-      seniorityLevel: 'architect',
-      responseStyle: 'detailed',
-      customInstructions: 'Priorize respostas técnicas claras, objetivas e em português.',
-      assistantName: 'JARVIS',
-      assistantGreeting: '',
-      experienceMode: 'engineering',
-    },
-  ],
-  [
-    'dev',
-    {
-      displayName: 'Desenvolvedor',
-      avatarIcon: 'D',
-      developerRole: 'Engenheiro de Software',
-      seniorityLevel: 'senior',
-      responseStyle: 'detailed',
-      customInstructions: '',
-      assistantName: 'JARVIS',
-      assistantGreeting: '',
-      experienceMode: 'engineering',
-    },
-  ],
-]);
+const userProfiles = new Map<string, Record<string, string>>();
 
 const learningProgress = new Map<string, { completed_modules: string[]; updated_at: string }>();
 
@@ -1333,29 +1297,37 @@ function buildApiRouter() {
       res.status(401).json({ detail: 'Token de administrador inválido.' });
       return;
     }
-    const admin = users.get('admin')!;
+    const admin = users.get('admin');
+    if (!admin) {
+      res.status(503).json({ detail: 'A conta administrativa ainda não foi inicializada.' });
+      return;
+    }
     const record = createSessionForUser(req, res, admin);
-    res.json({
-      status: 'authenticated',
-      user_id: admin.username,
-      role: admin.role,
-      session_token: record.session_id,
-    });
+    res.json({ status: 'authenticated', user_id: admin.username, role: admin.role, session_token: record.session_id });
   });
 
   api.post('/auth/bootstrap/exchange', (req, res) => {
     const token = String(req.body?.token || '').trim();
-    if (!VALID_BOOTSTRAP_TOKENS.has(token)) {
+    if (!token || !VALID_BOOTSTRAP_TOKENS.has(token)) {
       res.status(401).json({ detail: 'Token inicial inválido ou expirado.' });
       return;
     }
-    const admin = users.get('admin')!;
+    if (users.has('admin')) {
+      res.status(409).json({ detail: 'A configuração inicial já foi concluída.' });
+      return;
+    }
+    const admin = makeAccount('admin', 'Administrador', crypto.randomBytes(48).toString('hex'), 'admin', true);
+    users.set('admin', admin);
+    userProfiles.set('admin', {
+      displayName: 'Administrador', avatarIcon: 'J', developerRole: 'Administrador',
+      seniorityLevel: 'architect', responseStyle: 'detailed', customInstructions: '',
+      assistantName: 'JARVIS', assistantGreeting: '', experienceMode: 'engineering',
+    });
+    VALID_BOOTSTRAP_TOKENS.delete(token);
     const record = createSessionForUser(req, res, admin);
     res.json({
-      status: 'authenticated',
-      user_id: admin.username,
-      role: admin.role,
-      session_token: record.session_id,
+      status: 'authenticated', user_id: admin.username, role: admin.role,
+      must_change_password: true, session_token: record.session_id,
     });
   });
 
