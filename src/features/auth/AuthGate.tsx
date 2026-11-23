@@ -260,16 +260,12 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
     setError('');
     try {
       const fbUser = await signInWithGooglePopup();
+      const idToken = await fbUser.getIdToken();
       const response = await apiFetch('/api/v1/auth/firebase-session', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({
-          uid: fbUser.uid,
-          email: fbUser.email || '',
-          display_name: fbUser.displayName || 'Usuário',
-          email_verified: fbUser.emailVerified,
-        }),
+        body: JSON.stringify({ id_token: idToken }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || 'Não foi possível concluir o login com Google.');
