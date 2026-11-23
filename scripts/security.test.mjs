@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 const source = await readFile(new URL('../server.ts', import.meta.url), 'utf8');
 const firebaseVerifier = await readFile(new URL('../server/firebaseTokenVerifier.ts', import.meta.url), 'utf8');
 const authGate = await readFile(new URL('../src/features/auth/AuthGate.tsx', import.meta.url), 'utf8');
+const firestoreRules = await readFile(new URL('../firestore.rules', import.meta.url), 'utf8');
 
 test('chat sessions carry an explicit account owner', () => {
   assert.match(source, /interface StoredChatSession\s*\{\s*owner_user_id: string;/);
@@ -108,4 +109,10 @@ test('streamed chat route also validates and assigns the session owner', () => {
   assert.match(streamRoute, /const ownerUserId = user\?\.username \|\| 'admin'/);
   assert.match(streamRoute, /existingSession\.owner_user_id !== ownerUserId/);
   assert.match(streamRoute, /owner_user_id: ownerUserId/);
+});
+
+test('Firestore admin authorization uses a server-provisioned UID record, not a hardcoded email', () => {
+  assert.match(firestoreRules, /function isBootstrappedAdmin\(\)[\s\S]*?request\.auth\.uid/);
+  assert.match(firestoreRules, /exists\(\/databases\/\$\(database\)\/documents\/admins\/\$\(request\.auth\.uid\)\)/);
+  assert.doesNotMatch(firestoreRules, /request\.auth\.token\.email\s*==/);
 });
