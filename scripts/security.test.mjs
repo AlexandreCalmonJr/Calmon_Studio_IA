@@ -117,3 +117,7 @@ test('Firestore admin authorization uses a server-provisioned UID record, not a 
   assert.match(firestoreRules, /exists\(\/databases\/\$\(database\)\/documents\/admins\/\$\(request\.auth\.uid\)\)/);
   assert.doesNotMatch(firestoreRules, /request\.auth\.token\.email\s*==/);
 });
+
+test('trusted proxy is opt-in rather than trusting forwarded IP headers by default', () => {
+  assert.match(source, /app\.set\('trust proxy', process\.env\.TRUST_PROXY === '1' \? 1 : false\)/);
+});
