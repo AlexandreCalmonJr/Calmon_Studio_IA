@@ -153,6 +153,7 @@ import {
 } from './server/androidAppServer.ts';
 import { createLocalSqliteBrainStore } from './server/brain/sqliteBrainStore.ts';
 import { createBrainRouter } from './server/brain/brainRouter.ts';
+import { verifyFirebaseIdToken } from './server/firebaseTokenVerifier.ts';
 
 const requestContext = new AsyncLocalStorage<{ ownerUserId: string }>();
 const realtimeClients = new Map<WebSocket, string>();
@@ -1429,21 +1430,48 @@ function buildApiRouter() {
     });
   });
 
-  // Bridge verified Google / Firebase Auth client sign-in to local API session
-  api.post('/auth/firebase-session', (req, res) => {
-    const uid = String(req.body?.uid || '').trim();
-    const email = String(req.body?.email || '').trim().toLowerCase();
-    const display_name = String(req.body?.display_name || 'Usuário').trim().slice(0, 80) || 'Usuário';
-    const email_verified = req.body?.email_verified === true;
+  // Firebase identity is trusted only after server-side ID token signature and claims verification.
+  api.post('/auth/firebase-session', async (req, res) => {
+    const authHeader = String(req.headers.authorization || '');
+    const bearerToken = authHeader.toLowerCase().startsWith('bearer ')
+      ? authHeader.slice(7).trim()
+      : '';
+    const idToken = String(req.body?.id_token || bearerToken).trim();
+    const projectId = String(process.env.FIREBASE_PROJECT_ID || '').trim();
 
-    if (!uid || !/^[a-zA-Z0-9_-]{6,128}$/.test(uid)) {
-      res.status(400).json({ detail: 'Identificador Firebase inválido.' });
+    if (!idToken || !projectId) {
+      res.status(401).json({ detail: 'Autenticação Firebase não configurada ou token ausente.' });
       return;
     }
 
-    const username = `fb_${uid.slice(0, 20).toLowerCase()}`;
-    const isBootstrappedAdmin = email_verified && email === 'alexandrecalmonjunior@gmail.com';
+    let claims;
+    try {
+      claims = await verifyFirebaseIdToken(idToken, projectId);
+    } catch (error) {
+      res.status(401).json({
+        detail: error instanceof Error ? error.message : 'Token Firebase inválido.',
+      });
+      return;
+    }
+
+    const uid = claims.sub;
+    const email = String(claims.email || '').trim().toLowerCase();
+    const display_name = String(claims.name || email || 'Usuário').trim().slice(0, 80) || 'Usuário';
+    const email_verified = claims.email_verified === true;
+    if (!/^[a-zA-Z0-9_-]{6,128}$/.test(uid)) {
+      res.status(401).json({ detail: 'Identidade Firebase inválida.' });
+      return;
+    }
+
+    const adminEmails = new Set(
+      String(process.env.JARVIS_FIREBASE_ADMIN_EMAILS || '')
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean),
+    );
+    const isBootstrappedAdmin = email_verified && Boolean(email) && adminEmails.has(email);
     const role: 'admin' | 'developer' = isBootstrappedAdmin ? 'admin' : 'developer';
+    const username = `fb_${uid.slice(0, 20).toLowerCase()}`;
 
     let user = users.get(username);
     if (!user) {
@@ -1463,6 +1491,8 @@ function buildApiRouter() {
     } else if (!user.is_active) {
       res.status(403).json({ detail: 'Conta desativada pelo administrador.' });
       return;
+    } else if (isBootstrappedAdmin && user.role !== 'admin') {
+      user.role = 'admin';
     }
 
     const record = createSessionForUser(req, res, user);
