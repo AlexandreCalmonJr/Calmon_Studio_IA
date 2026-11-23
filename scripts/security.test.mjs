@@ -33,12 +33,13 @@ test('API session tokens are not accepted in query strings and expire server-sid
 test('websocket upgrades require an active, unexpired cookie session', () => {
   assert.match(source, /const sessionId = parseCookies\(request\.headers\.cookie\)\[SESSION_COOKIE\]/);
   assert.match(source, /HTTP\/1\.1 401 Unauthorized/);
-  assert.match(source, /realtimeClients\.set\(ws, session\.username\)/);
+  assert.match(source, /realtimeClients\.set\(ws, \{ username: session\.username, sessionId: session\.session_id \}\)/);
 });
 
 test('realtime broadcasts fail closed unless an owner is specified', () => {
   assert.match(source, /if \(!eventOwner\) return/);
-  assert.match(source, /clientOwner === eventOwner/);
+  assert.match(source, /clientIdentity\.username === eventOwner/);
+  assert.match(source, /sessions\.get\(clientIdentity\.sessionId\)/);
 });
 
 test('Firebase session exchange verifies a signed ID token server-side', () => {
