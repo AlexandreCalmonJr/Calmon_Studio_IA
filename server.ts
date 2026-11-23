@@ -153,16 +153,14 @@ import {
 import { createLocalSqliteBrainStore } from './server/brain/sqliteBrainStore.ts';
 import { createBrainRouter } from './server/brain/brainRouter.ts';
 
-const realtimeClients = new Set<WebSocket>();
-function broadcastRealtimeEvent(type: string, payload: unknown) {
+const realtimeClients = new Map<WebSocket, string>();
+function broadcastRealtimeEvent(type: string, payload: unknown, ownerUserId?: string) {
+  // Fail closed: events without an explicit owner are not broadcast to authenticated tenants.
+  if (!ownerUserId) return;
   const frame = JSON.stringify({ type, payload, timestamp: new Date().toISOString() });
-  realtimeClients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      try {
-        client.send(frame);
-      } catch {
-        // ignore dropped socket
-      }
+  realtimeClients.forEach((clientOwner, client) => {
+    if (clientOwner === ownerUserId && client.readyState === WebSocket.OPEN) {
+      try { client.send(frame); } catch { /* ignore dropped socket */ }
     }
   });
 }
@@ -1083,6 +1081,7 @@ let knowledgeDocs = [
 ];
 
 interface StoredChatSession {
+  owner_user_id: string;
   session_id: string;
   title: string;
   first_prompt: string;
@@ -1103,6 +1102,7 @@ const chatSessions = new Map<string, StoredChatSession>([
   [
     'sess_welcome_01',
     {
+      owner_user_id: 'admin',
       session_id: 'sess_welcome_01',
       title: 'Boas-vindas ao JARVIS AI Hub',
       first_prompt: 'Apresente o estado atual da plataforma e os próximos passos recomendados.',
@@ -1183,16 +1183,23 @@ function parseCookies(header?: string): Record<string, string> {
   return out;
 }
 
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+
 function getSessionFromReq(req: Request): SessionRecord | null {
   const cookies = parseCookies(req.headers.cookie);
   const headerToken = String(req.headers['x-jarvis-session'] || '').trim();
   const authHeader = String(req.headers.authorization || '').trim();
   const bearerToken = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7).trim() : '';
-  const queryToken = typeof req.query.session_token === 'string' ? req.query.session_token.trim() : '';
-
-  const sid = cookies[SESSION_COOKIE] || headerToken || bearerToken || queryToken;
+  // Session IDs are deliberately not accepted in query strings (URLs are commonly logged).
+  const sid = cookies[SESSION_COOKIE] || headerToken || bearerToken;
   if (!sid) return null;
-  return sessions.get(sid) || null;
+  const session = sessions.get(sid);
+  if (!session) return null;
+  if (Date.now() - session.created_at > SESSION_TTL_MS) {
+    sessions.delete(sid);
+    return null;
+  }
+  return session;
 }
 
 function setSessionCookie(req: Request, res: Response, sessionId: string) {
@@ -1903,8 +1910,9 @@ function buildApiRouter() {
   });
 
   // --- CHAT & TASKS ---
-  api.get('/chat/sessions', requireAuth, (_req, res) => {
-    const list = Array.from(chatSessions.values()).map((s) => ({
+  api.get('/chat/sessions', requireAuth, (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
+    const list = Array.from(chatSessions.values()).filter((s) => s.owner_user_id === ownerUserId).map((s) => ({
       session_id: s.session_id,
       title: s.title,
       first_prompt: s.first_prompt,
@@ -1917,31 +1925,39 @@ function buildApiRouter() {
 
   api.get('/chat/sessions/:id', requireAuth, (req, res) => {
     const s = chatSessions.get(req.params.id);
-    if (!s) {
-      res.json({ session_id: req.params.id, tasks: [], messages: [] });
+    if (!s || s.owner_user_id !== getOwnerUserId(req)) {
+      res.status(404).json({ detail: 'Conversa não encontrada.' });
       return;
     }
     res.json({ session_id: s.session_id, tasks: s.tasks, messages: s.messages });
   });
 
   api.delete('/chat/sessions/:id', requireAuth, (req, res) => {
+    const s = chatSessions.get(req.params.id);
+    if (!s || s.owner_user_id !== getOwnerUserId(req)) {
+      res.status(404).json({ detail: 'Conversa não encontrada.' });
+      return;
+    }
     chatSessions.delete(req.params.id);
     res.json({ deleted: true });
   });
 
   api.get('/chat/search', requireAuth, (req, res) => {
     const q = String(req.query.query || '').toLowerCase();
+    const ownerUserId = getOwnerUserId(req);
     const hits = Array.from(chatSessions.values())
-      .filter((s) => s.title.toLowerCase().includes(q) || s.messages.some((m) => m.content.toLowerCase().includes(q)))
+      .filter((s) => s.owner_user_id === ownerUserId && (s.title.toLowerCase().includes(q) || s.messages.some((m) => m.content.toLowerCase().includes(q))))
       .map((s) => ({ session_id: s.session_id, title: s.title, last_activity: s.last_activity }));
     res.json(hits);
   });
 
   api.get('/chat/sessions/:id/export', requireAuth, (req, res) => {
     const s = chatSessions.get(req.params.id);
-    const md = s
-      ? s.messages.map((m) => `### ${m.role === 'user' ? 'Você' : 'JARVIS'}\n\n${m.content}`).join('\n\n---\n\n')
-      : '# Conversa vazia';
+    if (!s || s.owner_user_id !== getOwnerUserId(req)) {
+      res.status(404).json({ detail: 'Conversa não encontrada.' });
+      return;
+    }
+    const md = s.messages.map((m) => `### ${m.role === 'user' ? 'Você' : 'JARVIS'}\n\n${m.content}`).join('\n\n---\n\n');
     res.type('text/markdown').send(md);
   });
 
@@ -1959,6 +1975,11 @@ function buildApiRouter() {
     const taskId = `tsk_${Date.now()}`;
 
     const ownerUserId = user?.username || 'admin';
+    const existingSession = chatSessions.get(sessionId);
+    if (existingSession && existingSession.owner_user_id !== ownerUserId) {
+      res.status(404).json({ detail: 'Conversa não encontrada.' });
+      return;
+    }
     const targetModelName = requestedModel || activeAgent.preferred_model;
     const resolvedExternalCred = resolveExternalCredentialForRequest(req, ownerUserId, targetModelName);
 
@@ -7919,8 +7940,15 @@ async function startServer() {
   const server = http.createServer(app);
   const wss = new WebSocketServer({ noServer: true });
 
-  wss.on('connection', (ws) => {
-    realtimeClients.add(ws);
+  wss.on('connection', (ws, request) => {
+    const sessionId = parseCookies(request.headers.cookie)[SESSION_COOKIE];
+    const session = sessionId ? sessions.get(sessionId) : undefined;
+    const account = session ? users.get(session.username) : undefined;
+    if (!session || !account?.is_active || Date.now() - session.created_at > SESSION_TTL_MS) {
+      ws.close(1008, 'Authentication required');
+      return;
+    }
+    realtimeClients.set(ws, session.username);
     try {
       ws.send(JSON.stringify({ type: 'connected', payload: { status: 'ready' } }));
     } catch {
@@ -7934,6 +7962,14 @@ async function startServer() {
   server.on('upgrade', (request, socket, head) => {
     const urlPath = (request.url || '').split('?')[0];
     if (urlPath === '/ws') {
+      const sessionId = parseCookies(request.headers.cookie)[SESSION_COOKIE];
+      const session = sessionId ? sessions.get(sessionId) : undefined;
+      const account = session ? users.get(session.username) : undefined;
+      if (!session || !account?.is_active || Date.now() - session.created_at > SESSION_TTL_MS) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+        socket.destroy();
+        return;
+      }
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit('connection', ws, request);
       });
