@@ -45,6 +45,7 @@ interface SessionInfo {
   subject_id?: string;
   user_id?: string;
   role?: string;
+  must_change_password?: boolean;
 }
 interface UserRecord {
   username: string;
@@ -104,6 +105,11 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
 
   // Active session & modals
   const [session, setSession] = useState<SessionInfo | null>(null);
+  const [passwordChangeRequired, setPasswordChangeRequired] = useState(false);
+  const [initialPassword, setInitialPassword] = useState('');
+  const [initialPasswordConfirm, setInitialPasswordConfirm] = useState('');
+  const [passwordChangeError, setPasswordChangeError] = useState('');
+  const [passwordChangeBusy, setPasswordChangeBusy] = useState(false);
   const [accessOpen, setAccessOpen] = useState(false);
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [newUser, setNewUser] = useState({
@@ -155,6 +161,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
       if (!accountId) throw new Error('A sessão não identificou a conta autenticada.');
       setActiveAccountScope(accountId);
       setSession(nextSession);
+      setPasswordChangeRequired(Boolean(nextSession.must_change_password));
       setStatus('authenticated');
       return true;
     } catch {
@@ -315,6 +322,38 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
       setError(cause instanceof Error ? cause.message : 'Falha ao validar token.');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const submitInitialPasswordChange = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setPasswordChangeError('');
+    if (initialPassword.length < 12) {
+      setPasswordChangeError('A palavra-passe deve ter pelo menos 12 caracteres.');
+      return;
+    }
+    if (initialPassword !== initialPasswordConfirm) {
+      setPasswordChangeError('As palavras-passe não coincidem.');
+      return;
+    }
+    setPasswordChangeBusy(true);
+    try {
+      const response = await apiFetch('/api/v1/auth/change-password', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ new_password: initialPassword }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'Não foi possível alterar a palavra-passe.');
+      setInitialPassword('');
+      setInitialPasswordConfirm('');
+      setPasswordChangeRequired(false);
+      setSession((current) => current ? { ...current, must_change_password: false } : current);
+    } catch (cause) {
+      setPasswordChangeError(cause instanceof Error ? cause.message : 'Falha ao alterar a palavra-passe.');
+    } finally {
+      setPasswordChangeBusy(false);
     }
   };
 
@@ -1043,6 +1082,54 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
 
   return (
     <>
+      {passwordChangeRequired && status === 'authenticated' && (
+        <div style={styles.overlay} role="presentation">
+          <section
+            style={styles.accessPanel}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="initial-password-title"
+          >
+            <div style={styles.accessHeader}>
+              <div>
+                <h2 id="initial-password-title" style={styles.accessTitle}>Proteja a conta administrativa</h2>
+                <p style={styles.headerSub}>Defina uma palavra-passe pessoal antes de utilizar o JARVIS.</p>
+              </div>
+            </div>
+            <form onSubmit={submitInitialPasswordChange} style={styles.form}>
+              <label style={styles.label} htmlFor="initial-admin-password">Nova palavra-passe (mínimo 12 caracteres)</label>
+              <input
+                id="initial-admin-password"
+                type="password"
+                autoComplete="new-password"
+                className="jarvis-input"
+                style={styles.input}
+                minLength={12}
+                value={initialPassword}
+                onChange={(event) => setInitialPassword(event.target.value)}
+                required
+              />
+              <label style={styles.label} htmlFor="initial-admin-password-confirm">Confirmar palavra-passe</label>
+              <input
+                id="initial-admin-password-confirm"
+                type="password"
+                autoComplete="new-password"
+                className="jarvis-input"
+                style={styles.input}
+                minLength={12}
+                value={initialPasswordConfirm}
+                onChange={(event) => setInitialPasswordConfirm(event.target.value)}
+                required
+              />
+              {passwordChangeError && <div role="alert" style={styles.error}>{passwordChangeError}</div>}
+              <button type="submit" disabled={passwordChangeBusy} className="btn btn-primary btn-lg btn-block">
+                {passwordChangeBusy ? 'A guardar...' : 'Guardar palavra-passe e continuar'}
+              </button>
+            </form>
+          </section>
+        </div>
+      )}
+
       {children}
 
       {deviceOpen && (session?.role === 'admin' || session?.role === 'developer') && (
