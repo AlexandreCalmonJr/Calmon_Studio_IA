@@ -59,9 +59,9 @@ test('Firebase verifier checks signature, project audience, issuer and expiry', 
 test('no default administrator credentials or fallback tokens remain', () => {
   assert.match(source, /const users = new Map<string, UserAccount>\(\)/);
   assert.doesNotMatch(source, /Jarvis@2026!Admin|Jarvis@2026!Dev|jarvis-admin-2026|jarvis-bootstrap-2026/);
+  assert.match(source, /process\.env\.JARVIS_ADMIN_PASSWORD/);
   assert.match(source, /process\.env\.JARVIS_BOOTSTRAP_TOKEN/);
-  assert.match(source, /VALID_BOOTSTRAP_TOKENS\.delete\(token\)/);
-  assert.match(source, /must_change_password: true/);
+  assert.match(source, /Configure JARVIS_ADMIN_PASSWORD/);
 });
 
 test('Firebase administrator role comes only from a verified-email allowlist', () => {
@@ -78,7 +78,7 @@ test('authentication and registration endpoints have rate limits', () => {
   }
 });
 
-test('first administrator must set a personal password before using protected routes', () => {
+test('password-change-required accounts are restricted until their password is changed', () => {
   assert.match(source, /user\.must_change_password && req\.path !== '\/auth\/change-password'/);
   assert.match(authGate, /passwordChangeRequired && status === 'authenticated'/);
   assert.match(authGate, /\/api\/v1\/auth\/change-password/);
