@@ -2154,6 +2154,12 @@ function buildApiRouter() {
     const requestedModel = req.body?.model ? String(req.body.model) : undefined;
     const enableWebSearch = typeof req.body?.enable_web_search === 'boolean' ? req.body.enable_web_search : undefined;
     const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
+    const ownerUserId = user?.username || 'admin';
+    const existingSession = chatSessions.get(sessionId);
+    if (existingSession && existingSession.owner_user_id !== ownerUserId) {
+      res.status(404).json({ detail: 'Conversa não encontrada.' });
+      return;
+    }
     const profile = user ? userProfiles.get(user.username) : undefined;
     const assistantName = String(req.body?.assistant_name || profile?.assistantName || 'JARVIS');
     const activeAgent = detectInvokedAgent(prompt, sessionId);
