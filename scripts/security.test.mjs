@@ -102,3 +102,10 @@ test('Firebase admin privilege is reconciled against the server allowlist', () =
   assert.match(source, /else if \(!isBootstrappedAdmin && user\.role === 'admin'\)/);
   assert.match(source, /user\.role = 'developer'/);
 });
+
+test('streamed chat route also validates and assigns the session owner', () => {
+  const streamRoute = source.slice(source.indexOf("api.post('/chat/stream'"));
+  assert.match(streamRoute, /const ownerUserId = user\?\.username \|\| 'admin'/);
+  assert.match(streamRoute, /existingSession\.owner_user_id !== ownerUserId/);
+  assert.match(streamRoute, /owner_user_id: ownerUserId/);
+});
