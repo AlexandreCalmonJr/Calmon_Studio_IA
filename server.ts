@@ -2019,6 +2019,7 @@ function buildApiRouter() {
       let session = chatSessions.get(sessionId);
       if (!session) {
         session = {
+          owner_user_id: ownerUserId,
           session_id: sessionId,
           title: prompt.slice(0, 48) || 'Nova conversa',
           first_prompt: prompt,
