@@ -1512,6 +1512,8 @@ function buildApiRouter() {
       return;
     } else if (isBootstrappedAdmin && user.role !== 'admin') {
       user.role = 'admin';
+    } else if (!isBootstrappedAdmin && user.role === 'admin') {
+      user.role = 'developer';
     }
 
     const record = createSessionForUser(req, res, user);
