@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -153,13 +154,15 @@ import {
 import { createLocalSqliteBrainStore } from './server/brain/sqliteBrainStore.ts';
 import { createBrainRouter } from './server/brain/brainRouter.ts';
 
+const requestContext = new AsyncLocalStorage<{ ownerUserId: string }>();
 const realtimeClients = new Map<WebSocket, string>();
 function broadcastRealtimeEvent(type: string, payload: unknown, ownerUserId?: string) {
-  // Fail closed: events without an explicit owner are not broadcast to authenticated tenants.
-  if (!ownerUserId) return;
+  // Resolve the owner from the authenticated request context; fail closed outside it.
+  const eventOwner = ownerUserId || requestContext.getStore()?.ownerUserId;
+  if (!eventOwner) return;
   const frame = JSON.stringify({ type, payload, timestamp: new Date().toISOString() });
   realtimeClients.forEach((clientOwner, client) => {
-    if (clientOwner === ownerUserId && client.readyState === WebSocket.OPEN) {
+    if (clientOwner === eventOwner && client.readyState === WebSocket.OPEN) {
       try { client.send(frame); } catch { /* ignore dropped socket */ }
     }
   });
@@ -1256,7 +1259,7 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
   }
   (req as Request & { jarvisSession?: SessionRecord; jarvisUser?: UserAccount }).jarvisSession = session;
   (req as Request & { jarvisSession?: SessionRecord; jarvisUser?: UserAccount }).jarvisUser = user;
-  next();
+  requestContext.run({ ownerUserId: user.username }, next);
 }
 
 function buildAssistantReply(prompt: string, model?: string): string {
