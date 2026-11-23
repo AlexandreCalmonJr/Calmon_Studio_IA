@@ -1244,6 +1244,38 @@ function buildAssistantReply(prompt: string, model?: string): string {
   ].join('\n');
 }
 
+const authRateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
+let authRateLimitOperations = 0;
+
+function createAuthRateLimit(scope: string, limit: number, windowMs = 15 * 60 * 1000) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const identity = String(req.body?.username || '').trim().toLowerCase();
+    const clientAddress = req.ip || req.socket.remoteAddress || 'unknown';
+    const key = `${scope}:${clientAddress}:${identity}`;
+    const now = Date.now();
+    let bucket = authRateLimitBuckets.get(key);
+    if (!bucket || now >= bucket.resetAt) {
+      bucket = { count: 0, resetAt: now + windowMs };
+      authRateLimitBuckets.set(key, bucket);
+    }
+    bucket.count += 1;
+
+    authRateLimitOperations += 1;
+    if (authRateLimitOperations % 128 === 0) {
+      for (const [bucketKey, entry] of authRateLimitBuckets) {
+        if (now >= entry.resetAt) authRateLimitBuckets.delete(bucketKey);
+      }
+    }
+
+    if (bucket.count > limit) {
+      res.setHeader('Retry-After', String(Math.max(1, Math.ceil((bucket.resetAt - now) / 1000))));
+      res.status(429).json({ detail: 'Muitas tentativas. Aguarde antes de tentar novamente.' });
+      return;
+    }
+    next();
+  };
+}
+
 function buildApiRouter() {
   const api = express.Router();
   api.use(express.json({ limit: '15mb' }));
@@ -1273,7 +1305,7 @@ function buildApiRouter() {
     });
   });
 
-  api.post('/auth/password-login', (req, res) => {
+  api.post('/auth/password-login', createAuthRateLimit('password-login', 10), (req, res) => {
     const username = String(req.body?.username || '').trim().toLowerCase();
     const password = String(req.body?.password || '');
     const user = users.get(username);
@@ -1291,7 +1323,7 @@ function buildApiRouter() {
     });
   });
 
-  api.post('/auth/login', (req, res) => {
+  api.post('/auth/login', createAuthRateLimit('admin-login', 5), (req, res) => {
     const token = String(req.body?.token || '').trim();
     if (!VALID_ADMIN_TOKENS.has(token)) {
       res.status(401).json({ detail: 'Token de administrador inválido.' });
@@ -1306,7 +1338,7 @@ function buildApiRouter() {
     res.json({ status: 'authenticated', user_id: admin.username, role: admin.role, session_token: record.session_id });
   });
 
-  api.post('/auth/bootstrap/exchange', (req, res) => {
+  api.post('/auth/bootstrap/exchange', createAuthRateLimit('bootstrap', 5), (req, res) => {
     const token = String(req.body?.token || '').trim();
     if (!token || !VALID_BOOTSTRAP_TOKENS.has(token)) {
       res.status(401).json({ detail: 'Token inicial inválido ou expirado.' });
@@ -1350,7 +1382,7 @@ function buildApiRouter() {
   });
 
   // Simplified household / personal account registration (starts in Simple Mode with custom assistant name)
-  api.post('/auth/register-personal', (req, res) => {
+  api.post('/auth/register-personal', createAuthRateLimit('register', 5), (req, res) => {
     const rawUsername = String(req.body?.username || '').trim().toLowerCase();
     const display_name = String(req.body?.display_name || '').trim();
     const password = String(req.body?.password || '');
@@ -1403,7 +1435,7 @@ function buildApiRouter() {
   });
 
   // Firebase identity is trusted only after server-side ID token signature and claims verification.
-  api.post('/auth/firebase-session', async (req, res) => {
+  api.post('/auth/firebase-session', createAuthRateLimit('firebase-login', 10), async (req, res) => {
     const authHeader = String(req.headers.authorization || '');
     const bearerToken = authHeader.toLowerCase().startsWith('bearer ')
       ? authHeader.slice(7).trim()
