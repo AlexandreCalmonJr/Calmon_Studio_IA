@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('../server.ts', import.meta.url), 'utf8');
+const firebaseVerifier = await readFile(new URL('../server/firebaseTokenVerifier.ts', import.meta.url), 'utf8');
+const authGate = await readFile(new URL('../src/features/auth/AuthGate.tsx', import.meta.url), 'utf8');
 
 test('chat sessions carry an explicit account owner', () => {
   assert.match(source, /interface StoredChatSession\s*\{\s*owner_user_id: string;/);
@@ -36,4 +38,20 @@ test('websocket upgrades require an active, unexpired cookie session', () => {
 test('realtime broadcasts fail closed unless an owner is specified', () => {
   assert.match(source, /if \(!ownerUserId\) return/);
   assert.match(source, /clientOwner === ownerUserId/);
+});
+
+test('Firebase session exchange verifies a signed ID token server-side', () => {
+  assert.match(source, /verifyFirebaseIdToken\(idToken, projectId\)/);
+  assert.match(source, /FIREBASE_PROJECT_ID/);
+  assert.doesNotMatch(source, /req\.body\?\.uid|req\.body\?\.email_verified/);
+  assert.match(authGate, /fbUser\.getIdToken\(\)/);
+  assert.match(authGate, /JSON\.stringify\(\{ id_token: idToken \}\)/);
+});
+
+test('Firebase verifier checks signature, project audience, issuer and expiry', () => {
+  assert.match(firebaseVerifier, /crypto\.verify\(/);
+  assert.match(firebaseVerifier, /new crypto\.X509Certificate\(certificate\)/);
+  assert.match(firebaseVerifier, /claims\.aud !== projectId/);
+  assert.match(firebaseVerifier, /claims\.iss !== expectedIssuer/);
+  assert.match(firebaseVerifier, /claims\.exp <= nowSeconds/);
 });
