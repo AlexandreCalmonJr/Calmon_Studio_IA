@@ -55,3 +55,25 @@ test('Firebase verifier checks signature, project audience, issuer and expiry', 
   assert.match(firebaseVerifier, /claims\.iss !== expectedIssuer/);
   assert.match(firebaseVerifier, /claims\.exp <= nowSeconds/);
 });
+
+test('no default administrator credentials or fallback tokens remain', () => {
+  assert.match(source, /const users = new Map<string, UserAccount>\(\)/);
+  assert.doesNotMatch(source, /Jarvis@2026!Admin|Jarvis@2026!Dev|jarvis-admin-2026|jarvis-bootstrap-2026/);
+  assert.match(source, /process\.env\.JARVIS_BOOTSTRAP_TOKEN/);
+  assert.match(source, /VALID_BOOTSTRAP_TOKENS\.delete\(token\)/);
+  assert.match(source, /must_change_password: true/);
+});
+
+test('Firebase administrator role comes only from a verified-email allowlist', () => {
+  assert.match(source, /JARVIS_FIREBASE_ADMIN_EMAILS/);
+  assert.match(source, /email_verified && Boolean\(email\) && adminEmails\.has\(email\)/);
+  assert.doesNotMatch(source, /alexandrecalmonjunior@gmail\.com/);
+});
+
+test('authentication and registration endpoints have rate limits', () => {
+  assert.match(source, /function createAuthRateLimit\(/);
+  for (const route of ['password-login', 'login', 'bootstrap/exchange', 'register-personal', 'firebase-session']) {
+    assert.match(source, new RegExp('createAuthRateLimit\\('));
+    assert.ok(source.includes(`/auth/${route}`), `expected route ${route}`);
+  }
+});
