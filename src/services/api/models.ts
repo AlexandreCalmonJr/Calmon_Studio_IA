@@ -274,3 +274,189 @@ export async function testVaultKey(key_id: string, scope: 'account' | 'global' =
   }
   return res.json();
 }
+
+export type ExternalProviderSlug =
+  | 'anthropic'
+  | 'openai'
+  | 'deepseek'
+  | 'groq'
+  | 'openrouter'
+  | 'xai'
+  | 'custom';
+
+export interface SessionProviderKeyRecord {
+  provider: ExternalProviderSlug;
+  name: string;
+  short_label: string;
+  tier: 'primary' | 'secondary';
+  docs_hint: string;
+  key_prefix_hint: string;
+  suggested_models: string[];
+  env_var: string;
+  configured: boolean;
+  source: 'http_only_cookie_and_vault' | 'http_only_cookie' | 'env' | 'none';
+  key_id: string;
+  masked_key: string;
+  base_url: string;
+  default_model: string;
+  is_active: boolean;
+  is_default: boolean;
+  last_tested_at: string | null;
+  last_test_status: string | null;
+  last_test_message: string | null;
+  last_latency_ms: number | null;
+  last_status_code: number | null;
+}
+
+export interface GeminiServerHealthRecord {
+  configured: boolean;
+  ok: boolean;
+  status_code: number;
+  latency_ms: number;
+  endpoint_host: string;
+  model: string;
+  checked_at: string;
+  message: string;
+}
+
+export interface SessionProviderKeysResponse {
+  storage_security: {
+    http_only_cookie: boolean;
+    cookie_name: string;
+    encryption: string;
+    plaintext_in_local_storage: boolean;
+    owner_user_id: string;
+  };
+  gemini_server_managed: boolean;
+  gemini_health?: GeminiServerHealthRecord | null;
+  providers: SessionProviderKeyRecord[];
+}
+
+export interface ConfiguredProvidersHealthResponse {
+  checked_at: string;
+  gemini_health: GeminiServerHealthRecord | null;
+  results: Array<{
+    provider: ExternalProviderSlug;
+    ok: boolean;
+    status_code: number;
+    latency_ms: number;
+    endpoint_host: string;
+    models_detected: string[];
+    message: string;
+    checked_at: string;
+  }>;
+  state: SessionProviderKeysResponse;
+}
+
+export async function fetchSessionProviderKeys(): Promise<SessionProviderKeysResponse> {
+  const res = await apiFetch(`${API_BASE}/settings/provider-keys`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Falha ao carregar chaves de provedores.' }));
+    throw new Error(err.detail || 'Falha ao carregar chaves de provedores.');
+  }
+  return res.json();
+}
+
+export async function probeConfiguredProvidersHealth(): Promise<ConfiguredProvidersHealthResponse> {
+  const res = await apiFetch(`${API_BASE}/settings/provider-keys/health`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Falha ao medir saúde dos provedores configurados.' }));
+    throw new Error(err.detail || 'Falha ao medir saúde dos provedores configurados.');
+  }
+  return res.json();
+}
+
+export async function saveSessionProviderKey(
+  provider: ExternalProviderSlug,
+  payload: {
+    api_key?: string;
+    base_url?: string;
+    default_model?: string;
+    is_default?: boolean;
+    label?: string;
+  }
+): Promise<SessionProviderKeysResponse> {
+  const res = await apiFetch(`${API_BASE}/settings/provider-keys/${encodeURIComponent(provider)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Falha ao salvar chave de API.' }));
+    throw new Error(err.detail || 'Falha ao salvar chave de API.');
+  }
+  return res.json();
+}
+
+export interface SessionProviderPingResponse {
+  ok: boolean;
+  status_code: number;
+  latency_ms: number;
+  endpoint_host: string;
+  models_detected: string[];
+  message: string;
+  state?: SessionProviderKeysResponse;
+}
+
+export async function testSessionProviderKey(
+  provider: ExternalProviderSlug,
+  payload?: { api_key?: string; base_url?: string }
+): Promise<SessionProviderPingResponse> {
+  const res = await apiFetch(`${API_BASE}/settings/provider-keys/${encodeURIComponent(provider)}/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {}),
+  });
+  const data = await res.json().catch(() => ({ ok: false, message: 'Falha ao testar conexão.' }));
+  if (!res.ok) {
+    return {
+      ok: false,
+      status_code: Number(data?.status_code || res.status || 0),
+      latency_ms: Number(data?.latency_ms || 0),
+      endpoint_host: String(data?.endpoint_host || ''),
+      models_detected: [],
+      message: data?.message || data?.detail || 'Falha na validação da chave.',
+      state: data?.state,
+    };
+  }
+  return {
+    ok: Boolean(data?.ok),
+    status_code: Number(data?.status_code || res.status || 200),
+    latency_ms: Number(data?.latency_ms || 0),
+    endpoint_host: String(data?.endpoint_host || ''),
+    models_detected: Array.isArray(data?.models_detected) ? data.models_detected : [],
+    message: String(data?.message || 'Conexão validada.'),
+    state: data?.state,
+  };
+}
+
+export async function setDefaultSessionProviderKey(
+  provider: ExternalProviderSlug | 'none'
+): Promise<SessionProviderKeysResponse> {
+  const res = await apiFetch(`${API_BASE}/settings/provider-keys/${encodeURIComponent(provider)}/default`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Falha ao definir provedor padrão.' }));
+    throw new Error(err.detail || 'Falha ao definir provedor padrão.');
+  }
+  return res.json();
+}
+
+export async function deleteSessionProviderKey(
+  provider: ExternalProviderSlug
+): Promise<SessionProviderKeysResponse> {
+  const res = await apiFetch(`${API_BASE}/settings/provider-keys/${encodeURIComponent(provider)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Falha ao remover chave de API.' }));
+    throw new Error(err.detail || 'Falha ao remover chave de API.');
+  }
+  return res.json();
+}
+

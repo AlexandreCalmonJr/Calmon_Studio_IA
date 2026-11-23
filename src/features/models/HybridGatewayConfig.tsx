@@ -39,12 +39,12 @@ interface Props {
  * Mantenha estes valores em sincronia com a tabela do backend.
  */
 const fallbackProviders: ProviderCard[] = [
-  { id: 'openai', name: 'OpenAI', defaultModel: 'gpt-4o-mini', baseUrl: 'https://api.openai.com/v1' },
-  { id: 'gemini', name: 'Google Gemini', defaultModel: 'gemini-2.5-flash', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai' },
-  { id: 'groq', name: 'Groq', defaultModel: 'openai/gpt-oss-120b', baseUrl: 'https://api.groq.com/openai/v1' },
+  { id: 'anthropic', name: 'Anthropic (Claude)', defaultModel: 'claude-sonnet-4-20250514', baseUrl: 'https://api.anthropic.com' },
+  { id: 'openai', name: 'OpenAI (GPT)', defaultModel: 'gpt-4o-mini', baseUrl: 'https://api.openai.com/v1' },
   { id: 'deepseek', name: 'DeepSeek', defaultModel: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1' },
-  { id: 'openrouter', name: 'OpenRouter', defaultModel: 'meta-llama/llama-3.3-70b-instruct', baseUrl: 'https://openrouter.ai/api/v1' },
-  { id: 'anthropic', name: 'Anthropic', defaultModel: 'claude-3-5-haiku-20241022', baseUrl: 'https://api.anthropic.com/v1' },
+  { id: 'groq', name: 'Groq', defaultModel: 'llama-3.3-70b-versatile', baseUrl: 'https://api.groq.com/openai/v1' },
+  { id: 'openrouter', name: 'OpenRouter', defaultModel: 'anthropic/claude-3.5-sonnet', baseUrl: 'https://openrouter.ai/api/v1' },
+  { id: 'xai', name: 'xAI (Grok)', defaultModel: 'grok-2-latest', baseUrl: 'https://api.x.ai/v1' },
   { id: 'custom', name: 'Compatível OpenAI / personalizado', defaultModel: '', baseUrl: '' },
 ];
 

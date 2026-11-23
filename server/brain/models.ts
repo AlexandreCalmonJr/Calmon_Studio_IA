@@ -482,11 +482,82 @@ CREATE TABLE IF NOT EXISTS mcp_tool_logs (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS provider_vault_keys (
+  id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  label TEXT NOT NULL,
+  encrypted_api_key TEXT NOT NULL,
+  masked_key TEXT NOT NULL,
+  base_url TEXT NOT NULL DEFAULT '',
+  default_model TEXT NOT NULL DEFAULT '',
+  is_active INTEGER NOT NULL DEFAULT 1,
+  is_default INTEGER NOT NULL DEFAULT 0,
+  last_tested_at TEXT,
+  last_test_status TEXT,
+  last_test_message TEXT,
+  last_latency_ms INTEGER,
+  last_status_code INTEGER,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS installed_packs (
+  owner_user_id TEXT NOT NULL,
+  pack_id TEXT NOT NULL,
+  version TEXT NOT NULL DEFAULT '1.0.0',
+  is_installed INTEGER NOT NULL DEFAULT 1,
+  installed_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (owner_user_id, pack_id)
+);
+
+CREATE TABLE IF NOT EXISTS agent_cores (
+  owner_user_id TEXT NOT NULL,
+  agent_role TEXT NOT NULL,
+  workspace_slug TEXT NOT NULL,
+  orchestration_mode TEXT NOT NULL DEFAULT 'plan_execute_verify',
+  max_steps INTEGER NOT NULL DEFAULT 8,
+  max_delegation_depth INTEGER NOT NULL DEFAULT 2,
+  primary_provider TEXT NOT NULL DEFAULT 'gemini',
+  primary_model TEXT NOT NULL DEFAULT 'gemini-2.5-flash',
+  fallback_provider TEXT NOT NULL DEFAULT 'openai',
+  fallback_model TEXT NOT NULL DEFAULT 'gpt-4.1-mini',
+  autonomy_policy TEXT NOT NULL DEFAULT 'auto_safe',
+  daily_budget_usd REAL NOT NULL DEFAULT 5.0,
+  allowed_mcp_servers_json TEXT NOT NULL DEFAULT '["mcp_local_workspace"]',
+  soul_markdown TEXT NOT NULL DEFAULT '',
+  memory_markdown TEXT NOT NULL DEFAULT '',
+  cron_schedule TEXT,
+  pack_id TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (owner_user_id, agent_role)
+);
+
+CREATE TABLE IF NOT EXISTS custom_packs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  tagline TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL DEFAULT 'desenvolvimento',
+  version TEXT NOT NULL DEFAULT '1.0.0',
+  accent_color TEXT NOT NULL DEFAULT '#6366f1',
+  definition_json TEXT NOT NULL,
+  created_by TEXT NOT NULL DEFAULT 'admin',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_lane_jobs_created ON session_lane_jobs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mcp_tool_logs_created ON mcp_tool_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_provider_vault_owner ON provider_vault_keys(owner_user_id, provider);
+CREATE INDEX IF NOT EXISTS idx_installed_packs_owner ON installed_packs(owner_user_id, is_installed);
+CREATE INDEX IF NOT EXISTS idx_agent_cores_owner ON agent_cores(owner_user_id, pack_id);
+CREATE INDEX IF NOT EXISTS idx_custom_packs_updated ON custom_packs(updated_at DESC);
 `;
 
 export const CORE_SQLITE_TABLES = [
@@ -506,6 +577,10 @@ export const CORE_SQLITE_TABLES = [
   'session_lane_jobs',
   'mcp_servers',
   'mcp_tool_logs',
+  'provider_vault_keys',
+  'installed_packs',
+  'agent_cores',
+  'custom_packs',
 ] as const;
 
 export const WORKSPACE_SQLITE_TABLES = [

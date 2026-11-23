@@ -35,6 +35,8 @@ export const TAB_PATHS: Record<string, string> = {
   github_import: '/github-import',
   android_app: '/android-app',
   brain_server: '/brain-server',
+  architecture: '/architecture',
+  pack_studio: '/pack-studio',
 };
 
 const PATH_TABS: Record<string, string> = {
@@ -106,6 +108,13 @@ const PATH_TABS: Record<string, string> = {
   brains: 'brain_server',
   docker: 'brain_server',
   servidor: 'brain_server',
+  architecture: 'architecture',
+  arquitetura: 'architecture',
+  arquiteto: 'architecture',
+  'pack-studio': 'pack_studio',
+  pack_studio: 'pack_studio',
+  'studio-pacotes': 'pack_studio',
+  'pacotes-admin': 'pack_studio',
 };
 
 export const KNOWN_TABS = new Set(Object.keys(TAB_PATHS));

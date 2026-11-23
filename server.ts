@@ -20,6 +20,43 @@ import {
   searchRealHuggingFace,
 } from './server/hybridAiEngine.ts';
 import {
+  evaluateAgentCoreReadiness,
+  isValidAgentRoleSlug,
+  normalizeAgentRoleSlug,
+} from './src/services/agentCoreEngine.ts';
+import {
+  MODULE_PACK_CATALOG,
+  getModulePackById,
+  getUnlockedTabsForPacks,
+  mergeCatalogWithCustomPacks,
+  normalizePackSlug,
+  summarizeInstalledPacks,
+  type ModulePackDefinition,
+} from './src/services/modulePackEngine.ts';
+import { analyzeProjectArchitecture } from './server/architectureAnalyzer.ts';
+import {
+  CookieVaultEnvelope,
+  EXTERNAL_PROVIDERS,
+  EXTERNAL_PROVIDER_IDS,
+  ExternalProviderId,
+  GeminiServerHealthResult,
+  ResolvedExternalCredential,
+  VAULT_COOKIE_NAME,
+  buildSecureVaultCookieHeader,
+  decryptProviderSecret,
+  encryptProviderSecret,
+  getEnvProviderCredential,
+  inferExternalProviderFromModel,
+  maskApiKey,
+  normalizeProviderId,
+  parseCookieHeader,
+  sealVaultCookieEnvelope,
+  testExternalProviderConnection,
+  testGeminiServerConnection,
+  unsealVaultCookieEnvelope,
+  validateProviderBaseUrl,
+} from './server/providerEngine.ts';
+import {
   AssistantPeer,
   AssistantRelayMessage,
   BrainLayer,
@@ -324,146 +361,46 @@ function getActiveHardwareProfile(): NotebookHardwareProfile {
   return hardwareProfiles.find((p) => p.id === activeHardwareProfileId) || hardwareProfiles[0];
 }
 
-let vaultKeys: Array<Record<string, unknown>> = [
-  {
-    key_id: 'local-ollama-default',
-    label: 'Ollama Local Runtime',
-    provider: 'ollama',
-    provider_name: 'Ollama',
-    masked_key: 'local://127.0.0.1:11434',
-    base_url: 'http://127.0.0.1:11434',
-    default_model: 'qwen2.5-coder:14b',
-    preferred_model: 'qwen2.5-coder:14b',
-    is_active: true,
-    is_default: true,
-    owner_user_id: 'admin',
-  },
-];
-
-let approvals: Array<Record<string, unknown>> = [
-  {
-    id: 'apr_deploy_policy_01',
-    task_id: 'tsk_sec_audit_09',
-    agent_role: 'cybersecurity_engineer',
-    operation: 'project_file_modified',
-    impact_summary: 'Atualizar cabeçalhos CSP e política HSTS no gateway de API.',
-    affected_resources: ['gateway/security_headers.ts', 'config/csp.json'],
-    proposed_diff: '+ Content-Security-Policy: default-src \'self\'; frame-ancestors \'self\'\n+ Strict-Transport-Security: max-age=31536000; includeSubDomains',
-    reversible: true,
-    status: 'pending',
-    requested_at: new Date(Date.now() - 1000 * 60 * 18).toISOString(),
-  },
-  {
-    id: 'apr_migration_02',
-    task_id: 'tsk_backend_idx_04',
-    agent_role: 'backend_developer',
-    operation: 'proactive_code_patch_application',
-    impact_summary: 'Adicionar índice composto (tenant_id, created_at) na tabela de auditoria.',
-    affected_resources: ['migrations/2026_add_audit_idx.sql'],
-    proposed_diff: '+ CREATE INDEX CONCURRENTLY idx_audit_tenant_created ON audit_events (tenant_id, created_at DESC);',
-    reversible: true,
-    status: 'pending',
-    requested_at: new Date(Date.now() - 1000 * 60 * 42).toISOString(),
-  },
-];
+let approvals: Array<Record<string, unknown>> = [];
 
 const nowIso = () => new Date().toISOString();
 
 const serverLogs: Array<{ id: string; timestamp: string; level: string; source: string; message: string }> = [
-  { id: 'log_1', timestamp: new Date(Date.now() - 1000 * 60 * 12).toISOString(), level: 'INFO', source: 'security_core', message: 'Núcleo de segurança inicializado com validação de sessão HttpOnly.' },
-  { id: 'log_2', timestamp: new Date(Date.now() - 1000 * 60 * 9).toISOString(), level: 'INFO', source: 'model_runtime', message: 'Roteador híbrido pronto: qwen2.5-coder:14b e llama3.1:8b disponíveis.' },
-  { id: 'log_3', timestamp: new Date(Date.now() - 1000 * 60 * 5).toISOString(), level: 'INFO', source: 'approval_engine', message: 'Motor de aprovações ativo: 2 solicitações aguardando decisão.' },
-  { id: 'log_4', timestamp: new Date(Date.now() - 1000 * 60 * 2).toISOString(), level: 'WARNING', source: 'telemetry', message: 'Latência acima da média detectada em lote de análise estática (1420 ms).' },
-];
-
-const auditLogs = [
   {
-    id: 'aud_1',
-    timestamp: new Date(Date.now() - 1000 * 60 * 40).toISOString(),
-    actor: 'admin',
-    operation: 'model_selected',
-    status: 'success',
-    severity: 'info',
-    details: 'Modelo padrão definido para qwen2.5-coder:14b.',
-  },
-  {
-    id: 'aud_2',
-    timestamp: new Date(Date.now() - 1000 * 60 * 25).toISOString(),
-    actor: 'cybersecurity_engineer',
-    operation: 'approval_request_created',
-    status: 'awaiting_approval',
-    severity: 'medium',
-    details: 'Solicitação de atualização de cabeçalhos CSP registrada.',
-  },
-  {
-    id: 'aud_3',
-    timestamp: new Date(Date.now() - 1000 * 60 * 10).toISOString(),
-    actor: 'code_reviewer',
-    operation: 'qa_security_pipeline_run',
-    status: 'gate_passed',
-    severity: 'info',
-    details: 'Verificação estática concluída sem vulnerabilidades críticas.',
+    id: `log_boot_${Date.now().toString(36)}`,
+    timestamp: nowIso(),
+    level: 'INFO',
+    source: 'brain_runtime',
+    message: 'Servidor JARVIS AI Hub iniciado com autenticação HttpOnly, SQLite WAL e cofre AES-256-GCM.',
   },
 ];
 
-const telemetryRecords = [
-  {
-    id: 'inf_01',
-    task_id: 'tsk_arch_01',
-    agent_role: 'software_architect',
-    model_name: 'qwen2.5-coder:14b',
-    provider: 'ollama',
-    status: 'success',
-    duration_ms: 840,
-    prompt_tokens: 1420,
-    completion_tokens: 680,
-    cost_usd: 0,
-    feedback_rating: 5,
-    created_at: new Date(Date.now() - 1000 * 60 * 180).toISOString(),
-  },
-  {
-    id: 'inf_02',
-    task_id: 'tsk_ui_02',
-    agent_role: 'frontend_mobile_developer',
-    model_name: 'qwen2.5-coder:14b',
-    provider: 'ollama',
-    status: 'success',
-    duration_ms: 920,
-    prompt_tokens: 2150,
-    completion_tokens: 1120,
-    cost_usd: 0,
-    feedback_rating: 5,
-    created_at: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
-  },
-  {
-    id: 'inf_03',
-    task_id: 'tsk_sec_audit_09',
-    agent_role: 'cybersecurity_engineer',
-    model_name: 'llama3.1:8b',
-    provider: 'ollama',
-    status: 'success',
-    duration_ms: 610,
-    prompt_tokens: 1890,
-    completion_tokens: 540,
-    cost_usd: 0,
-    feedback_rating: 4,
-    created_at: new Date(Date.now() - 1000 * 60 * 55).toISOString(),
-  },
-  {
-    id: 'inf_04',
-    task_id: 'tsk_backend_idx_04',
-    agent_role: 'backend_developer',
-    model_name: 'deepseek-r1:14b',
-    provider: 'ollama',
-    status: 'success',
-    duration_ms: 1180,
-    prompt_tokens: 1640,
-    completion_tokens: 910,
-    cost_usd: 0,
-    feedback_rating: 5,
-    created_at: new Date(Date.now() - 1000 * 60 * 20).toISOString(),
-  },
-];
+const auditLogs: Array<{
+  id: string | number;
+  timestamp: string;
+  actor: string;
+  operation: string;
+  status: string;
+  severity: string;
+  details: string;
+}> = [];
+
+interface RealTelemetryRecord {
+  id: string;
+  task_id: string;
+  agent_role: string;
+  model_name: string;
+  provider: string;
+  status: string;
+  duration_ms: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost_usd: number;
+  feedback_rating?: number;
+  created_at: string;
+}
+
+const telemetryRecords: RealTelemetryRecord[] = [];
 
 interface AgentServerRecord {
   role: string;
@@ -1684,14 +1621,31 @@ function buildApiRouter() {
     const load = os.loadavg()[0] || 0;
     const cpuCount = Math.max(1, os.cpus().length);
     const cpuPercent = Math.min(100, Math.round((load / cpuCount) * 100 * 10) / 10);
+
+    let diskTotalGb = 0;
+    let diskFreeGb = 0;
+    let diskPercent = 0;
+    try {
+      const statfs = fs.statfsSync('/');
+      const totalBytes = Number(statfs.blocks) * Number(statfs.bsize);
+      const freeBytes = Number(statfs.bavail) * Number(statfs.bsize);
+      if (totalBytes > 0) {
+        diskTotalGb = Math.round((totalBytes / 1024 ** 3) * 10) / 10;
+        diskFreeGb = Math.round((freeBytes / 1024 ** 3) * 10) / 10;
+        diskPercent = Math.round(((totalBytes - freeBytes) / totalBytes) * 1000) / 10;
+      }
+    } catch {
+      // Ambiente sem suporte a statfsSync mantém zeros reais
+    }
+
     res.json({
-      cpu_percent: cpuPercent || 14.2,
+      cpu_percent: cpuPercent,
       ram_used_mb: usedMb,
       ram_total_mb: totalMb,
       ram_percent: totalMb > 0 ? Math.round((usedMb / totalMb) * 1000) / 10 : 0,
-      disk_free_gb: 128.4,
-      disk_total_gb: 256,
-      disk_percent: 49.8,
+      disk_free_gb: diskFreeGb,
+      disk_total_gb: diskTotalGb,
+      disk_percent: diskPercent,
       inference_queue_active: 0,
       inference_queue_waiting: 0,
       is_throttled: false,
@@ -1727,9 +1681,86 @@ function buildApiRouter() {
       : telemetryRecords.slice(0, limit);
 
     const totalTokens = filtered.reduce((acc, r) => acc + r.prompt_tokens + r.completion_tokens, 0);
+    const totalCost = Number(filtered.reduce((acc, r) => acc + (r.cost_usd || 0), 0).toFixed(4));
     const avgLatency = filtered.length
       ? Math.round(filtered.reduce((acc, r) => acc + r.duration_ms, 0) / filtered.length)
       : 0;
+
+    // Agrupa métricas reais por (model_name, provider, agent_role)
+    const perfMap = new Map<
+      string,
+      {
+        model_name: string;
+        provider: string;
+        agent_role: string;
+        total_inferences: number;
+        successful: number;
+        failed: number;
+        latency_sum: number;
+        tokens_sum: number;
+        cost_sum: number;
+        rating_sum: number;
+        rating_count: number;
+      }
+    >();
+
+    for (const r of filtered) {
+      const k = `${r.model_name}::${r.provider}::${r.agent_role}`;
+      const existing = perfMap.get(k) || {
+        model_name: r.model_name,
+        provider: r.provider,
+        agent_role: r.agent_role,
+        total_inferences: 0,
+        successful: 0,
+        failed: 0,
+        latency_sum: 0,
+        tokens_sum: 0,
+        cost_sum: 0,
+        rating_sum: 0,
+        rating_count: 0,
+      };
+      existing.total_inferences += 1;
+      if (r.status === 'success') existing.successful += 1;
+      else existing.failed += 1;
+      existing.latency_sum += r.duration_ms;
+      existing.tokens_sum += r.prompt_tokens + r.completion_tokens;
+      existing.cost_sum += r.cost_usd || 0;
+      if (typeof r.feedback_rating === 'number' && r.feedback_rating > 0) {
+        existing.rating_sum += r.feedback_rating;
+        existing.rating_count += 1;
+      }
+      perfMap.set(k, existing);
+    }
+
+    const model_performance = Array.from(perfMap.values()).map((entry) => ({
+      model_name: entry.model_name,
+      provider: entry.provider,
+      agent_role: entry.agent_role,
+      total_inferences: entry.total_inferences,
+      successful: entry.successful,
+      failed: entry.failed,
+      success_rate: entry.total_inferences
+        ? Math.round((entry.successful / entry.total_inferences) * 100)
+        : 0,
+      average_latency_ms: entry.total_inferences
+        ? Math.round(entry.latency_sum / entry.total_inferences)
+        : 0,
+      average_tokens: entry.total_inferences
+        ? Math.round(entry.tokens_sum / entry.total_inferences)
+        : 0,
+      total_cost_usd: Number(entry.cost_sum.toFixed(4)),
+    }));
+
+    const model_quality = Array.from(perfMap.values())
+      .filter((entry) => entry.rating_count > 0)
+      .map((entry) => ({
+        model_name: entry.model_name,
+        provider: entry.provider,
+        agent_role: entry.agent_role,
+        feedback_count: entry.rating_count,
+        average_rating: Number((entry.rating_sum / entry.rating_count).toFixed(2)),
+        sample_sufficient: entry.rating_count >= 5,
+      }));
 
     res.json({
       summary: {
@@ -1737,66 +1768,12 @@ function buildApiRouter() {
         successful: filtered.filter((r) => r.status === 'success').length,
         failed: filtered.filter((r) => r.status !== 'success').length,
         total_tokens: totalTokens,
-        total_cost_usd: 0,
+        total_cost_usd: totalCost,
         average_latency_ms: avgLatency,
       },
       records: filtered,
-      model_performance: [
-        {
-          model_name: 'qwen2.5-coder:14b',
-          provider: 'ollama',
-          agent_role: 'frontend_mobile_developer',
-          total_inferences: 2,
-          successful: 2,
-          failed: 0,
-          success_rate: 100,
-          average_latency_ms: 880,
-          average_tokens: 2685,
-          total_cost_usd: 0,
-        },
-        {
-          model_name: 'deepseek-r1:14b',
-          provider: 'ollama',
-          agent_role: 'backend_developer',
-          total_inferences: 1,
-          successful: 1,
-          failed: 0,
-          success_rate: 100,
-          average_latency_ms: 1180,
-          average_tokens: 2550,
-          total_cost_usd: 0,
-        },
-        {
-          model_name: 'llama3.1:8b',
-          provider: 'ollama',
-          agent_role: 'cybersecurity_engineer',
-          total_inferences: 1,
-          successful: 1,
-          failed: 0,
-          success_rate: 100,
-          average_latency_ms: 610,
-          average_tokens: 2430,
-          total_cost_usd: 0,
-        },
-      ],
-      model_quality: [
-        {
-          model_name: 'qwen2.5-coder:14b',
-          provider: 'ollama',
-          agent_role: 'frontend_mobile_developer',
-          feedback_count: 14,
-          average_rating: 4.9,
-          sample_sufficient: true,
-        },
-        {
-          model_name: 'deepseek-r1:14b',
-          provider: 'ollama',
-          agent_role: 'software_architect',
-          feedback_count: 9,
-          average_rating: 4.8,
-          sample_sufficient: true,
-        },
-      ],
+      model_performance,
+      model_quality,
     });
   });
 
@@ -1834,7 +1811,19 @@ function buildApiRouter() {
   });
 
   api.post('/system/backup', requireAuth, (_req, res) => {
-    res.json({ status: 'created', created_at: nowIso() });
+    try {
+      const backup = localBrainStore.createSqliteBackup();
+      serverLogs.unshift({
+        id: `log_bkp_${Date.now().toString(36)}`,
+        timestamp: nowIso(),
+        level: 'INFO',
+        source: 'sqlite_backup',
+        message: `Backup consistente SQLite criado: ${backup.filename} (${backup.size_bytes} bytes).`,
+      });
+      res.json({ status: 'created', ...backup });
+    } catch (err: any) {
+      res.status(500).json({ detail: err?.message || 'Falha ao gerar backup SQLite.' });
+    }
   });
 
   api.post('/system/kill-switch', requireAuth, (req, res) => {
@@ -1857,6 +1846,8 @@ function buildApiRouter() {
   // --- HARDWARE ---
   api.get('/system/hardware-profile', requireAuth, (_req, res) => {
     const cpus = os.cpus();
+    const cpuCount = Math.max(1, cpus.length);
+    const loadPercent = Math.min(100, Math.round(((os.loadavg()[0] || 0) / cpuCount) * 1000) / 10);
     const totalGb = Math.round((os.totalmem() / (1024 ** 3)) * 10) / 10;
     const availGb = Math.round((os.freemem() / (1024 ** 3)) * 10) / 10;
     const usedGb = Math.max(0, Math.round((totalGb - availGb) * 10) / 10);
@@ -1866,7 +1857,7 @@ function buildApiRouter() {
           model: cpus[0]?.model || 'Host CPU',
           cores: Math.max(1, Math.floor(cpus.length / 2)),
           threads: cpus.length,
-          current_load_percent: 14.2,
+          current_load_percent: loadPercent,
         },
         ram: {
           total_gb: totalGb,
@@ -1967,11 +1958,15 @@ function buildApiRouter() {
     const activeHw = getActiveHardwareProfile();
     const taskId = `tsk_${Date.now()}`;
 
+    const ownerUserId = user?.username || 'admin';
+    const targetModelName = requestedModel || activeAgent.preferred_model;
+    const resolvedExternalCred = resolveExternalCredentialForRequest(req, ownerUserId, targetModelName);
+
     try {
       const result = await runHybridInference({
         prompt,
         systemInstruction: activeAgent.system_prompt,
-        requestedModel: requestedModel || activeAgent.preferred_model,
+        requestedModel: targetModelName,
         routingPolicy: activeAgent.routing_policy,
         ollamaBaseUrl: activeHw.ollama_url,
         ollamaConnected: providerConnectivity.ollama_connected,
@@ -1982,7 +1977,23 @@ function buildApiRouter() {
         agentProperName: activeAgent.proper_name,
         strictFocus: activeAgent.strict_focus,
         strictTopic: activeAgent.strict_topic,
+        externalProvider: resolvedExternalCred,
       });
+
+      telemetryRecords.unshift({
+        id: `inf_${Date.now().toString(36)}`,
+        task_id: taskId,
+        agent_role: activeAgent.role,
+        model_name: result.modelUsed,
+        provider: result.provider,
+        status: 'success',
+        duration_ms: result.latencyMs,
+        prompt_tokens: Math.max(1, Math.ceil(prompt.length / 4)),
+        completion_tokens: Math.max(1, Math.ceil(result.text.length / 4)),
+        cost_usd: 0,
+        created_at: nowIso(),
+      });
+      if (telemetryRecords.length > 500) telemetryRecords.length = 500;
 
       let session = chatSessions.get(sessionId);
       if (!session) {
@@ -2154,10 +2165,14 @@ function buildApiRouter() {
       }
       const enrichedSystemPrompt = [primaryAgent.system_prompt, ...contextNotes].filter(Boolean).join('\n\n');
 
+      const streamOwnerUserId = user?.username || 'admin';
+      const streamTargetModel = requestedModel || primaryAgent.preferred_model;
+      const streamExternalCred = resolveExternalCredentialForRequest(req, streamOwnerUserId, streamTargetModel);
+
       const result = await runHybridInference({
         prompt,
         systemInstruction: enrichedSystemPrompt,
-        requestedModel: requestedModel || primaryAgent.preferred_model,
+        requestedModel: streamTargetModel,
         routingPolicy: primaryAgent.routing_policy,
         ollamaBaseUrl: activeHw.ollama_url,
         ollamaConnected: providerConnectivity.ollama_connected,
@@ -2168,7 +2183,23 @@ function buildApiRouter() {
         agentProperName: primaryAgent.proper_name,
         strictFocus: primaryAgent.strict_focus,
         strictTopic: primaryAgent.strict_topic,
+        externalProvider: streamExternalCred,
       });
+
+      telemetryRecords.unshift({
+        id: `inf_${Date.now().toString(36)}`,
+        task_id: taskId,
+        agent_role: primaryAgent.role,
+        model_name: result.modelUsed,
+        provider: result.provider,
+        status: 'success',
+        duration_ms: result.latencyMs,
+        prompt_tokens: Math.max(1, Math.ceil(prompt.length / 4)),
+        completion_tokens: Math.max(1, Math.ceil(result.text.length / 4)),
+        cost_usd: 0,
+        created_at: nowIso(),
+      });
+      if (telemetryRecords.length > 500) telemetryRecords.length = 500;
 
       let generatedArtifact: StructuredArtifactPayload | null = null;
       if (orchestrationPlan.deliverable) {
@@ -2338,8 +2369,377 @@ function buildApiRouter() {
     res.json({ purged_count: 0, retention_days: retention });
   });
 
-  // --- AGENTS (CRUD + VERSIONS + ROLLBACK) ---
-  api.get('/agents', requireAuth, (_req, res) => res.json(agentsList));
+  // --- MODULE PACKS & AGENT CORE HELPERS ---
+  const provisionPackResources = (ownerUserId: string, pack: ModulePackDefinition) => {
+    const provisionedAgents: string[] = [];
+
+    for (const spec of pack.agents) {
+      const existing = agentsList.find((a) => a.role === spec.role);
+      if (!existing) {
+        const created: AgentServerRecord = {
+          role: spec.role,
+          name: spec.name,
+          proper_name: spec.proper_name,
+          handle: spec.handle,
+          category: spec.category,
+          mission: spec.mission,
+          preferred_model: spec.preferred_model,
+          routing_policy: 'auto_hybrid',
+          autonomy_level: spec.autonomy_level,
+          is_read_only: spec.autonomy_level === 'read_only',
+          strict_focus: true,
+          strict_topic: spec.name,
+          delegation_targets: [],
+          allowed_tools: [...spec.allowed_tools],
+          system_prompt: `Você é ${spec.proper_name} (${spec.name}), especialista do pacote ${pack.name}. Missão: ${spec.mission}`,
+          mascot: {
+            id: 'maestro_slime',
+            color: spec.mascot_color || '#f97316',
+            accessory: 'none',
+            mood: 'idle',
+          },
+          is_custom: true,
+          template_id: `pack:${pack.id}`,
+          installed_skills: [...spec.installed_skills],
+          version: 1,
+          updated_at: nowIso(),
+        };
+        agentsList.unshift(created);
+        recordAgentVersion(created, `Instalado via pacote ${pack.name}`);
+        provisionedAgents.push(created.role);
+      }
+
+      // Garante que o núcleo individual (AgentCore) existe no SQLite
+      localBrainStore.getAgentCore(ownerUserId, spec.role, {
+        name: spec.name,
+        proper_name: spec.proper_name,
+        handle: spec.handle,
+        mission: spec.mission,
+        preferred_model: spec.preferred_model,
+        pack_id: pack.id,
+      });
+
+      // Garante skills do pacote no catálogo em memória
+      for (const skillName of spec.installed_skills) {
+        const existingSkill = skillsList.find(
+          (s) => s.name.toLowerCase() === skillName.toLowerCase()
+        );
+        if (existingSkill) {
+          if (!existingSkill.assigned_agents.includes(spec.role)) {
+            existingSkill.assigned_agents.push(spec.role);
+            existingSkill.updated_at = nowIso();
+          }
+        } else {
+          const slug = normalizeAgentRoleSlug(skillName);
+          skillsList.unshift({
+            id: `skill_pack_${pack.id}_${slug}`,
+            name: skillName,
+            version: pack.version,
+            origin: `pack:${pack.id}`,
+            license: 'MIT',
+            description: `Habilidade instalada automaticamente pelo pacote ${pack.name}.`,
+            domain: pack.category,
+            allowed_tools: [...spec.allowed_tools],
+            required_permissions: ['skills:read'],
+            assigned_agents: [spec.role],
+            content_hash: `sha256:${crypto.randomBytes(6).toString('hex')}`,
+            is_approved: true,
+            is_revoked: false,
+            instructions: `Habilidade "${skillName}" vinculada ao pacote ${pack.name} (${spec.proper_name}).`,
+            created_at: nowIso(),
+            updated_at: nowIso(),
+          });
+        }
+      }
+    }
+
+    // Semeia trilhas de estudo do pacote no SQLite e na base de conhecimento ativa
+    for (const track of pack.study_tracks) {
+      localBrainStore.upsertKnowledgeDocumentRecord({
+        name: track.document_name,
+        category: pack.category,
+        content: track.markdown_content,
+        fileType: 'md',
+      });
+      if (!knowledgeDocs.some((d: any) => d.name === track.document_name)) {
+        knowledgeDocs.unshift({
+          name: track.document_name,
+          category: pack.category,
+          chunks: Math.max(1, Math.ceil(track.markdown_content.length / 650)),
+          size_bytes: Buffer.byteLength(track.markdown_content, 'utf8'),
+          file_type: 'md',
+          indexed_at: nowIso(),
+          content: track.markdown_content,
+        });
+      }
+    }
+
+    return provisionedAgents;
+  };
+
+  const hydrateInstalledPackResourcesForUser = (ownerUserId: string) => {
+    const installed = localBrainStore.listInstalledPacks(ownerUserId);
+    const customPacks = localBrainStore.listCustomPacks();
+    for (const rec of installed) {
+      const def = getModulePackById(rec.pack_id, customPacks);
+      if (def) {
+        provisionPackResources(ownerUserId, def);
+      }
+    }
+    return installed;
+  };
+
+  const buildPacksResponsePayload = (ownerUserId: string) => {
+    const installedRecords = hydrateInstalledPackResourcesForUser(ownerUserId);
+    const customPacks = localBrainStore.listCustomPacks();
+    const mergedCatalog = mergeCatalogWithCustomPacks(customPacks);
+    const installedMap = new Map(installedRecords.map((r) => [r.pack_id, r]));
+    const installedIds = installedRecords.map((r) => r.pack_id);
+    const packs = mergedCatalog.map((pack) => {
+      const rec = installedMap.get(pack.id);
+      return {
+        ...pack,
+        installed: Boolean(rec),
+        installed_at: rec?.installed_at || null,
+      };
+    });
+    return {
+      packs,
+      custom_packs: customPacks,
+      installed_pack_ids: installedIds,
+      unlocked_tabs: getUnlockedTabsForPacks(installedIds, customPacks),
+      summary: summarizeInstalledPacks(installedIds, customPacks),
+    };
+  };
+
+  const requirePackStudioRole = (req: Request, res: Response, next: NextFunction) => {
+    const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
+    if (!user || (user.role !== 'admin' && user.role !== 'developer')) {
+      res.status(403).json({
+        detail: 'Acesso restrito a administradores e desenvolvedores do Estúdio de Pacotes.',
+      });
+      return;
+    }
+    next();
+  };
+
+  api.get('/packs', requireAuth, (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
+    res.json(buildPacksResponsePayload(ownerUserId));
+  });
+
+  api.post('/packs/:packId/install', requireAuth, (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
+    const packId = String(req.params.packId || '').trim();
+    const customPacks = localBrainStore.listCustomPacks();
+    const pack = getModulePackById(packId, customPacks);
+    if (!pack) {
+      res.status(404).json({ detail: 'Pacote modular não encontrado no catálogo.' });
+      return;
+    }
+
+    localBrainStore.installPackRecord(ownerUserId, pack.id, pack.version);
+    const provisionedAgents = provisionPackResources(ownerUserId, pack);
+    res.json({
+      pack_id: pack.id,
+      installed: true,
+      provisioned_agents: provisionedAgents,
+      ...buildPacksResponsePayload(ownerUserId),
+    });
+  });
+
+  api.delete('/packs/:packId', requireAuth, (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
+    const packId = String(req.params.packId || '').trim();
+    const customPacks = localBrainStore.listCustomPacks();
+    const pack = getModulePackById(packId, customPacks);
+    if (!pack) {
+      res.status(404).json({ detail: 'Pacote modular não encontrado no catálogo.' });
+      return;
+    }
+
+    localBrainStore.uninstallPackRecord(ownerUserId, pack.id);
+    const packTemplateTag = `pack:${pack.id}`;
+    agentsList = agentsList.filter(
+      (a) => a.role === 'jarvis_master' || a.template_id !== packTemplateTag
+    );
+
+    res.json({
+      pack_id: pack.id,
+      installed: false,
+      ...buildPacksResponsePayload(ownerUserId),
+    });
+  });
+
+  // --- ESTÚDIO DE PACOTES (DEV / ADMIN CRUD) ---
+  api.get('/admin/packs', requireAuth, requirePackStudioRole, (_req, res) => {
+    const customPacks = localBrainStore.listCustomPacks();
+    res.json({
+      custom_packs: customPacks,
+      official_pack_ids: MODULE_PACK_CATALOG.map((p) => p.id),
+    });
+  });
+
+  api.post('/admin/packs', requireAuth, requirePackStudioRole, (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
+    try {
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const desiredId = normalizePackSlug(String(body.id || body.name || ''));
+      if (MODULE_PACK_CATALOG.some((p) => p.id === desiredId)) {
+        res.status(409).json({
+          detail: 'Este identificador pertence a um pacote oficial. Escolha outro ID para o pacote personalizado.',
+        });
+        return;
+      }
+      const saved = localBrainStore.upsertCustomPack(ownerUserId, { ...body, id: desiredId });
+      res.status(201).json({
+        pack: saved,
+        ...buildPacksResponsePayload(ownerUserId),
+      });
+    } catch (err) {
+      res.status(400).json({
+        detail: err instanceof Error ? err.message : 'Dados inválidos para criar pacote.',
+      });
+    }
+  });
+
+  api.put('/admin/packs/:packId', requireAuth, requirePackStudioRole, (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
+    const packId = normalizePackSlug(String(req.params.packId || ''));
+    if (MODULE_PACK_CATALOG.some((p) => p.id === packId)) {
+      res.status(409).json({
+        detail: 'Pacotes oficiais são protegidos. Crie um pacote personalizado com outro identificador.',
+      });
+      return;
+    }
+    try {
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const saved = localBrainStore.upsertCustomPack(ownerUserId, { ...body, id: packId });
+      res.json({
+        pack: saved,
+        ...buildPacksResponsePayload(ownerUserId),
+      });
+    } catch (err) {
+      res.status(400).json({
+        detail: err instanceof Error ? err.message : 'Falha ao atualizar pacote personalizado.',
+      });
+    }
+  });
+
+  api.delete('/admin/packs/:packId', requireAuth, requirePackStudioRole, (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
+    const packId = normalizePackSlug(String(req.params.packId || ''));
+    const deleted = localBrainStore.deleteCustomPack(ownerUserId, packId);
+    if (!deleted) {
+      res.status(404).json({ detail: 'Pacote personalizado não encontrado.' });
+      return;
+    }
+    const packTemplateTag = `pack:${packId}`;
+    agentsList = agentsList.filter(
+      (a) => a.role === 'jarvis_master' || a.template_id !== packTemplateTag
+    );
+    res.json({
+      deleted_pack_id: packId,
+      ...buildPacksResponsePayload(ownerUserId),
+    });
+  });
+
+  // --- AGENTE DE ARQUITETURA (ANÁLISE REAL DO PROJETO) ---
+  api.get('/architecture/analyze', requireAuth, (_req, res) => {
+    try {
+      const report = analyzeProjectArchitecture(process.cwd());
+      res.json(report);
+    } catch (err) {
+      res.status(500).json({
+        detail: err instanceof Error ? err.message : 'Falha ao analisar a arquitetura do projeto.',
+      });
+    }
+  });
+
+  // --- AGENTS (CRUD + INDIVIDUAL CORES + VERSIONS + ROLLBACK) ---
+  api.get('/agents', requireAuth, (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
+    hydrateInstalledPackResourcesForUser(ownerUserId);
+    res.json(agentsList);
+  });
+
+  api.get('/agents/cores', requireAuth, (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
+    hydrateInstalledPackResourcesForUser(ownerUserId);
+    const cores = agentsList.map((agent) => {
+      const core = localBrainStore.getAgentCore(ownerUserId, agent.role, {
+        name: agent.name,
+        proper_name: agent.proper_name,
+        handle: agent.handle,
+        mission: agent.mission,
+        preferred_model: agent.preferred_model,
+        pack_id: agent.template_id?.startsWith('pack:') ? agent.template_id.slice(5) : null,
+      });
+      return {
+        core,
+        readiness: evaluateAgentCoreReadiness(core),
+      };
+    });
+    res.json({ cores });
+  });
+
+  api.get('/agents/:role/core', requireAuth, (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
+    const normalizedRole = normalizeAgentRoleSlug(String(req.params.role || ''));
+    if (!isValidAgentRoleSlug(normalizedRole)) {
+      res.status(400).json({ detail: 'Identificador de agente inválido.' });
+      return;
+    }
+    hydrateInstalledPackResourcesForUser(ownerUserId);
+    const agent = agentsList.find((a) => a.role === normalizedRole);
+    const core = localBrainStore.getAgentCore(ownerUserId, normalizedRole, {
+      name: agent?.name,
+      proper_name: agent?.proper_name,
+      handle: agent?.handle,
+      mission: agent?.mission,
+      preferred_model: agent?.preferred_model,
+      pack_id: agent?.template_id?.startsWith('pack:') ? agent.template_id.slice(5) : null,
+    });
+    res.json({
+      core,
+      readiness: evaluateAgentCoreReadiness(core),
+    });
+  });
+
+  api.put('/agents/:role/core', requireAuth, (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
+    const normalizedRole = normalizeAgentRoleSlug(String(req.params.role || ''));
+    if (!isValidAgentRoleSlug(normalizedRole)) {
+      res.status(400).json({ detail: 'Identificador de agente inválido.' });
+      return;
+    }
+    hydrateInstalledPackResourcesForUser(ownerUserId);
+    const agent = agentsList.find((a) => a.role === normalizedRole);
+    const updatedCore = localBrainStore.upsertAgentCore(
+      ownerUserId,
+      normalizedRole,
+      req.body || {},
+      {
+        name: agent?.name,
+        proper_name: agent?.proper_name,
+        handle: agent?.handle,
+        mission: agent?.mission,
+        preferred_model: agent?.preferred_model,
+        pack_id: agent?.template_id?.startsWith('pack:') ? agent.template_id.slice(5) : null,
+      }
+    );
+
+    // Sincroniza modelo principal no cartão do agente quando existir na lista ativa
+    if (agent && updatedCore.primary_model) {
+      agent.preferred_model = updatedCore.primary_model;
+      agent.updated_at = nowIso();
+    }
+
+    res.json({
+      core: updatedCore,
+      readiness: evaluateAgentCoreReadiness(updatedCore),
+    });
+  });
 
   api.post('/agents', requireAuth, (req, res) => {
     const properName = String(req.body?.proper_name || '').trim();
@@ -2743,44 +3143,259 @@ function buildApiRouter() {
     };
   };
 
-  api.get('/models', requireAuth, async (_req, res) => {
+  // --- COFRE DE CHAVES DE TERCEIROS (SQLITE AES-256-GCM + COOKIE HTTP-ONLY CRIPTOGRAFADO) ---
+  const isHttpsReq = (req: Request): boolean => {
+    const fwd = String(req.headers['x-forwarded-proto'] || '').toLowerCase();
+    return req.secure || fwd.includes('https');
+  };
+
+  const getOwnerUserId = (req: Request): string => {
+    const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
+    return user?.username || 'admin';
+  };
+
+  const readVaultCookieEnvelope = (req: Request, ownerUserId: string): CookieVaultEnvelope | null => {
+    const cookies = parseCookieHeader(req.headers.cookie);
+    return unsealVaultCookieEnvelope(cookies[VAULT_COOKIE_NAME], ownerUserId);
+  };
+
+  const syncVaultHttpOnlyCookie = (req: Request, res: Response, ownerUserId: string): void => {
+    const dbRecords = localBrainStore.listAllEncryptedProviderVaultRecords(ownerUserId);
+    const entries: CookieVaultEnvelope['entries'] = {};
+    for (const rec of dbRecords) {
+      const prov = normalizeProviderId(rec.provider);
+      if (!prov) continue;
+      try {
+        const plainKey = decryptProviderSecret(rec.encrypted_api_key);
+        entries[prov] = {
+          provider: prov,
+          apiKey: plainKey,
+          baseUrl: rec.base_url || EXTERNAL_PROVIDERS[prov].defaultBaseUrl,
+          defaultModel: rec.default_model || EXTERNAL_PROVIDERS[prov].defaultModel,
+          isDefault: rec.is_default,
+          label: rec.label,
+        };
+      } catch {
+        // Ignora registros cuja chave efêmera expirou entre reinicializações sem KEYVAULT_MASTER_KEY
+      }
+    }
+
+    const hasEntries = Object.keys(entries).length > 0;
+    if (!hasEntries) {
+      res.append('Set-Cookie', buildSecureVaultCookieHeader('', isHttpsReq(req), 0));
+      return;
+    }
+
+    const sealed = sealVaultCookieEnvelope({
+      ownerUserId,
+      updatedAt: nowIso(),
+      entries,
+    });
+    res.append('Set-Cookie', buildSecureVaultCookieHeader(sealed, isHttpsReq(req)));
+  };
+
+  const resolveExternalCredentialForRequest = (
+    req: Request,
+    ownerUserId: string,
+    requestedModel?: string,
+    explicitProvider?: ExternalProviderId | null
+  ): ResolvedExternalCredential | null => {
+    const inferredProvider = explicitProvider || inferExternalProviderFromModel(requestedModel);
+
+    const resolveFromProvider = (prov: ExternalProviderId): ResolvedExternalCredential | null => {
+      const dbRec = localBrainStore.getEncryptedProviderVaultRecord(ownerUserId, prov);
+      if (dbRec && dbRec.is_active) {
+        try {
+          return {
+            provider: prov,
+            apiKey: decryptProviderSecret(dbRec.encrypted_api_key),
+            baseUrl: dbRec.base_url || EXTERNAL_PROVIDERS[prov].defaultBaseUrl,
+            model: dbRec.default_model || EXTERNAL_PROVIDERS[prov].defaultModel,
+            source: 'session_vault',
+            keyId: dbRec.key_id,
+            label: dbRec.label,
+          };
+        } catch {
+          // Segue para cookie HttpOnly ou env
+        }
+      }
+
+      const cookieEnv = readVaultCookieEnvelope(req, ownerUserId);
+      const fromCookie = cookieEnv?.entries?.[prov];
+      if (fromCookie?.apiKey) {
+        return {
+          provider: prov,
+          apiKey: fromCookie.apiKey,
+          baseUrl: fromCookie.baseUrl || EXTERNAL_PROVIDERS[prov].defaultBaseUrl,
+          model: fromCookie.defaultModel || EXTERNAL_PROVIDERS[prov].defaultModel,
+          source: 'http_only_cookie',
+          label: fromCookie.label || EXTERNAL_PROVIDERS[prov].name,
+        };
+      }
+
+      return getEnvProviderCredential(prov);
+    };
+
+    if (inferredProvider) {
+      return resolveFromProvider(inferredProvider);
+    }
+
+    // Caso nenhum provedor específico tenha sido pedido no nome do modelo, verifica chave marcada como padrão
+    const defaultDb = localBrainStore.getDefaultEncryptedProviderVaultRecord(ownerUserId);
+    if (defaultDb) {
+      const prov = normalizeProviderId(defaultDb.provider);
+      if (prov) {
+        try {
+          return {
+            provider: prov,
+            apiKey: decryptProviderSecret(defaultDb.encrypted_api_key),
+            baseUrl: defaultDb.base_url || EXTERNAL_PROVIDERS[prov].defaultBaseUrl,
+            model: defaultDb.default_model || EXTERNAL_PROVIDERS[prov].defaultModel,
+            source: 'session_vault',
+            keyId: defaultDb.key_id,
+            label: defaultDb.label,
+          };
+        } catch {
+          // Segue para cookie HttpOnly
+        }
+      }
+    }
+
+    const cookieEnv = readVaultCookieEnvelope(req, ownerUserId);
+    if (cookieEnv?.entries) {
+      for (const entry of Object.values(cookieEnv.entries)) {
+        if (entry && entry.isDefault && entry.apiKey) {
+          return {
+            provider: entry.provider,
+            apiKey: entry.apiKey,
+            baseUrl: entry.baseUrl || EXTERNAL_PROVIDERS[entry.provider].defaultBaseUrl,
+            model: entry.defaultModel || EXTERNAL_PROVIDERS[entry.provider].defaultModel,
+            source: 'http_only_cookie',
+            label: entry.label || EXTERNAL_PROVIDERS[entry.provider].name,
+          };
+        }
+      }
+    }
+
+    return null;
+  };
+
+  let lastGeminiHealth: GeminiServerHealthResult | null = null;
+
+  const buildSessionProviderKeysPayload = (req: Request, ownerUserId: string) => {
+    const dbKeys = localBrainStore.listProviderVaultKeys(ownerUserId);
+    const cookieEnv = readVaultCookieEnvelope(req, ownerUserId);
+
+    const providers = EXTERNAL_PROVIDER_IDS.map((provId) => {
+      const meta = EXTERNAL_PROVIDERS[provId];
+      const dbMatch = dbKeys.find((k) => normalizeProviderId(k.provider) === provId);
+      const cookieMatch = cookieEnv?.entries?.[provId];
+      const envMatch = getEnvProviderCredential(provId);
+
+      const configured = Boolean(dbMatch || cookieMatch?.apiKey || envMatch);
+      const source: 'http_only_cookie_and_vault' | 'http_only_cookie' | 'env' | 'none' = dbMatch
+        ? 'http_only_cookie_and_vault'
+        : cookieMatch?.apiKey
+          ? 'http_only_cookie'
+          : envMatch
+            ? 'env'
+            : 'none';
+
+      return {
+        provider: provId,
+        name: meta.name,
+        short_label: meta.shortLabel,
+        tier: meta.tier,
+        docs_hint: meta.docsHint,
+        key_prefix_hint: meta.keyPrefixHint,
+        suggested_models: meta.suggestedModels,
+        env_var: meta.envVar,
+        configured,
+        source,
+        key_id: dbMatch?.key_id || `session_${provId}`,
+        masked_key:
+          dbMatch?.masked_key ||
+          (cookieMatch?.apiKey ? maskApiKey(cookieMatch.apiKey) : envMatch ? maskApiKey(envMatch.apiKey) : ''),
+        base_url: dbMatch?.base_url || cookieMatch?.baseUrl || envMatch?.baseUrl || meta.defaultBaseUrl,
+        default_model: dbMatch?.default_model || cookieMatch?.defaultModel || envMatch?.model || meta.defaultModel,
+        is_active: dbMatch ? dbMatch.is_active : Boolean(cookieMatch?.apiKey || envMatch),
+        is_default: dbMatch ? dbMatch.is_default : Boolean(cookieMatch?.isDefault),
+        last_tested_at: dbMatch?.last_tested_at || null,
+        last_test_status: dbMatch?.last_test_status || null,
+        last_test_message: dbMatch?.last_test_message || null,
+        last_latency_ms: dbMatch?.last_latency_ms ?? null,
+        last_status_code: dbMatch?.last_status_code ?? null,
+      };
+    });
+
+    return {
+      storage_security: {
+        http_only_cookie: true,
+        cookie_name: VAULT_COOKIE_NAME,
+        encryption: 'AES-256-GCM',
+        plaintext_in_local_storage: false,
+        owner_user_id: ownerUserId,
+      },
+      gemini_server_managed: isGeminiApiConfigured(),
+      gemini_health: lastGeminiHealth,
+      providers,
+    };
+  };
+
+  api.get('/models', requireAuth, async (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
     const activeHw = getActiveHardwareProfile();
     const ollamaProbe = providerConnectivity.ollama_connected
       ? await fetchOllamaLocalModels(activeHw.ollama_url)
       : { reachable: false, latencyMs: 0, models: [] };
 
-    const fallbackLocalModels = [
-      { name: 'qwen2.5-coder:7b', size: 4900000000, parameter_size: '7B', role: 'Código Local', modified_at: nowIso() },
-      { name: 'llama3.1:8b', size: 4700000000, parameter_size: '8B', role: 'Segurança Local', modified_at: nowIso() },
-      { name: 'llama3.2:3b', size: 2200000000, parameter_size: '3B', role: 'Ultra Leve', modified_at: nowIso() },
-    ];
-    const resolvedLocal = ollamaProbe.models.length > 0 ? ollamaProbe.models : fallbackLocalModels;
+    const realLocalModels = ollamaProbe.reachable ? ollamaProbe.models : [];
+    const providerState = buildSessionProviderKeysPayload(req, ownerUserId);
+
+    const onlineModels: Array<{ name: string; provider: string; role: string }> = [];
+    if (providerConnectivity.gemini_connected && isGeminiApiConfigured()) {
+      onlineModels.push(
+        { name: 'gemini-4-hydrogen', provider: 'Gemini Online · Web', role: 'Híbrido + Pesquisa Web' },
+        { name: 'gemini-3.1-flash-lite', provider: 'Gemini Online · Rápido', role: 'Respostas Instantâneas' }
+      );
+    }
+    for (const p of providerState.providers) {
+      if (p.configured && p.default_model) {
+        onlineModels.push({
+          name: p.default_model,
+          provider: `${p.name}${p.is_default ? ' · Padrão' : ''}`,
+          role: p.source === 'env' ? 'Variável de Ambiente' : 'Cofre Protegido da Sessão',
+        });
+      }
+    }
+
+    const defaultExternal = providerState.providers.find((p) => p.configured && p.is_default);
+    const resolvedActiveModel = defaultExternal
+      ? defaultExternal.default_model
+      : isGeminiApiConfigured()
+        ? 'gemini-4-hydrogen'
+        : realLocalModels[0]?.name || hybridConfig.default_model;
 
     res.json({
-      runtime: providerConnectivity.ollama_connected ? 'hybrid' : 'online',
+      runtime: providerConnectivity.ollama_connected && ollamaProbe.reachable ? 'hybrid' : 'online',
       status: 'online',
-      active_model: hybridConfig.default_model,
+      active_model: resolvedActiveModel,
       hybrid_gateway: {
-        enabled: providerConnectivity.gemini_connected,
-        provider: 'Gemini Online',
-        model: 'gemini-4-hydrogen',
+        enabled: providerConnectivity.gemini_connected || Boolean(defaultExternal),
+        provider: defaultExternal ? defaultExternal.name : 'Gemini Online',
+        model: resolvedActiveModel,
         current_spend_usd: hybridConfig.current_spend_usd,
         max_budget_usd: hybridConfig.max_budget_usd,
       },
-      online_models: providerConnectivity.gemini_connected
-        ? [
-            { name: 'gemini-4-hydrogen', provider: 'Gemini Online · Web', role: 'Híbrido + Pesquisa Web' },
-            { name: 'gemini-3.1-flash-lite', provider: 'Gemini Online · Rápido', role: 'Respostas Instantâneas' },
-          ]
-        : [],
-      local_models: resolvedLocal.map((m: any) => ({
+      online_models: onlineModels,
+      local_models: realLocalModels.map((m: any) => ({
         name: m.name,
-        size_gb: Number(((m.size || 4500000000) / 1e9).toFixed(1)),
-        quantization: 'Q4_K_M',
+        size_gb: Number(((m.size || 0) / 1e9).toFixed(1)),
+        quantization: 'Local',
         family: m.family || 'ollama',
-        status: ollamaProbe.reachable ? 'online' : 'catalog',
+        status: 'online',
       })),
-      models: resolvedLocal,
+      models: realLocalModels,
       ollama_reachable: ollamaProbe.reachable,
     });
   });
@@ -2869,6 +3484,7 @@ function buildApiRouter() {
   });
 
   api.post('/models/arena', requireAuth, async (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
     const prompt = String(req.body?.prompt || '').trim();
     const modelA = String(req.body?.model_a || 'gemini-4-hydrogen').trim();
     const modelB = String(req.body?.model_b || 'gemini-3.1-flash-lite').trim();
@@ -2880,6 +3496,7 @@ function buildApiRouter() {
     const activeHw = getActiveHardwareProfile();
     const runSide = async (modelId: string) => {
       try {
+        const externalCred = resolveExternalCredentialForRequest(req, ownerUserId, modelId);
         const result = await runHybridInference({
           prompt,
           systemInstruction: 'Você está em um comparativo lado a lado (Modo Arena). Entregue sua melhor resposta clara, precisa e objetiva em português.',
@@ -2889,6 +3506,7 @@ function buildApiRouter() {
           ollamaConnected: providerConnectivity.ollama_connected,
           geminiConnected: providerConnectivity.gemini_connected,
           enableWebSearch,
+          externalProvider: externalCred,
         });
         return {
           model_requested: modelId,
@@ -2902,11 +3520,12 @@ function buildApiRouter() {
           sources: result.sources,
         };
       } catch (err: any) {
+        const inferred = inferExternalProviderFromModel(modelId);
         return {
           model_requested: modelId,
           model_used: modelId,
-          execution_mode: modelId.startsWith('gemini-') ? ('ONLINE' as const) : ('LOCAL' as const),
-          provider: modelId.startsWith('gemini-') ? 'gemini' : 'ollama',
+          execution_mode: modelId.startsWith('gemini-') || inferred ? ('ONLINE' as const) : ('LOCAL' as const),
+          provider: inferred || (modelId.startsWith('gemini-') ? 'gemini' : 'ollama'),
           latency_ms: 0,
           text: '',
           error: err instanceof Error ? err.message : 'Falha na inferência.',
@@ -2918,16 +3537,64 @@ function buildApiRouter() {
     res.json({ left, right });
   });
 
-  api.get('/models/hybrid-config', requireAuth, (_req, res) =>
-    res.json({ ...hybridConfig, has_api_key: isGeminiApiConfigured() })
-  );
+  api.get('/models/hybrid-config', requireAuth, (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
+    const defaultExternal = resolveExternalCredentialForRequest(req, ownerUserId);
+    res.json({
+      ...hybridConfig,
+      provider_name: defaultExternal ? defaultExternal.provider : hybridConfig.provider_name,
+      default_model: defaultExternal ? defaultExternal.model : hybridConfig.default_model,
+      base_url: defaultExternal ? defaultExternal.baseUrl : hybridConfig.base_url,
+      has_api_key: Boolean(defaultExternal) || isGeminiApiConfigured(),
+    });
+  });
+
   api.post('/models/hybrid-config', requireAuth, (req, res) => {
-    hybridConfig = { ...hybridConfig, ...req.body, has_api_key: isGeminiApiConfigured() };
+    const ownerUserId = getOwnerUserId(req);
+    const providerId = normalizeProviderId(String(req.body?.provider_name || ''));
+    const rawKey = String(req.body?.api_key || '').trim();
+    const baseUrl = String(req.body?.base_url || '').trim();
+    const defaultModel = String(req.body?.default_model || '').trim();
+
+    if (providerId && rawKey) {
+      const check = validateProviderBaseUrl(providerId, baseUrl);
+      if (!check.valid) {
+        res.status(400).json({ detail: check.error || 'Endpoint inválido.' });
+        return;
+      }
+      const meta = EXTERNAL_PROVIDERS[providerId];
+      localBrainStore.upsertProviderVaultKey({
+        key_id: `session_${providerId}`,
+        owner_user_id: ownerUserId,
+        provider: providerId,
+        label: meta.name,
+        encrypted_api_key: encryptProviderSecret(rawKey),
+        masked_key: maskApiKey(rawKey),
+        base_url: check.normalizedUrl,
+        default_model: defaultModel || meta.defaultModel,
+        is_active: req.body?.enabled !== false,
+        is_default: req.body?.enabled !== false,
+      });
+      syncVaultHttpOnlyCookie(req, res, ownerUserId);
+    }
+
+    hybridConfig = {
+      ...hybridConfig,
+      provider_name: String(req.body?.provider_name || hybridConfig.provider_name),
+      enabled: req.body?.enabled !== false,
+      base_url: baseUrl || hybridConfig.base_url,
+      default_model: defaultModel || hybridConfig.default_model,
+      max_budget_usd: Number(req.body?.max_budget_usd ?? hybridConfig.max_budget_usd),
+      has_api_key: Boolean(resolveExternalCredentialForRequest(req, ownerUserId)) || isGeminiApiConfigured(),
+    };
     res.json(hybridConfig);
   });
+
   api.post('/models/hybrid-config/test', requireAuth, async (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
     const activeHw = getActiveHardwareProfile();
     const providerName = String(req.body?.provider_name || hybridConfig.provider_name).toLowerCase();
+
     if (providerName.includes('ollama')) {
       const probe = await fetchOllamaLocalModels(String(req.body?.base_url || activeHw.ollama_url));
       res.json({
@@ -2940,15 +3607,37 @@ function buildApiRouter() {
       });
       return;
     }
+
+    const externalId = normalizeProviderId(providerName);
+    if (externalId) {
+      const rawKey = String(req.body?.api_key || '').trim();
+      const existing = resolveExternalCredentialForRequest(req, ownerUserId, undefined, externalId);
+      const effectiveKey = rawKey || existing?.apiKey || '';
+      const effectiveUrl = String(req.body?.base_url || '').trim() || existing?.baseUrl;
+      const probe = await testExternalProviderConnection({
+        provider: externalId,
+        apiKey: effectiveKey,
+        baseUrl: effectiveUrl,
+      });
+      res.json({
+        success: probe.ok,
+        latency_ms: probe.latency_ms,
+        models_detected: probe.models_detected,
+        message: probe.ok ? probe.message : undefined,
+        error: probe.ok ? undefined : probe.message,
+      });
+      return;
+    }
+
     res.json({
       success: isGeminiApiConfigured(),
-      latency_ms: 38,
+      latency_ms: 32,
       message: isGeminiApiConfigured()
-        ? 'Gemini Online pronto no servidor (chave configurada em Settings > Secrets).'
+        ? 'Gemini Online pronto no servidor (credencial protegida no ambiente).'
         : undefined,
       error: isGeminiApiConfigured()
         ? undefined
-        : 'GEMINI_API_KEY não encontrada no servidor (verifique Settings > Secrets).',
+        : 'GEMINI_API_KEY não encontrada no ambiente do servidor.',
     });
   });
 
@@ -2984,36 +3673,336 @@ function buildApiRouter() {
     res.json(map);
   });
 
+  // --- SETTINGS: COFRE PROTEGIDO DE CHAVES DE TERCEIROS (HTTP-ONLY COOKIE + SQLITE AES-256-GCM) ---
+  api.get('/settings/provider-keys', requireAuth, (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
+    res.json(buildSessionProviderKeysPayload(req, ownerUserId));
+  });
 
-  api.get('/models/vault', requireAuth, (_req, res) => res.json({ keys: vaultKeys }));
+  api.put('/settings/provider-keys/:provider', requireAuth, (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
+    const providerId = normalizeProviderId(req.params.provider);
+    if (!providerId) {
+      res.status(400).json({ detail: 'Provedor externo não suportado. Use anthropic, openai, deepseek, groq, openrouter, xai ou custom.' });
+      return;
+    }
+
+    const meta = EXTERNAL_PROVIDERS[providerId];
+    const rawKey = String(req.body?.api_key || '').trim();
+    const baseUrl = String(req.body?.base_url || '').trim() || meta.defaultBaseUrl;
+    const defaultModel = String(req.body?.default_model || '').trim() || meta.defaultModel;
+    const isDefault = Boolean(req.body?.is_default);
+    const label = String(req.body?.label || meta.name).trim().slice(0, 64) || meta.name;
+
+    const urlCheck = validateProviderBaseUrl(providerId, baseUrl);
+    if (!urlCheck.valid) {
+      res.status(400).json({ detail: urlCheck.error || 'Endpoint HTTPS inválido.' });
+      return;
+    }
+
+    const keyId = `session_${providerId}`;
+    const existing = localBrainStore.getEncryptedProviderVaultRecord(ownerUserId, keyId);
+    if (!rawKey && !existing) {
+      res.status(400).json({ detail: `Informe a chave de API do provedor ${meta.shortLabel}.` });
+      return;
+    }
+
+    try {
+      localBrainStore.upsertProviderVaultKey({
+        key_id: keyId,
+        owner_user_id: ownerUserId,
+        provider: providerId,
+        label,
+        encrypted_api_key: rawKey ? encryptProviderSecret(rawKey) : undefined,
+        masked_key: rawKey ? maskApiKey(rawKey) : undefined,
+        base_url: urlCheck.normalizedUrl,
+        default_model: defaultModel,
+        is_active: true,
+        is_default: isDefault || Boolean(existing?.is_default),
+      });
+      syncVaultHttpOnlyCookie(req, res, ownerUserId);
+      res.json(buildSessionProviderKeysPayload(req, ownerUserId));
+    } catch (err: any) {
+      res.status(400).json({ detail: err?.message || 'Não foi possível salvar a chave de API.' });
+    }
+  });
+
+  api.post('/settings/provider-keys/:provider/test', requireAuth, async (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
+    const providerId = normalizeProviderId(req.params.provider);
+    if (!providerId) {
+      res.status(400).json({ detail: 'Provedor externo não suportado.' });
+      return;
+    }
+
+    const rawKey = String(req.body?.api_key || '').trim();
+    const existing = resolveExternalCredentialForRequest(req, ownerUserId, undefined, providerId);
+    const effectiveKey = rawKey || existing?.apiKey || '';
+    const effectiveUrl = String(req.body?.base_url || '').trim() || existing?.baseUrl;
+
+    const result = await testExternalProviderConnection({
+      provider: providerId,
+      apiKey: effectiveKey,
+      baseUrl: effectiveUrl,
+    });
+
+    const dbRec = localBrainStore.getEncryptedProviderVaultRecord(ownerUserId, `session_${providerId}`);
+    if (dbRec) {
+      localBrainStore.recordProviderVaultTestResult(
+        ownerUserId,
+        dbRec.key_id,
+        result.ok ? 'ok' : 'error',
+        result.message,
+        result.latency_ms,
+        result.status_code
+      );
+    }
+
+    res.status(result.ok ? 200 : 400).json({
+      ...result,
+      state: buildSessionProviderKeysPayload(req, ownerUserId),
+    });
+  });
+
+  api.post('/settings/provider-keys/health', requireAuth, async (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
+    const checkedAt = new Date().toISOString();
+    const initialPayload = buildSessionProviderKeysPayload(req, ownerUserId);
+    const configuredExternal = initialPayload.providers.filter((p) => p.configured);
+
+    const externalPromises = configuredExternal.map(async (item) => {
+      const cred = resolveExternalCredentialForRequest(req, ownerUserId, undefined, item.provider);
+      const result = await testExternalProviderConnection({
+        provider: item.provider,
+        apiKey: cred?.apiKey || '',
+        baseUrl: cred?.baseUrl || item.base_url,
+        timeoutMs: 6500,
+      });
+
+      const dbRec = localBrainStore.getEncryptedProviderVaultRecord(ownerUserId, `session_${item.provider}`);
+      if (dbRec) {
+        localBrainStore.recordProviderVaultTestResult(
+          ownerUserId,
+          dbRec.key_id,
+          result.ok ? 'ok' : 'error',
+          result.message,
+          result.latency_ms,
+          result.status_code
+        );
+      }
+
+      return {
+        provider: item.provider,
+        ok: result.ok,
+        status_code: result.status_code,
+        latency_ms: result.latency_ms,
+        endpoint_host: result.endpoint_host,
+        models_detected: result.models_detected,
+        message: result.message,
+        checked_at: new Date().toISOString(),
+      };
+    });
+
+    const geminiPromise = isGeminiApiConfigured()
+      ? testGeminiServerConnection(6500).then((r) => {
+          lastGeminiHealth = r;
+          return r;
+        })
+      : Promise.resolve(null);
+
+    const [geminiHealth, externalSettled] = await Promise.all([
+      geminiPromise,
+      Promise.allSettled(externalPromises),
+    ]);
+
+    const results = externalSettled
+      .filter((entry): entry is PromiseFulfilledResult<any> => entry.status === 'fulfilled')
+      .map((entry) => entry.value);
+
+    res.json({
+      checked_at: checkedAt,
+      gemini_health: geminiHealth,
+      results,
+      state: buildSessionProviderKeysPayload(req, ownerUserId),
+    });
+  });
+
+  api.post('/settings/provider-keys/:provider/default', requireAuth, (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
+    const rawProv = String(req.params.provider || '').toLowerCase();
+    if (rawProv === 'none' || rawProv === 'gemini') {
+      localBrainStore.clearDefaultProviderVaultKey(ownerUserId);
+      syncVaultHttpOnlyCookie(req, res, ownerUserId);
+      res.json(buildSessionProviderKeysPayload(req, ownerUserId));
+      return;
+    }
+
+    const providerId = normalizeProviderId(rawProv);
+    if (!providerId) {
+      res.status(400).json({ detail: 'Provedor inválido.' });
+      return;
+    }
+
+    const updated = localBrainStore.setDefaultProviderVaultKey(ownerUserId, providerId);
+    if (!updated) {
+      res.status(404).json({ detail: 'Salve uma chave de API para este provedor antes de ativá-lo como padrão.' });
+      return;
+    }
+    syncVaultHttpOnlyCookie(req, res, ownerUserId);
+    res.json(buildSessionProviderKeysPayload(req, ownerUserId));
+  });
+
+  api.delete('/settings/provider-keys/:provider', requireAuth, (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
+    const providerId = normalizeProviderId(req.params.provider);
+    if (!providerId) {
+      res.status(400).json({ detail: 'Provedor inválido.' });
+      return;
+    }
+    localBrainStore.deleteProviderVaultKey(ownerUserId, providerId);
+    syncVaultHttpOnlyCookie(req, res, ownerUserId);
+    res.json(buildSessionProviderKeysPayload(req, ownerUserId));
+  });
+
+  // --- KEYVAULT COMPATÍVEL COM CENTRAL DE MODELOS (PERSISTIDO EM SQLITE AES-256-GCM + COOKIE HTTP-ONLY) ---
+  api.get('/models/vault', requireAuth, (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
+    const items = localBrainStore.listProviderVaultKeys(ownerUserId).map((k) => ({
+      key_id: k.key_id,
+      label: k.label,
+      provider: k.provider,
+      provider_name: EXTERNAL_PROVIDERS[k.provider as ExternalProviderId]?.name || k.provider,
+      masked_key: k.masked_key,
+      base_url: k.base_url,
+      default_model: k.default_model,
+      preferred_model: k.default_model,
+      is_active: k.is_active,
+      is_default: k.is_default,
+      owner_user_id: k.owner_user_id,
+      last_tested_at: k.last_tested_at,
+      last_test_status: k.last_test_status,
+      last_test_message: k.last_test_message,
+    }));
+    res.json({ keys: items });
+  });
+
   api.post('/models/vault', requireAuth, (req, res) => {
-    const key_id = String(req.body?.key_id || `key_${Date.now()}`);
-    const raw = String(req.body?.api_key || '');
-    const masked_key = raw.length > 8 ? `${raw.slice(0, 4)}••••${raw.slice(-4)}` : '••••••••';
-    const item = {
-      key_id,
-      label: String(req.body?.label || key_id),
-      provider: String(req.body?.provider || 'custom'),
-      provider_name: String(req.body?.provider || 'custom'),
-      masked_key,
-      base_url: req.body?.base_url || '',
-      default_model: req.body?.default_model || '',
-      is_active: req.body?.is_active !== false,
-      is_default: Boolean(req.body?.is_default),
-    };
-    vaultKeys = [...vaultKeys.filter((k) => k.key_id !== key_id), item];
-    res.status(201).json(item);
+    const ownerUserId = getOwnerUserId(req);
+    const providerId = normalizeProviderId(String(req.body?.provider || ''));
+    if (!providerId) {
+      res.status(400).json({
+        detail: 'Provedor inválido. Use anthropic, openai, deepseek, groq, openrouter, xai ou custom (Gemini é gerenciado no servidor).',
+      });
+      return;
+    }
+
+    const rawKey = String(req.body?.api_key || '').trim();
+    if (!rawKey) {
+      res.status(400).json({ detail: 'Informe uma chave de API válida.' });
+      return;
+    }
+
+    const meta = EXTERNAL_PROVIDERS[providerId];
+    const urlCheck = validateProviderBaseUrl(providerId, String(req.body?.base_url || ''));
+    if (!urlCheck.valid) {
+      res.status(400).json({ detail: urlCheck.error || 'Endpoint HTTPS inválido.' });
+      return;
+    }
+
+    const keyId = String(req.body?.key_id || `session_${providerId}`)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, '_')
+      .slice(0, 48);
+
+    try {
+      const saved = localBrainStore.upsertProviderVaultKey({
+        key_id: keyId || `session_${providerId}`,
+        owner_user_id: ownerUserId,
+        provider: providerId,
+        label: String(req.body?.label || meta.name).trim().slice(0, 64),
+        encrypted_api_key: encryptProviderSecret(rawKey),
+        masked_key: maskApiKey(rawKey),
+        base_url: urlCheck.normalizedUrl,
+        default_model: String(req.body?.default_model || meta.defaultModel).trim(),
+        is_active: req.body?.is_active !== false,
+        is_default: Boolean(req.body?.is_default),
+      });
+      syncVaultHttpOnlyCookie(req, res, ownerUserId);
+      res.status(201).json({
+        ...saved,
+        provider_name: meta.name,
+        preferred_model: saved.default_model,
+      });
+    } catch (err: any) {
+      res.status(400).json({ detail: err?.message || 'Erro ao salvar credencial no cofre.' });
+    }
   });
+
   api.delete('/models/vault/:keyId', requireAuth, (req, res) => {
-    vaultKeys = vaultKeys.filter((k) => k.key_id !== req.params.keyId);
-    res.json({ deleted: true });
+    const ownerUserId = getOwnerUserId(req);
+    const deleted = localBrainStore.deleteProviderVaultKey(ownerUserId, req.params.keyId);
+    syncVaultHttpOnlyCookie(req, res, ownerUserId);
+    res.json({ deleted });
   });
+
   api.post('/models/vault/:keyId/default', requireAuth, (req, res) => {
-    vaultKeys = vaultKeys.map((k) => ({ ...k, is_default: k.key_id === req.params.keyId }));
+    const ownerUserId = getOwnerUserId(req);
+    const updated = localBrainStore.setDefaultProviderVaultKey(ownerUserId, req.params.keyId);
+    if (!updated) {
+      res.status(404).json({ detail: 'Credencial não encontrada neste cofre de sessão.' });
+      return;
+    }
+    syncVaultHttpOnlyCookie(req, res, ownerUserId);
     res.json({ status: 'updated' });
   });
-  api.post('/models/vault/:keyId/test', requireAuth, (_req, res) => {
-    res.json({ status: 'ok', message: 'Chave verificada.' });
+
+  api.post('/models/vault/:keyId/test', requireAuth, async (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
+    const record = localBrainStore.getEncryptedProviderVaultRecord(ownerUserId, req.params.keyId);
+    if (!record) {
+      res.status(404).json({ status: 'error', detail: 'Credencial não encontrada no cofre da sessão.' });
+      return;
+    }
+    const providerId = normalizeProviderId(record.provider);
+    if (!providerId) {
+      res.status(400).json({ status: 'error', detail: 'Provedor não suportado para verificação.' });
+      return;
+    }
+
+    let plainKey = '';
+    try {
+      plainKey = decryptProviderSecret(record.encrypted_api_key);
+    } catch {
+      res.status(400).json({
+        status: 'error',
+        detail: 'A chave criptografada precisará ser reinserida após rotação da chave mestra.',
+      });
+      return;
+    }
+
+    const result = await testExternalProviderConnection({
+      provider: providerId,
+      apiKey: plainKey,
+      baseUrl: record.base_url,
+    });
+    localBrainStore.recordProviderVaultTestResult(
+      ownerUserId,
+      record.key_id,
+      result.ok ? 'ok' : 'error',
+      result.message
+    );
+
+    if (!result.ok) {
+      res.status(400).json({ status: 'error', detail: result.message, latency_ms: result.latency_ms });
+      return;
+    }
+    res.json({
+      status: 'ok',
+      message: result.message,
+      latency_ms: result.latency_ms,
+      models_detected: result.models_detected,
+    });
   });
 
   // --- WORKSPACE ---
@@ -4250,7 +5239,21 @@ function buildApiRouter() {
   });
 
   // --- SECURITY ---
-  api.get('/audit/logs', requireAuth, (_req, res) => res.json({ total: auditLogs.length, logs: auditLogs }));
+  api.get('/audit/logs', requireAuth, (_req, res) => {
+    const dbAudit = localBrainStore.listAuditLogs(80).map((row) => ({
+      id: row.id,
+      timestamp: row.created_at,
+      actor: row.actor,
+      operation: row.action,
+      status: 'recorded',
+      severity: 'info',
+      details: row.detail || row.resource,
+    }));
+    const merged = [...auditLogs, ...dbAudit]
+      .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)))
+      .slice(0, 100);
+    res.json({ total: merged.length, logs: merged });
+  });
   api.get('/security/cyber-shield-status', requireAuth, (_req, res) => {
     res.json({
       status: networkIsolated ? 'isolated' : 'protected',
@@ -6624,19 +7627,7 @@ ${original}
     return `${raw.slice(0, 4)}-${raw.slice(4, 8)}`;
   };
 
-  let pairedDevicesList: PairedDeviceRecord[] = [
-    {
-      id: 'dev_android_seed_1',
-      name: 'Android Principal (Exemplo)',
-      platform: 'android',
-      model: 'Smartphone Android',
-      os_version: 'Android 15',
-      status: 'online',
-      paired_at: nowIso(),
-      last_seen: nowIso(),
-      token_hint: 'ks_9f2a••••e41b',
-    },
-  ];
+  let pairedDevicesList: PairedDeviceRecord[] = [];
 
   const createFreshPairingSession = (opts?: {
     serverUrl?: string;
@@ -6917,6 +7908,7 @@ async function startServer() {
       server: {
         middlewareMode: true,
         hmr: false,
+        ws: false,
       },
       appType: 'spa',
     });

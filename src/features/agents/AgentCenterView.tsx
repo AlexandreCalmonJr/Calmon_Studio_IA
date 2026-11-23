@@ -1,31 +1,45 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { BookOpen, Bot, GitBranch, Play, Plus, RefreshCw, Search, SlidersHorizontal, Sparkles, Store, Trash2, X } from 'lucide-react';
+import { BookOpen, Bot, Code2, Compass, Cpu, GitBranch, Package, Play, Plus, RefreshCw, Search, SlidersHorizontal, Sparkles, Store, Trash2, X } from 'lucide-react';
 import { AgentInfo, getAgentLabel, getModelLabel } from '../../types';
 import { deleteAgent, fetchAgents, updateAgentConfig } from '../../api';
 import { notify } from '../../shared/common/Toast';
 import { ConfirmDialog } from '../../shared/common/ConfirmDialog';
 import { AgentActionsModal } from './AgentActionsModal';
 import { AgentCreatorModal } from './AgentCreatorModal';
+import { AgentCoreInspectorModal } from './AgentCoreInspectorModal';
 import { AgentPlayground } from './AgentPlayground';
 import { AgentRouteModal } from './AgentRouteModal';
+import { AgentSchemaModeView } from './AgentSchemaModeView';
 import { AgentSkillsModal } from './AgentSkillsModal';
 import { AgentTemplateStoreGrid } from './AgentTemplateStoreGrid';
 import { PageHeader } from '../../shared/layout/PageHeader';
 import { MascotAvatar } from '../../shared/common/MascotAvatar';
 import { useAssistantIdentity } from '../../context/AssistantIdentityContext';
 import { AGENT_TEMPLATE_LIBRARY, canUninstallAgent } from '../../services/agentTemplates';
+import {
+  fetchAllAgentCores,
+  PACKS_UPDATED_EVENT,
+  type AgentCoreEnvelope,
+} from '../../services/api/packs';
 
 type AgentCategory = 'all' | 'studies' | 'creative' | 'security' | 'business' | 'dev';
-type AgentCenterSection = 'installed' | 'store';
+type AgentCenterSection = 'installed' | 'schema' | 'store';
 
 interface AgentCenterViewProps {
   onOpenGitHubImport?: () => void;
+  onOpenPackStore?: () => void;
+  onOpenArchitecture?: () => void;
 }
 
-export const AgentCenterView: React.FC<AgentCenterViewProps> = ({ onOpenGitHubImport }) => {
+export const AgentCenterView: React.FC<AgentCenterViewProps> = ({
+  onOpenGitHubImport,
+  onOpenPackStore,
+  onOpenArchitecture,
+}) => {
   const { assistantName, experienceMode } = useAssistantIdentity();
   const isSimpleMode = experienceMode === 'simple';
   const [agents, setAgents] = useState<AgentInfo[]>([]);
+  const [agentCoresByRole, setAgentCoresByRole] = useState<Record<string, AgentCoreEnvelope>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [section, setSection] = useState<AgentCenterSection>('installed');
@@ -38,6 +52,7 @@ export const AgentCenterView: React.FC<AgentCenterViewProps> = ({ onOpenGitHubIm
   const [selectedActionsAgent, setSelectedActionsAgent] = useState<AgentInfo | null>(null);
   const [selectedRouteAgent, setSelectedRouteAgent] = useState<AgentInfo | null>(null);
   const [selectedSkillsAgent, setSelectedSkillsAgent] = useState<AgentInfo | null>(null);
+  const [selectedCoreAgent, setSelectedCoreAgent] = useState<AgentInfo | null>(null);
   const [pendingUninstall, setPendingUninstall] = useState<AgentInfo | null>(null);
   const [uninstalling, setUninstalling] = useState(false);
 
@@ -75,8 +90,18 @@ export const AgentCenterView: React.FC<AgentCenterViewProps> = ({ onOpenGitHubIm
   const loadAgents = async () => {
     setLoading(true);
     try {
-      const data = await fetchAgents();
+      const [data, coresList] = await Promise.all([
+        fetchAgents(),
+        fetchAllAgentCores().catch(() => [] as AgentCoreEnvelope[]),
+      ]);
       setAgents(data);
+      const nextMap: Record<string, AgentCoreEnvelope> = {};
+      for (const item of coresList) {
+        if (item?.core?.agent_role) {
+          nextMap[item.core.agent_role] = item;
+        }
+      }
+      setAgentCoresByRole(nextMap);
       setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'Falha ao carregar o catálogo de agentes.');
@@ -91,7 +116,11 @@ export const AgentCenterView: React.FC<AgentCenterViewProps> = ({ onOpenGitHubIm
       void loadAgents();
     };
     window.addEventListener('jarvis:agents-updated', onAgentsUpdated);
-    return () => window.removeEventListener('jarvis:agents-updated', onAgentsUpdated);
+    window.addEventListener(PACKS_UPDATED_EVENT, onAgentsUpdated);
+    return () => {
+      window.removeEventListener('jarvis:agents-updated', onAgentsUpdated);
+      window.removeEventListener(PACKS_UPDATED_EVENT, onAgentsUpdated);
+    };
   }, []);
 
   const filteredAgents = useMemo(() => {
@@ -151,6 +180,18 @@ export const AgentCenterView: React.FC<AgentCenterViewProps> = ({ onOpenGitHubIm
               <Plus size={14} />
               <span>Criar do zero</span>
             </button>
+            {onOpenArchitecture && (
+              <button type="button" onClick={onOpenArchitecture} className="btn btn-secondary btn-sm">
+                <Compass size={14} />
+                <span>Agente de Arquitetura</span>
+              </button>
+            )}
+            {onOpenPackStore && (
+              <button type="button" onClick={onOpenPackStore} className="btn btn-secondary btn-sm">
+                <Package size={14} />
+                <span>Loja de Pacotes</span>
+              </button>
+            )}
             {onOpenGitHubImport && (
               <button type="button" onClick={onOpenGitHubImport} className="btn btn-secondary btn-sm">
                 <GitBranch size={14} />
@@ -171,7 +212,7 @@ export const AgentCenterView: React.FC<AgentCenterViewProps> = ({ onOpenGitHubIm
         }
       />
 
-      {/* Alternador Principal: Meus Agentes Instalados vs Loja de Agentes Prontos */}
+      {/* Alternador Principal: Meus Agentes Instalados vs Modo Schema vs Loja de Agentes Prontos */}
       <div
         className="jarvis-segmented"
         role="tablist"
@@ -185,8 +226,18 @@ export const AgentCenterView: React.FC<AgentCenterViewProps> = ({ onOpenGitHubIm
           onClick={() => setSection('installed')}
           className={`jarvis-segmented-btn ${section === 'installed' ? 'is-active' : ''}`}
         >
-          <Bot size={13} />
-          <span>Meus Agentes Instalados ({agents.length})</span>
+          <Bot size={14} />
+          <span>Meus Agentes ({agents.length})</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={section === 'schema'}
+          onClick={() => setSection('schema')}
+          className={`jarvis-segmented-btn ${section === 'schema' ? 'is-active' : ''}`}
+        >
+          <Code2 size={14} />
+          <span>Modo Schema ({agents.length})</span>
         </button>
         <button
           type="button"
@@ -195,7 +246,7 @@ export const AgentCenterView: React.FC<AgentCenterViewProps> = ({ onOpenGitHubIm
           onClick={() => setSection('store')}
           className={`jarvis-segmented-btn ${section === 'store' ? 'is-active' : ''}`}
         >
-          <Sparkles size={13} />
+          <Sparkles size={14} />
           <span>Loja de Agentes Prontos ({AGENT_TEMPLATE_LIBRARY.length})</span>
         </button>
       </div>
@@ -220,6 +271,16 @@ export const AgentCenterView: React.FC<AgentCenterViewProps> = ({ onOpenGitHubIm
               })
             );
           }}
+        />
+      ) : section === 'schema' ? (
+        <AgentSchemaModeView
+          agents={agents}
+          agentCoresByRole={agentCoresByRole}
+          onCoreSaved={(role, envelope) => {
+            setAgentCoresByRole((prev) => ({ ...prev, [role]: envelope }));
+            void loadAgents();
+          }}
+          onOpenFullInspector={(agent) => setSelectedCoreAgent(agent)}
         />
       ) : (
         <>
@@ -476,6 +537,26 @@ export const AgentCenterView: React.FC<AgentCenterViewProps> = ({ onOpenGitHubIm
                   </span>
                 </div>
 
+                {agentCoresByRole[agent.role] && (
+                  <div
+                    style={{
+                      color: 'var(--text-secondary)',
+                      fontSize: '0.72rem',
+                      marginTop: '2px',
+                    }}
+                  >
+                    <span>Núcleo: {agentCoresByRole[agent.role].readiness.orchestrationLabel}</span>
+                    <span aria-hidden="true"> · </span>
+                    <span className="tabular-nums mono">
+                      {agentCoresByRole[agent.role].core.max_steps} passos
+                    </span>
+                    <span aria-hidden="true"> · </span>
+                    <span className="tabular-nums mono">
+                      ${agentCoresByRole[agent.role].core.daily_budget_usd}/dia
+                    </span>
+                  </div>
+                )}
+
                 <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem', marginTop: '2px' }}>
                   <span>{agent.strict_focus ? 'Foco estrito' : 'Escopo flexível'}</span>
                   <span aria-hidden="true"> · </span>
@@ -496,6 +577,16 @@ export const AgentCenterView: React.FC<AgentCenterViewProps> = ({ onOpenGitHubIm
                   flexWrap: 'wrap',
                 }}
               >
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ flex: '1 1 82px' }}
+                  onClick={() => setSelectedCoreAgent(agent)}
+                  aria-label={`Configurar núcleo de ${properName} (${handleLabel})`}
+                >
+                  <Cpu size={13} />
+                  <span>Núcleo</span>
+                </button>
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
@@ -615,6 +706,26 @@ export const AgentCenterView: React.FC<AgentCenterViewProps> = ({ onOpenGitHubIm
           agent={selectedSkillsAgent}
           onClose={() => setSelectedSkillsAgent(null)}
           onSaved={loadAgents}
+        />
+      )}
+
+      {selectedCoreAgent && (
+        <AgentCoreInspectorModal
+          isOpen={true}
+          agentRole={selectedCoreAgent.role}
+          agentName={selectedCoreAgent.proper_name || selectedCoreAgent.name}
+          agentHandle={selectedCoreAgent.handle}
+          onClose={() => setSelectedCoreAgent(null)}
+          onSaved={(updatedCore, updatedReadiness) => {
+            setAgentCoresByRole((prev) => ({
+              ...prev,
+              [updatedCore.agent_role]: {
+                core: updatedCore,
+                readiness: updatedReadiness,
+              },
+            }));
+            void loadAgents();
+          }}
         />
       )}
     </div>

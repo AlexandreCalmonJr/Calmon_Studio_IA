@@ -126,9 +126,11 @@ test('buildDualModeServerArtifacts generates polyglot server files (Node + Pytho
   assert.ok(paths.includes('services/go-gateway/go.mod'));
   assert.ok(paths.includes('services/go-gateway/main.go'));
   assert.ok(paths.includes('services/go-gateway/Dockerfile'));
-  assert.ok(paths.includes('services/python-worker/worker.py'));
+  assert.ok(paths.includes('services/python-worker/app/main.py'));
   assert.ok(paths.includes('services/python-worker/requirements.txt'));
   assert.ok(paths.includes('services/python-worker/Dockerfile'));
+  const pyReq = files.find((f) => f.path === 'services/python-worker/requirements.txt')!.content;
+  assert.ok(pyReq.includes('fastapi') && pyReq.includes('langgraph') && pyReq.includes('chromadb'));
 
   const compose = files.find((f) => f.path === 'docker-compose.yml')!.content;
   assert.ok(compose.includes('pgvector/pgvector:pg16'));

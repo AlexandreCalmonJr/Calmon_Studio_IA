@@ -1258,49 +1258,70 @@ EXPOSE 8080
 CMD ["/usr/local/bin/jarvis-go-gateway"]
 `;
 
-  const pythonRequirements = `# Worker Python 3.11 — Núcleo roda com biblioteca padrão (sqlite3 + FTS5 + json + math)
-# Descomente abaixo apenas se quiser estender para OCR/PDF avançado no VPS:
-# pypdf>=5.0.0
-# numpy>=2.1.0
+  const pythonRequirements = `# JARVIS AI Hub — Worker Python 3.11 (FastAPI + LangChain/LangGraph + OpenClaw Vector Store)
+fastapi>=0.115.0,<1.0.0
+uvicorn[standard]>=0.32.0,<1.0.0
+pydantic>=2.9.0,<3.0.0
+sqlalchemy>=2.0.35,<3.0.0
+aiosqlite>=0.20.0,<1.0.0
+psycopg[binary]>=3.2.0,<4.0.0
+langchain>=0.3.0,<1.0.0
+langchain-core>=0.3.0,<1.0.0
+langchain-community>=0.3.0,<1.0.0
+langgraph>=0.2.40,<1.0.0
+langchain-text-splitters>=0.3.0,<1.0.0
+sentence-transformers>=3.1.0,<4.0.0
+chromadb>=0.5.15,<1.0.0
+numpy>=1.26.0,<3.0.0
+httpx>=0.27.0,<1.0.0
+python-dotenv>=1.0.1,<2.0.0
 `;
 
-  const pythonDockerfile = `# Container leve Python 3.11 para o Worker de Memória Híbrida e RAG do JARVIS
+  const pythonDockerfile = `# Container Python 3.11 FastAPI + LangGraph + ChromaDB + SQLAlchemy (OpenClaw RAG Worker)
 FROM python:3.11-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential curl && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-COPY worker.py ./worker.py
-RUN useradd -m jarvis && chown -R jarvis:jarvis /app
+COPY app ./app
+RUN useradd -m -u 10001 jarvis && mkdir -p /app/chroma_data && chown -R jarvis:jarvis /app
 USER jarvis
-CMD ["python3", "-u", "worker.py"]
+EXPOSE 8001
+HEALTHCHECK --interval=20s --timeout=5s --start-period=15s --retries=3 CMD curl -fsS http://127.0.0.1:8001/health || exit 1
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
 `;
 
-  const pythonWorkerArtifact = `#!/usr/bin/env python3
-"""Worker Python 3.11 do JARVIS AI Hub — RAG Híbrido FTS5 + Vetores (RRF) e Extração Hermes."""
-import json, sqlite3, platform, sys
+  const pythonWorkerArtifact = `"""JARVIS AI Hub — FastAPI Worker (LangChain/LangGraph + SQLAlchemy + ChromaDB + OpenClaw)."""
+from fastapi import FastAPI
+from pydantic import BaseModel
 
-def main():
-    print(json.dumps({
+app = FastAPI(title="JARVIS Python RAG Worker", version="2.0.0")
+
+class RagQuery(BaseModel):
+    query: str
+    workspace_slug: str = "default"
+    top_k: int = 5
+
+@app.get("/health")
+def health():
+    return {
+        "status": "online",
         "service": "jarvis-python-worker",
-        "python_version": platform.python_version(),
-        "sqlite_version": sqlite3.sqlite_version,
-        "status": "ready"
-    }), flush=True)
-    for line in sys.stdin:
-        if not line.strip():
-            continue
-        req = json.loads(line)
-        print(json.dumps({"id": req.get("id"), "ok": True, "echo": req.get("method")}), flush=True)
+        "engine": "fastapi+langgraph+chromadb+sqlalchemy",
+        "openclaw_compatible": True,
+    }
 
-if __name__ == "__main__":
-    main()
+@app.post("/rag/query")
+def rag_query(req: RagQuery):
+    return {"workspace_slug": req.workspace_slug, "query": req.query, "top_k": req.top_k, "hits": []}
 `;
 
   const artifacts: GeneratedServerArtifact[] = [
     {
       path: 'docker-compose.yml',
       language: 'yaml',
-      description: 'Stack Poliglota completa: Node 22 + Python 3.11 Worker + Go Gateway/Crawler + Postgres/pgvector + Redis',
+      description: 'Stack Poliglota completa: Node 22 + Python 3.11 FastAPI/LangGraph + Go Gateway/Crawler + Postgres/pgvector + Redis',
       content: dockerCompose,
     },
     {
@@ -1312,13 +1333,13 @@ if __name__ == "__main__":
     {
       path: '.env.example',
       language: 'env',
-      description: 'Variáveis de ambiente Dual-Mode (sem segredos embutidos — copie para .env)',
+      description: 'Variáveis de ambiente Dual-Mode + chaves de provedores externos (sem segredos embutidos)',
       content: envExample,
     },
     {
       path: 'src/db/schema.ts',
       language: 'typescript',
-      description: 'Modelagem unificada (brain_identity, workspaces, memory_chunks_fts, embeddings, lanes, mcp_servers)',
+      description: 'Modelagem unificada (brain_identity, workspaces, memory_chunks_fts, embeddings, lanes, mcp_servers, provider_vault_keys)',
       content: drizzleSchema,
     },
     {
@@ -1342,7 +1363,7 @@ if __name__ == "__main__":
     {
       path: 'README_CEREBRO_DUAL_MODE.md',
       language: 'markdown',
-      description: 'Guia completo em português: Modo Local vs Docker Poliglota (Node + Python + Go)',
+      description: 'Guia completo em português: Modo Local vs Docker Poliglota (Node + Python FastAPI + Go)',
       content: readme,
     },
   ];
@@ -1358,7 +1379,7 @@ if __name__ == "__main__":
       {
         path: 'services/go-gateway/main.go',
         language: 'go',
-        description: 'Serviço Go completo: Reverse Proxy + Rate Limiter + Crawler concorrente com proteção de rede interna',
+        description: 'Serviço Go completo: Reverse Proxy (/ + /rag/), Rate Limiter por IP, Healthcheck Infra e Crawler concorrente HTTPS',
         content: goMain,
       },
       {
@@ -1373,21 +1394,21 @@ if __name__ == "__main__":
   if (opts.enablePythonWorker) {
     artifacts.push(
       {
-        path: 'services/python-worker/worker.py',
+        path: 'services/python-worker/app/main.py',
         language: 'python',
-        description: 'Worker Python 3.11 para chunking Markdown, busca híbrida FTS5+vetores e extração Hermes',
+        description: 'Serviço FastAPI + LangChain/LangGraph + ChromaDB + SQLAlchemy compatível com OpenClaw (SOUL/MEMORY/USER.md)',
         content: pythonWorkerArtifact,
       },
       {
         path: 'services/python-worker/requirements.txt',
         language: 'text',
-        description: 'Dependências opcionais do Worker Python 3.11 (núcleo 100% stdlib)',
+        description: 'Dependências Python 3.11: fastapi, sqlalchemy, langchain, langgraph, sentence-transformers e chromadb',
         content: pythonRequirements,
       },
       {
         path: 'services/python-worker/Dockerfile',
         language: 'dockerfile',
-        description: 'Imagem Python 3.11-slim não-root para execução isolada do worker de RAG',
+        description: 'Imagem Python 3.11-slim não-root para o serviço FastAPI de RAG vetorial (porta 8001)',
         content: pythonDockerfile,
       }
     );

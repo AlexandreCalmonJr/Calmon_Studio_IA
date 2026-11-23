@@ -21,6 +21,23 @@ import {
 } from '../../src/services/brainArchitectureEngine.ts';
 import type { PairedDeviceRecord } from '../../src/services/androidAppEngine.ts';
 import {
+  buildDefaultAgentCore,
+  deriveAgentWorkspaceSlug,
+  normalizeAgentRoleSlug,
+  sanitizeAgentCorePatch,
+  type AgentCoreConfig,
+  type AgentCorePatch,
+  type AgentCoreSeedMeta,
+} from '../../src/services/agentCoreEngine.ts';
+import {
+  DEFAULT_PREINSTALLED_PACK_IDS,
+  getModulePackById,
+  normalizePackSlug,
+  sanitizeCustomPackInput,
+  type CustomPackDraftInput,
+  type ModulePackDefinition,
+} from '../../src/services/modulePackEngine.ts';
+import {
   BRAIN_SCHEMA_VERSION,
   CORE_SQLITE_TABLES,
   SQLITE_SCHEMA_DDL,
@@ -118,9 +135,23 @@ export class LocalSqliteBrainStore {
 
     this.db = new DatabaseSync(this.dbPath);
     this.db.exec(SQLITE_SCHEMA_DDL);
+    this.ensureProviderVaultColumns();
 
     this.ensureInitialRecords(options);
     this.ensureDefaultWorkspaceAndMcp();
+  }
+
+  private ensureProviderVaultColumns(): void {
+    const columns = this.db
+      .prepare('PRAGMA table_info(provider_vault_keys)')
+      .all() as Array<{ name: string }>;
+    const existing = new Set(columns.map((c) => String(c.name)));
+    if (!existing.has('last_latency_ms')) {
+      this.db.exec('ALTER TABLE provider_vault_keys ADD COLUMN last_latency_ms INTEGER');
+    }
+    if (!existing.has('last_status_code')) {
+      this.db.exec('ALTER TABLE provider_vault_keys ADD COLUMN last_status_code INTEGER');
+    }
   }
 
   private ensureInitialRecords(options: LocalSqliteStoreOptions): void {
@@ -1368,6 +1399,741 @@ export class LocalSqliteBrainStore {
     return this.db
       .prepare('SELECT * FROM mcp_tool_logs ORDER BY created_at DESC LIMIT ?')
       .all(safeLimit) as unknown as McpToolLogModel[];
+  }
+
+  // ==================== COFRE CRIPTOGRAFADO DE CHAVES DE PROVEDORES (SESSÃO) ====================
+  public listProviderVaultKeys(ownerUserId: string): Array<{
+    key_id: string;
+    owner_user_id: string;
+    provider: string;
+    label: string;
+    masked_key: string;
+    base_url: string;
+    default_model: string;
+    is_active: boolean;
+    is_default: boolean;
+    last_tested_at: string | null;
+    last_test_status: string | null;
+    last_test_message: string | null;
+    created_at: string;
+    updated_at: string;
+  }> {
+    const rows = this.db
+      .prepare(
+        `SELECT id, owner_user_id, provider, label, masked_key, base_url, default_model,
+                is_active, is_default, last_tested_at, last_test_status, last_test_message,
+                last_latency_ms, last_status_code, created_at, updated_at
+         FROM provider_vault_keys
+         WHERE owner_user_id = ?
+         ORDER BY is_default DESC, updated_at DESC`
+      )
+      .all(ownerUserId) as Array<Record<string, any>>;
+
+    return rows.map((r) => ({
+      key_id: String(r.id),
+      owner_user_id: String(r.owner_user_id),
+      provider: String(r.provider),
+      label: String(r.label),
+      masked_key: String(r.masked_key),
+      base_url: String(r.base_url || ''),
+      default_model: String(r.default_model || ''),
+      is_active: Boolean(r.is_active),
+      is_default: Boolean(r.is_default),
+      last_tested_at: r.last_tested_at ? String(r.last_tested_at) : null,
+      last_test_status: r.last_test_status ? String(r.last_test_status) : null,
+      last_test_message: r.last_test_message ? String(r.last_test_message) : null,
+      last_latency_ms:
+        typeof r.last_latency_ms === 'number' && Number.isFinite(r.last_latency_ms)
+          ? Math.round(r.last_latency_ms)
+          : null,
+      last_status_code:
+        typeof r.last_status_code === 'number' && Number.isFinite(r.last_status_code)
+          ? Math.round(r.last_status_code)
+          : null,
+      created_at: String(r.created_at),
+      updated_at: String(r.updated_at),
+    }));
+  }
+
+  public upsertProviderVaultKey(input: {
+    key_id: string;
+    owner_user_id: string;
+    provider: string;
+    label: string;
+    encrypted_api_key?: string;
+    masked_key?: string;
+    base_url: string;
+    default_model: string;
+    is_active: boolean;
+    is_default: boolean;
+  }): {
+    key_id: string;
+    owner_user_id: string;
+    provider: string;
+    label: string;
+    masked_key: string;
+    base_url: string;
+    default_model: string;
+    is_active: boolean;
+    is_default: boolean;
+    last_tested_at: string | null;
+    last_test_status: string | null;
+    last_test_message: string | null;
+    last_latency_ms: number | null;
+    last_status_code: number | null;
+    created_at: string;
+    updated_at: string;
+  } {
+    const now = nowIso();
+    const existing = this.db
+      .prepare('SELECT * FROM provider_vault_keys WHERE id = ? AND owner_user_id = ?')
+      .get(input.key_id, input.owner_user_id) as Record<string, any> | undefined;
+
+    const encrypted = input.encrypted_api_key || (existing ? String(existing.encrypted_api_key) : '');
+    const masked = input.masked_key || (existing ? String(existing.masked_key) : '');
+    if (!encrypted || !masked) {
+      throw new Error('Informe a chave de API para salvar este provedor no cofre da sessão.');
+    }
+
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      if (input.is_default) {
+        this.db
+          .prepare('UPDATE provider_vault_keys SET is_default = 0 WHERE owner_user_id = ?')
+          .run(input.owner_user_id);
+      }
+
+      if (existing) {
+        this.db
+          .prepare(
+            `UPDATE provider_vault_keys
+             SET provider = ?, label = ?, encrypted_api_key = ?, masked_key = ?,
+                 base_url = ?, default_model = ?, is_active = ?, is_default = ?, updated_at = ?
+             WHERE id = ? AND owner_user_id = ?`
+          )
+          .run(
+            input.provider,
+            input.label,
+            encrypted,
+            masked,
+            input.base_url,
+            input.default_model,
+            input.is_active ? 1 : 0,
+            input.is_default ? 1 : 0,
+            now,
+            input.key_id,
+            input.owner_user_id
+          );
+      } else {
+        this.db
+          .prepare(
+            `INSERT INTO provider_vault_keys
+              (id, owner_user_id, provider, label, encrypted_api_key, masked_key, base_url, default_model,
+               is_active, is_default, last_tested_at, last_test_status, last_test_message, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?)`
+          )
+          .run(
+            input.key_id,
+            input.owner_user_id,
+            input.provider,
+            input.label,
+            encrypted,
+            masked,
+            input.base_url,
+            input.default_model,
+            input.is_active ? 1 : 0,
+            input.is_default ? 1 : 0,
+            now,
+            now
+          );
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+
+    this.appendAuditLog({
+      action: 'vault.provider_key.saved',
+      actor: input.owner_user_id,
+      resource: `${input.provider}:${input.key_id}`,
+      detail: `Credencial ${input.provider} (${masked}) salva criptografada na sessão protegida.`,
+    });
+
+    const saved = this.listProviderVaultKeys(input.owner_user_id).find((k) => k.key_id === input.key_id)!;
+    return saved;
+  }
+
+  public getEncryptedProviderVaultRecord(
+    ownerUserId: string,
+    keyIdOrProvider: string
+  ): {
+    key_id: string;
+    owner_user_id: string;
+    provider: string;
+    label: string;
+    encrypted_api_key: string;
+    masked_key: string;
+    base_url: string;
+    default_model: string;
+    is_active: boolean;
+    is_default: boolean;
+  } | null {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM provider_vault_keys
+         WHERE owner_user_id = ? AND (id = ? OR provider = ?)
+         ORDER BY is_default DESC, updated_at DESC
+         LIMIT 1`
+      )
+      .get(ownerUserId, keyIdOrProvider, keyIdOrProvider) as Record<string, any> | undefined;
+
+    if (!row) return null;
+    return {
+      key_id: String(row.id),
+      owner_user_id: String(row.owner_user_id),
+      provider: String(row.provider),
+      label: String(row.label),
+      encrypted_api_key: String(row.encrypted_api_key),
+      masked_key: String(row.masked_key),
+      base_url: String(row.base_url || ''),
+      default_model: String(row.default_model || ''),
+      is_active: Boolean(row.is_active),
+      is_default: Boolean(row.is_default),
+    };
+  }
+
+  public listAllEncryptedProviderVaultRecords(ownerUserId: string): Array<{
+    key_id: string;
+    owner_user_id: string;
+    provider: string;
+    label: string;
+    encrypted_api_key: string;
+    masked_key: string;
+    base_url: string;
+    default_model: string;
+    is_active: boolean;
+    is_default: boolean;
+  }> {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM provider_vault_keys
+         WHERE owner_user_id = ? AND is_active = 1
+         ORDER BY is_default DESC, updated_at DESC`
+      )
+      .all(ownerUserId) as Array<Record<string, any>>;
+
+    return rows.map((row) => ({
+      key_id: String(row.id),
+      owner_user_id: String(row.owner_user_id),
+      provider: String(row.provider),
+      label: String(row.label),
+      encrypted_api_key: String(row.encrypted_api_key),
+      masked_key: String(row.masked_key),
+      base_url: String(row.base_url || ''),
+      default_model: String(row.default_model || ''),
+      is_active: Boolean(row.is_active),
+      is_default: Boolean(row.is_default),
+    }));
+  }
+
+  public getDefaultEncryptedProviderVaultRecord(ownerUserId: string): {
+    key_id: string;
+    owner_user_id: string;
+    provider: string;
+    label: string;
+    encrypted_api_key: string;
+    masked_key: string;
+    base_url: string;
+    default_model: string;
+    is_active: boolean;
+    is_default: boolean;
+  } | null {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM provider_vault_keys
+         WHERE owner_user_id = ? AND is_active = 1 AND is_default = 1
+         ORDER BY updated_at DESC
+         LIMIT 1`
+      )
+      .get(ownerUserId) as Record<string, any> | undefined;
+
+    if (!row) return null;
+    return {
+      key_id: String(row.id),
+      owner_user_id: String(row.owner_user_id),
+      provider: String(row.provider),
+      label: String(row.label),
+      encrypted_api_key: String(row.encrypted_api_key),
+      masked_key: String(row.masked_key),
+      base_url: String(row.base_url || ''),
+      default_model: String(row.default_model || ''),
+      is_active: Boolean(row.is_active),
+      is_default: Boolean(row.is_default),
+    };
+  }
+
+  public recordProviderVaultTestResult(
+    ownerUserId: string,
+    keyId: string,
+    status: 'ok' | 'error',
+    message: string,
+    latencyMs?: number | null,
+    statusCode?: number | null
+  ): void {
+    const cleanLatency =
+      typeof latencyMs === 'number' && Number.isFinite(latencyMs) && latencyMs >= 0
+        ? Math.round(latencyMs)
+        : null;
+    const cleanStatusCode =
+      typeof statusCode === 'number' && Number.isFinite(statusCode) && statusCode > 0
+        ? Math.round(statusCode)
+        : null;
+    const now = nowIso();
+    this.db
+      .prepare(
+        `UPDATE provider_vault_keys
+         SET last_tested_at = ?, last_test_status = ?, last_test_message = ?,
+             last_latency_ms = ?, last_status_code = ?, updated_at = ?
+         WHERE id = ? AND owner_user_id = ?`
+      )
+      .run(now, status, message.slice(0, 280), cleanLatency, cleanStatusCode, now, keyId, ownerUserId);
+  }
+
+  public setDefaultProviderVaultKey(ownerUserId: string, keyIdOrProvider: string): boolean {
+    const target = this.getEncryptedProviderVaultRecord(ownerUserId, keyIdOrProvider);
+    if (!target) return false;
+    const now = nowIso();
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.prepare('UPDATE provider_vault_keys SET is_default = 0 WHERE owner_user_id = ?').run(ownerUserId);
+      this.db
+        .prepare(
+          'UPDATE provider_vault_keys SET is_default = 1, is_active = 1, updated_at = ? WHERE id = ? AND owner_user_id = ?'
+        )
+        .run(now, target.key_id, ownerUserId);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+
+    this.appendAuditLog({
+      action: 'vault.provider_key.default_set',
+      actor: ownerUserId,
+      resource: `${target.provider}:${target.key_id}`,
+      detail: `Provedor ${target.provider} definido como padrão de inferência na sessão.`,
+    });
+    return true;
+  }
+
+  public clearDefaultProviderVaultKey(ownerUserId: string): void {
+    this.db
+      .prepare('UPDATE provider_vault_keys SET is_default = 0, updated_at = ? WHERE owner_user_id = ?')
+      .run(nowIso(), ownerUserId);
+  }
+
+  public deleteProviderVaultKey(ownerUserId: string, keyIdOrProvider: string): boolean {
+    const target = this.getEncryptedProviderVaultRecord(ownerUserId, keyIdOrProvider);
+    if (!target) return false;
+    this.db
+      .prepare('DELETE FROM provider_vault_keys WHERE id = ? AND owner_user_id = ?')
+      .run(target.key_id, ownerUserId);
+    this.appendAuditLog({
+      action: 'vault.provider_key.deleted',
+      actor: ownerUserId,
+      resource: `${target.provider}:${target.key_id}`,
+      detail: `Credencial ${target.provider} (${target.masked_key}) removida do cofre da sessão.`,
+    });
+    return true;
+  }
+
+  // ==================== PACOTES MODULARES (MODULE PACK ENGINE) ====================
+
+  private ensureDefaultPacksSeeded(ownerUserId: string): void {
+    const existingCount = (
+      this.db
+        .prepare('SELECT COUNT(*) AS total FROM installed_packs WHERE owner_user_id = ?')
+        .get(ownerUserId) as { total: number }
+    ).total;
+
+    if (existingCount > 0) return;
+
+    const now = nowIso();
+    const stmt = this.db.prepare(
+      `INSERT OR IGNORE INTO installed_packs (owner_user_id, pack_id, version, is_installed, installed_at, updated_at)
+       VALUES (?, ?, ?, 1, ?, ?)`
+    );
+
+    for (const packId of DEFAULT_PREINSTALLED_PACK_IDS) {
+      const def = getModulePackById(packId);
+      stmt.run(ownerUserId, packId, def?.version || '1.0.0', now, now);
+    }
+  }
+
+  public listInstalledPacks(ownerUserId: string): Array<{
+    pack_id: string;
+    version: string;
+    installed_at: string;
+  }> {
+    this.ensureDefaultPacksSeeded(ownerUserId);
+    const rows = this.db
+      .prepare(
+        `SELECT pack_id, version, installed_at
+         FROM installed_packs
+         WHERE owner_user_id = ? AND is_installed = 1
+         ORDER BY installed_at ASC`
+      )
+      .all(ownerUserId) as Array<Record<string, unknown>>;
+
+    return rows.map((row) => ({
+      pack_id: String(row.pack_id),
+      version: String(row.version || '1.0.0'),
+      installed_at: String(row.installed_at),
+    }));
+  }
+
+  public installPackRecord(
+    ownerUserId: string,
+    packId: string,
+    version = '1.0.0'
+  ): { pack_id: string; version: string; installed_at: string } {
+    this.ensureDefaultPacksSeeded(ownerUserId);
+    const now = nowIso();
+    this.db
+      .prepare(
+        `INSERT INTO installed_packs (owner_user_id, pack_id, version, is_installed, installed_at, updated_at)
+         VALUES (?, ?, ?, 1, ?, ?)
+         ON CONFLICT(owner_user_id, pack_id) DO UPDATE SET
+           version = excluded.version,
+           is_installed = 1,
+           installed_at = excluded.installed_at,
+           updated_at = excluded.updated_at`
+      )
+      .run(ownerUserId, packId, version, now, now);
+
+    this.appendAuditLog({
+      action: 'module_pack.installed',
+      actor: ownerUserId,
+      resource: packId,
+      detail: `Pacote modular ${packId} v${version} instalado.`,
+    });
+
+    return { pack_id: packId, version, installed_at: now };
+  }
+
+  public uninstallPackRecord(ownerUserId: string, packId: string): boolean {
+    this.ensureDefaultPacksSeeded(ownerUserId);
+    const now = nowIso();
+    const existing = this.db
+      .prepare('SELECT pack_id FROM installed_packs WHERE owner_user_id = ? AND pack_id = ?')
+      .get(ownerUserId, packId);
+
+    if (existing) {
+      this.db
+        .prepare(
+          `UPDATE installed_packs
+           SET is_installed = 0, updated_at = ?
+           WHERE owner_user_id = ? AND pack_id = ?`
+        )
+        .run(now, ownerUserId, packId);
+    } else {
+      this.db
+        .prepare(
+          `INSERT INTO installed_packs (owner_user_id, pack_id, version, is_installed, installed_at, updated_at)
+           VALUES (?, ?, '1.0.0', 0, ?, ?)`
+        )
+        .run(ownerUserId, packId, now, now);
+    }
+
+    this.appendAuditLog({
+      action: 'module_pack.uninstalled',
+      actor: ownerUserId,
+      resource: packId,
+      detail: `Pacote modular ${packId} removido da navegação ativa.`,
+    });
+    return true;
+  }
+
+  public listCustomPacks(): ModulePackDefinition[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, name, tagline, description, category, version, definition_json, created_by, updated_at
+         FROM custom_packs
+         ORDER BY updated_at DESC`
+      )
+      .all() as Array<Record<string, unknown>>;
+
+    const result: ModulePackDefinition[] = [];
+    for (const row of rows) {
+      const parsed = safeJsonParse<Partial<ModulePackDefinition> | null>(row.definition_json, null);
+      if (!parsed) continue;
+      const tabs = Array.isArray(parsed.tabs) ? parsed.tabs : [];
+      result.push({
+        id: String(row.id),
+        name: String(row.name || parsed.name || row.id),
+        tagline: String(row.tagline || parsed.tagline || ''),
+        description: String(row.description || parsed.description || ''),
+        category: (String(row.category || parsed.category || 'engineering') as ModulePackDefinition['category']),
+        category_label: String(parsed.category_label || 'Engenharia & Arquitetura'),
+        version: String(row.version || parsed.version || '1.0.0'),
+        tabs,
+        tab_labels: parsed.tab_labels && typeof parsed.tab_labels === 'object' ? parsed.tab_labels : {},
+        agents: Array.isArray(parsed.agents) ? parsed.agents : [],
+        skills: Array.isArray(parsed.skills) ? parsed.skills : [],
+        mcp_presets: Array.isArray(parsed.mcp_presets) ? parsed.mcp_presets : [],
+        workflows: Array.isArray(parsed.workflows) ? parsed.workflows : [],
+        study_tracks: Array.isArray(parsed.study_tracks) ? parsed.study_tracks : [],
+        is_custom: true,
+        created_by: String(row.created_by || 'admin'),
+      });
+    }
+    return result;
+  }
+
+  public upsertCustomPack(createdBy: string, input: CustomPackDraftInput): ModulePackDefinition {
+    const normalized = sanitizeCustomPackInput(input, createdBy);
+    const now = nowIso();
+    this.db
+      .prepare(
+        `INSERT INTO custom_packs (
+          id, name, tagline, description, category, version, accent_color,
+          definition_json, created_by, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          name = excluded.name,
+          tagline = excluded.tagline,
+          description = excluded.description,
+          category = excluded.category,
+          version = excluded.version,
+          definition_json = excluded.definition_json,
+          updated_at = excluded.updated_at`
+      )
+      .run(
+        normalized.id,
+        normalized.name,
+        normalized.tagline,
+        normalized.description,
+        normalized.category,
+        normalized.version,
+        '#f97316',
+        JSON.stringify(normalized),
+        createdBy,
+        now,
+        now
+      );
+
+    this.appendAuditLog({
+      action: 'custom_pack.saved',
+      actor: createdBy,
+      resource: normalized.id,
+      detail: `Pacote personalizado "${normalized.name}" v${normalized.version} salvo com ${normalized.tabs.length} módulo(s) e ${normalized.agents.length} agente(s).`,
+    });
+
+    return normalized;
+  }
+
+  public deleteCustomPack(actor: string, packId: string): boolean {
+    const cleanId = normalizePackSlug(packId);
+    const existing = this.db
+      .prepare('SELECT id FROM custom_packs WHERE id = ?')
+      .get(cleanId);
+    if (!existing) return false;
+
+    this.db.prepare('DELETE FROM custom_packs WHERE id = ?').run(cleanId);
+    this.db.prepare('DELETE FROM installed_packs WHERE pack_id = ?').run(cleanId);
+
+    this.appendAuditLog({
+      action: 'custom_pack.deleted',
+      actor,
+      resource: cleanId,
+      detail: `Pacote personalizado ${cleanId} removido do Estúdio de Pacotes.`,
+    });
+    return true;
+  }
+
+  public upsertKnowledgeDocumentRecord(input: {
+    name: string;
+    category: string;
+    content: string;
+    fileType?: string;
+  }): void {
+    const cleanName = String(input.name || '').trim().slice(0, 180);
+    if (!cleanName) return;
+    const content = String(input.content || '');
+    const now = nowIso();
+    this.db
+      .prepare(
+        `INSERT INTO knowledge_documents (name, category, file_type, content, chunks, size_bytes, indexed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(name) DO UPDATE SET
+           category = excluded.category,
+           content = excluded.content,
+           chunks = excluded.chunks,
+           size_bytes = excluded.size_bytes,
+           indexed_at = excluded.indexed_at`
+      )
+      .run(
+        cleanName,
+        String(input.category || 'estudos').slice(0, 64),
+        String(input.fileType || 'md').slice(0, 16),
+        content,
+        Math.max(1, Math.ceil(content.length / 650)),
+        Buffer.byteLength(content, 'utf8'),
+        now
+      );
+  }
+
+  // ==================== NÚCLEOS INDIVIDUAIS DE AGENTES (AGENT CORE SCHEMA) ====================
+
+  private hydrateAgentCoreRow(row: Record<string, unknown>): AgentCoreConfig {
+    return {
+      agent_role: String(row.agent_role),
+      workspace_slug: String(row.workspace_slug || deriveAgentWorkspaceSlug(String(row.agent_role))),
+      orchestration_mode: String(row.orchestration_mode || 'plan_execute_verify') as AgentCoreConfig['orchestration_mode'],
+      max_steps: Number(row.max_steps) || 8,
+      max_delegation_depth: Number(row.max_delegation_depth) || 2,
+      primary_provider: String(row.primary_provider || 'gemini'),
+      primary_model: String(row.primary_model || 'gemini-2.5-flash'),
+      fallback_provider: String(row.fallback_provider || 'openai'),
+      fallback_model: String(row.fallback_model || 'gpt-4.1-mini'),
+      autonomy_policy: String(row.autonomy_policy || 'auto_safe') as AgentCoreConfig['autonomy_policy'],
+      daily_budget_usd: Number.isFinite(Number(row.daily_budget_usd)) ? Number(row.daily_budget_usd) : 5,
+      allowed_mcp_servers: safeJsonParse<string[]>(row.allowed_mcp_servers_json, ['mcp_local_workspace']),
+      soul_markdown: String(row.soul_markdown || ''),
+      memory_markdown: String(row.memory_markdown || ''),
+      cron_schedule: row.cron_schedule ? String(row.cron_schedule) : null,
+      pack_id: row.pack_id ? String(row.pack_id) : null,
+      status: (row.status === 'paused' ? 'paused' : 'active') as AgentCoreConfig['status'],
+      updated_at: String(row.updated_at || nowIso()),
+    };
+  }
+
+  private syncAgentCoreWorkspaceFiles(core: AgentCoreConfig): void {
+    try {
+      const safeSlug = sanitizeWorkspaceSlug(core.workspace_slug || deriveAgentWorkspaceSlug(core.agent_role));
+      const agentWsRoot = resolveConfinedPath(this.workspacesDir, safeSlug);
+      fs.mkdirSync(agentWsRoot, { recursive: true });
+      const soulPath = resolveConfinedPath(agentWsRoot, 'SOUL.md');
+      const memoryPath = resolveConfinedPath(agentWsRoot, 'MEMORY.md');
+      fs.writeFileSync(soulPath, core.soul_markdown || '', 'utf8');
+      fs.writeFileSync(memoryPath, core.memory_markdown || '', 'utf8');
+    } catch {
+      // Non-fatal: SQLite remains source of truth even if filesystem sync is restricted
+    }
+  }
+
+  public listAgentCores(ownerUserId: string): AgentCoreConfig[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM agent_cores
+         WHERE owner_user_id = ?
+         ORDER BY updated_at DESC`
+      )
+      .all(ownerUserId) as Array<Record<string, unknown>>;
+
+    return rows.map((row) => this.hydrateAgentCoreRow(row));
+  }
+
+  public getAgentCore(
+    ownerUserId: string,
+    agentRole: string,
+    seedMeta?: AgentCoreSeedMeta
+  ): AgentCoreConfig {
+    const safeRole = normalizeAgentRoleSlug(agentRole);
+    const row = this.db
+      .prepare('SELECT * FROM agent_cores WHERE owner_user_id = ? AND agent_role = ?')
+      .get(ownerUserId, safeRole) as Record<string, unknown> | undefined;
+
+    if (row) {
+      return this.hydrateAgentCoreRow(row);
+    }
+
+    const seeded = buildDefaultAgentCore(safeRole, seedMeta, nowIso());
+    this.saveAgentCoreRecord(ownerUserId, seeded);
+    return seeded;
+  }
+
+  private saveAgentCoreRecord(ownerUserId: string, core: AgentCoreConfig): void {
+    this.db
+      .prepare(
+        `INSERT INTO agent_cores (
+          owner_user_id, agent_role, workspace_slug, orchestration_mode,
+          max_steps, max_delegation_depth, primary_provider, primary_model,
+          fallback_provider, fallback_model, autonomy_policy, daily_budget_usd,
+          allowed_mcp_servers_json, soul_markdown, memory_markdown, cron_schedule,
+          pack_id, status, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(owner_user_id, agent_role) DO UPDATE SET
+          workspace_slug = excluded.workspace_slug,
+          orchestration_mode = excluded.orchestration_mode,
+          max_steps = excluded.max_steps,
+          max_delegation_depth = excluded.max_delegation_depth,
+          primary_provider = excluded.primary_provider,
+          primary_model = excluded.primary_model,
+          fallback_provider = excluded.fallback_provider,
+          fallback_model = excluded.fallback_model,
+          autonomy_policy = excluded.autonomy_policy,
+          daily_budget_usd = excluded.daily_budget_usd,
+          allowed_mcp_servers_json = excluded.allowed_mcp_servers_json,
+          soul_markdown = excluded.soul_markdown,
+          memory_markdown = excluded.memory_markdown,
+          cron_schedule = excluded.cron_schedule,
+          pack_id = excluded.pack_id,
+          status = excluded.status,
+          updated_at = excluded.updated_at`
+      )
+      .run(
+        ownerUserId,
+        core.agent_role,
+        core.workspace_slug,
+        core.orchestration_mode,
+        core.max_steps,
+        core.max_delegation_depth,
+        core.primary_provider,
+        core.primary_model,
+        core.fallback_provider,
+        core.fallback_model,
+        core.autonomy_policy,
+        core.daily_budget_usd,
+        JSON.stringify(core.allowed_mcp_servers),
+        core.soul_markdown,
+        core.memory_markdown,
+        core.cron_schedule,
+        core.pack_id,
+        core.status,
+        core.updated_at
+      );
+
+    this.syncAgentCoreWorkspaceFiles(core);
+  }
+
+  public upsertAgentCore(
+    ownerUserId: string,
+    agentRole: string,
+    patch: AgentCorePatch,
+    seedMeta?: AgentCoreSeedMeta
+  ): AgentCoreConfig {
+    const current = this.getAgentCore(ownerUserId, agentRole, seedMeta);
+    const merged = sanitizeAgentCorePatch(current, patch, nowIso());
+    this.saveAgentCoreRecord(ownerUserId, merged);
+
+    this.appendAuditLog({
+      action: 'agent_core.updated',
+      actor: ownerUserId,
+      resource: merged.agent_role,
+      detail: `Núcleo atualizado (${merged.orchestration_mode}, ${merged.primary_provider}/${merged.primary_model}, max_steps=${merged.max_steps}).`,
+    });
+
+    return merged;
+  }
+
+  public deleteAgentCore(ownerUserId: string, agentRole: string): boolean {
+    const safeRole = normalizeAgentRoleSlug(agentRole);
+    this.db
+      .prepare('DELETE FROM agent_cores WHERE owner_user_id = ? AND agent_role = ?')
+      .run(ownerUserId, safeRole);
+    return true;
   }
 
   public close(): void {

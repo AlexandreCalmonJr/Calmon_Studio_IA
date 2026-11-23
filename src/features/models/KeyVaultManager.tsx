@@ -10,7 +10,7 @@ import {
 } from '../../services/api/models';
 import { humanizeLabel } from '../../types';
 
-const providers = ['openai', 'gemini', 'groq', 'deepseek', 'anthropic', 'custom'];
+const providers = ['anthropic', 'openai', 'deepseek', 'groq', 'openrouter', 'xai', 'custom'];
 
 const keyScope = (item: KeyVaultItem): 'account' | 'global' =>
   item.owner_user_id ? 'account' : 'global';

@@ -34,6 +34,7 @@ import { getUserProfile, UserProfileData } from '../../shared/common/UserProfile
 import { notify } from '../../shared/common/Toast';
 import { getAccountStorageKey } from '../../services/accountScope';
 import { KeyVaultManager } from '../models/KeyVaultManager';
+import { ThirdPartyApiKeysCard } from './ThirdPartyApiKeysCard';
 import { PageHeader } from '../../shared/layout/PageHeader';
 import { useAssistantIdentity } from '../../context/AssistantIdentityContext';
 import {
@@ -47,6 +48,18 @@ import {
   setVoiceAutoSpeakPref,
   setWakeWordEnabledPref,
 } from '../../hooks/useWakeWordListener';
+import {
+  ACCENT_CATALOG,
+  THEME_CATALOG,
+  THEME_CHANGED_EVENT,
+  loadThemePreferences,
+  resolveEffectiveTheme,
+  getSystemPrefersDark,
+  saveAndApplyThemePreferences,
+  type AccentColor,
+  type ThemeMode,
+  type UiDensity,
+} from '../../services/themeEngine';
 
 interface SettingsViewProps {
   initialSubTab?: string;
@@ -159,13 +172,43 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [testingOllama, setTestingOllama] = useState(false);
   const [backingUpDb, setBackingUpDb] = useState(false);
 
-  // Aparência e Tema
-  const [themeMode, setThemeMode] = useState<'obsidian' | 'oled' | 'graphite'>('obsidian');
-  const [accentColor, setAccentColor] = useState<'blue' | 'purple' | 'emerald' | 'orange'>('orange');
-  const [uiDensity, setUiDensity] = useState<'comfortable' | 'compact'>('comfortable');
-  const [glassmorphism, setGlassmorphism] = useState(true);
-  const [smoothAnimations, setSmoothAnimations] = useState(true);
+  // Aparência e Tema (Motor de Tema Dinâmico Real)
+  const initialThemePrefs = loadThemePreferences();
+  const [themeMode, setThemeMode] = useState<ThemeMode>(initialThemePrefs.themeMode);
+  const [accentColor, setAccentColor] = useState<AccentColor>(initialThemePrefs.accentColor);
+  const [uiDensity, setUiDensity] = useState<UiDensity>(initialThemePrefs.uiDensity);
+  const [glassmorphism, setGlassmorphism] = useState<boolean>(initialThemePrefs.glassmorphism);
+  const [smoothAnimations, setSmoothAnimations] = useState<boolean>(initialThemePrefs.smoothAnimations);
   const [railAgentsMode, setRailAgentsMode] = useState<'auto' | 'always' | 'never'>('auto');
+
+  useEffect(() => {
+    const syncTheme = () => {
+      const latest = loadThemePreferences();
+      setThemeMode(latest.themeMode);
+      setAccentColor(latest.accentColor);
+      setUiDensity(latest.uiDensity);
+      setGlassmorphism(latest.glassmorphism);
+      setSmoothAnimations(latest.smoothAnimations);
+    };
+    window.addEventListener(THEME_CHANGED_EVENT, syncTheme);
+    return () => window.removeEventListener(THEME_CHANGED_EVENT, syncTheme);
+  }, []);
+
+  const updateThemePref = (patch: Partial<{
+    themeMode: ThemeMode;
+    accentColor: AccentColor;
+    uiDensity: UiDensity;
+    glassmorphism: boolean;
+    smoothAnimations: boolean;
+  }>, toastMessage?: string) => {
+    const { preferences } = saveAndApplyThemePreferences(patch);
+    setThemeMode(preferences.themeMode);
+    setAccentColor(preferences.accentColor);
+    setUiDensity(preferences.uiDensity);
+    setGlassmorphism(preferences.glassmorphism);
+    setSmoothAnimations(preferences.smoothAnimations);
+    if (toastMessage) notify(toastMessage, 'success');
+  };
 
   // Notificações
   const [notifyTaskCompletion, setNotifyTaskCompletion] = useState(true);
@@ -1560,7 +1603,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </section>
 
               <section className="jarvis-settings-section">
-                <h3 className="jarvis-settings-section__title">Chaves de Provedores (KeyVault)</h3>
+                <h3 className="jarvis-settings-section__title">Chaves de API de Terceiros (Anthropic, OpenAI, DeepSeek)</h3>
+                <ThirdPartyApiKeysCard />
+              </section>
+
+              <section className="jarvis-settings-section">
+                <h3 className="jarvis-settings-section__title">Gerenciador Avançado do Cofre (KeyVault)</h3>
                 <KeyVaultManager />
               </section>
             </>
@@ -1654,43 +1702,66 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <>
               <PageHeader
                 icon={<Palette size={18} />}
-                title="Aparência e Tema"
-                subtitle="Controle elementos da interface em tempo real e pré-visualize paletas de tema."
+                title="Aparência e Tema Dinâmico"
+                subtitle="Personalize o tema, a cor de destaque, a densidade e os efeitos visuais em tempo real em todas as páginas."
               />
 
-              <div className="jarvis-callout jarvis-callout--warning" role="note">
-                Os controles de Dynamic Island, Dock de Agentes e Especialistas na Barra Lateral têm efeito imediato. Tema, cor de destaque e densidade são pré-visualizações locais nesta build.
+              <div className="jarvis-callout jarvis-callout--success" role="status">
+                <strong>Tema dinâmico ativo:</strong> todas as alterações abaixo são aplicadas instantaneamente em toda a plataforma e salvas automaticamente neste navegador.
+                {themeMode === 'auto' && (
+                  <span>
+                    {' '}
+                    Modo automático detectou{' '}
+                    <strong>
+                      {resolveEffectiveTheme('auto', getSystemPrefersDark()) === 'friendly_light'
+                        ? 'Claro Amigável'
+                        : 'Obsidian Studio'}
+                    </strong>{' '}
+                    pelo seu sistema operacional.
+                  </span>
+                )}
               </div>
 
               <section className="jarvis-settings-section">
                 <h3 className="jarvis-settings-section__title">Tema do Sistema</h3>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '10px' }}>
-                  {[
-                    { id: 'obsidian', name: 'Obsidian & Laranja JARVIS (Padrão)', desc: 'Fundo escuro fosco com alto contraste e acento laranja JARVIS', bg: '#0b0d12' },
-                    { id: 'oled', name: 'OLED Puro', desc: 'Preto puro para monitores OLED e contraste máximo', bg: '#000000' },
-                    { id: 'graphite', name: 'Cinza Grafite', desc: 'Tons de cinza neutro com transições suaves', bg: '#1e1e24' },
-                  ].map((t) => (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+                  {THEME_CATALOG.map((t) => (
                     <button
                       key={t.id}
                       type="button"
-                      onClick={() => setThemeMode(t.id as 'obsidian' | 'oled' | 'graphite')}
+                      data-theme-choice={t.id}
+                      onClick={() => updateThemePref({ themeMode: t.id }, `Tema alterado para ${t.shortLabel}.`)}
                       className={`jarvis-choice-card ${themeMode === t.id ? 'is-active' : ''}`}
                       aria-pressed={themeMode === t.id}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                        <span style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-primary)' }}>{t.name}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: '10px' }}>
+                        <span style={{ fontSize: '0.86rem', fontWeight: 600, color: 'var(--text-primary)' }}>{t.name}</span>
                         <span
+                          aria-hidden="true"
                           style={{
-                            width: '16px',
-                            height: '16px',
-                            borderRadius: '4px',
-                            backgroundColor: t.bg,
+                            width: '28px',
+                            height: '20px',
+                            borderRadius: '6px',
+                            background: t.previewBg,
                             border: '1px solid var(--border-hover)',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
                             flexShrink: 0,
                           }}
-                        />
+                        >
+                          <span
+                            style={{
+                              width: '12px',
+                              height: '8px',
+                              borderRadius: '3px',
+                              backgroundColor: t.previewCard,
+                              border: '1px solid rgba(148,163,184,0.35)',
+                            }}
+                          />
+                        </span>
                       </div>
-                      <span style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>{t.desc}</span>
+                      <span style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>{t.desc}</span>
                     </button>
                   ))}
                 </div>
@@ -1698,26 +1769,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
               <section className="jarvis-settings-section">
                 <h3 className="jarvis-settings-section__title">Cor de Destaque (Accent)</h3>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  {[
-                    { id: 'orange', name: 'Laranja JARVIS', hex: '#f97316' },
-                    { id: 'blue', name: 'Azul Cobalto', hex: '#3b82f6' },
-                    { id: 'purple', name: 'Púrpura IA', hex: '#a855f7' },
-                    { id: 'emerald', name: 'Esmeralda', hex: '#10b981' },
-                  ].map((c) => (
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                  {ACCENT_CATALOG.map((c) => (
                     <button
                       key={c.id}
                       type="button"
-                      onClick={() => setAccentColor(c.id as 'blue' | 'purple' | 'emerald' | 'orange')}
-                      className={`btn btn-sm ${accentColor === c.id ? 'btn-secondary is-active' : 'btn-ghost'}`}
+                      data-accent-choice={c.id}
+                      onClick={() => updateThemePref({ accentColor: c.id }, `Cor de destaque: ${c.name}.`)}
+                      className={`btn btn-sm ${accentColor === c.id ? 'btn-primary' : 'btn-secondary'}`}
                       aria-pressed={accentColor === c.id}
                     >
                       <span
+                        aria-hidden="true"
                         style={{
-                          width: '10px',
-                          height: '10px',
+                          width: '11px',
+                          height: '11px',
                           borderRadius: '50%',
                           backgroundColor: c.hex,
+                          border: '1.5px solid rgba(255,255,255,0.7)',
                           flexShrink: 0,
                         }}
                       />
@@ -1784,7 +1853,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       </div>
                     </div>
                     <div className="jarvis-setting-row__control">
-                      {renderToggle(glassmorphism, () => setGlassmorphism(!glassmorphism), 'Desfoque Glassmorphism')}
+                      {renderToggle(
+                        glassmorphism,
+                        () => updateThemePref({ glassmorphism: !glassmorphism }),
+                        'Desfoque Glassmorphism'
+                      )}
                     </div>
                   </div>
 
@@ -1792,11 +1865,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <div className="jarvis-setting-row__info">
                       <div className="jarvis-setting-row__title">Animações Suaves</div>
                       <div className="jarvis-setting-row__desc">
-                        Habilita transições sutis entre painéis e micro-interações.
+                        Habilita transições sutis entre painéis e micro-interações (desative para movimento reduzido).
                       </div>
                     </div>
                     <div className="jarvis-setting-row__control">
-                      {renderToggle(smoothAnimations, () => setSmoothAnimations(!smoothAnimations), 'Animações Suaves')}
+                      {renderToggle(
+                        smoothAnimations,
+                        () => updateThemePref({ smoothAnimations: !smoothAnimations }),
+                        'Animações Suaves'
+                      )}
                     </div>
                   </div>
 
@@ -1804,18 +1881,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <div className="jarvis-setting-row__info">
                       <div className="jarvis-setting-row__title">Densidade da Interface</div>
                       <div className="jarvis-setting-row__desc">
-                        Controla o espaçamento entre cards, tabelas e mensagens do chat.
+                        Controla o espaçamento entre cards, tabelas e blocos de todas as páginas.
                       </div>
                     </div>
                     <div className="jarvis-setting-row__control">
                       <select
                         aria-label="Densidade da Interface"
                         value={uiDensity}
-                        onChange={(e) => setUiDensity(e.target.value as 'comfortable' | 'compact')}
+                        onChange={(e) =>
+                          updateThemePref(
+                            { uiDensity: e.target.value as UiDensity },
+                            'Densidade atualizada.'
+                          )
+                        }
                         className="jarvis-select"
-                        style={{ width: 'auto', minWidth: '185px' }}
+                        style={{ width: 'auto', minWidth: '200px' }}
                       >
-                        <option value="comfortable">Confortável (Padrão)</option>
+                        <option value="comfortable">Confortável (Amigável)</option>
+                        <option value="balanced">Equilibrada</option>
                         <option value="compact">Compacta (Alta Densidade)</option>
                       </select>
                     </div>

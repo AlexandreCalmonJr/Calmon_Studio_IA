@@ -22,8 +22,20 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-jarvis}:${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no .env}@jarvis-brain-db:5432/${POSTGRES_DB:-jarvis_brain}
       - REDIS_URL=redis://jarvis-brain-redis:6379
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - XAI_API_KEY=${XAI_API_KEY:-}
+      - CUSTOM_LLM_API_KEY=${CUSTOM_LLM_API_KEY:-}
+      - CUSTOM_LLM_BASE_URL=${CUSTOM_LLM_BASE_URL:-}
+      - CUSTOM_LLM_MODEL=${CUSTOM_LLM_MODEL:-}
+      - KEYVAULT_MASTER_KEY=${KEYVAULT_MASTER_KEY:-}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - OLLAMA_HOST=${OLLAMA_HOST:-http://jarvis-ollama:11434}
+      - PYTHON_WORKER_URL=http://jarvis-python-worker:8001
+      - INTERNAL_WORKER_TOKEN=${INTERNAL_WORKER_TOKEN:-}
       - JWT_SECRET=${JWT_SECRET:?Defina JWT_SECRET no .env}
     depends_on:
       jarvis-brain-db:
@@ -78,15 +90,26 @@ services:
       - jarvis_ollama_models:/root/.ollama
 
   jarvis-python-worker:
-    image: python:3.11-slim
+    build:
+      context: ./services/python-worker
+      dockerfile: Dockerfile
     container_name: jarvis-python-worker
     profiles: ["python-worker"]
     restart: unless-stopped
-    working_dir: /app
+    ports:
+      - "${PYTHON_WORKER_PORT:-8001}:8001"
+    environment:
+      - PYTHON_WORKER_PORT=8001
+      - OPENCLAW_WORKSPACE_DIR=/app/storage/workspaces/default
+      - CHROMA_PERSIST_DIR=/app/chroma_data
+      - WORKER_DATABASE_URL=sqlite:////app/chroma_data/worker_meta.db
+      - INTERNAL_WORKER_TOKEN=${INTERNAL_WORKER_TOKEN:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
     volumes:
-      - ./server/brain/python_worker.py:/app/python_worker.py:ro
-      - jarvis_brain_storage:/app/storage:ro
-    command: ["python3", "-u", "/app/python_worker.py"]
+      - jarvis_brain_storage:/app/storage
+      - jarvis_chroma_data:/app/chroma_data
 
   jarvis-go-gateway:
     build:
@@ -101,7 +124,9 @@ services:
       - "${GO_GATEWAY_PORT:-8080}:8080"
     environment:
       - UPSTREAM_BRAIN_URL=http://jarvis-brain-api:3000
+      - PYTHON_WORKER_URL=http://jarvis-python-worker:8001
       - GATEWAY_PORT=8080
+      - RATE_LIMIT_RPS=${RATE_LIMIT_RPS:-60}
       - INTERNAL_GATEWAY_TOKEN=${INTERNAL_GATEWAY_TOKEN:-}
 
 volumes:
@@ -109,3 +134,4 @@ volumes:
   jarvis_pg_data:
   jarvis_redis_data:
   jarvis_ollama_models:
+  jarvis_chroma_data:

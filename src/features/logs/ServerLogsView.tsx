@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { Pause, Play, Copy, Check, Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Pause, Play, Copy, Check, Trash2, Download, FileJson, FileSpreadsheet } from 'lucide-react';
 import { API_BASE } from '../../services/api/client';
+import { apiFetch } from '../../services/sessionTransport';
 import { fetchServerLogs, clearServerLogs } from '../../api';
 import { fetchOverviewTelemetry } from '../../services/api/system';
 import { PageHeader } from '../../shared/layout/PageHeader';
@@ -8,14 +9,18 @@ import { ModelMetricsCards } from './ModelMetricsCards';
 import { InferenceHistoryTable } from './InferenceHistoryTable';
 import { TerminalLogConsole } from './TerminalLogConsole';
 import { ConfirmDialog } from '../../shared/common/ConfirmDialog';
-
-interface LogEntry {
-  id: number;
-  timestamp: string;
-  level: string;
-  logger: string;
-  message: string;
-}
+import { notify } from '../../shared/common/Toast';
+import {
+  buildLogExportFilename,
+  filterServerLogs,
+  formatServerLogsAsCsv,
+  formatServerLogsAsJson,
+  normalizeServerLogEntry,
+  normalizeServerLogList,
+  triggerTextFileDownload,
+  type LogExportFormat,
+  type ServerLogRecord,
+} from '../../services/logExportEngine';
 
 interface ModelMetrics {
   total_inferences: number;
@@ -74,13 +79,14 @@ function toModelMetrics(telemetry: {
 }
 
 export const ServerLogsView: React.FC = () => {
-  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [logs, setLogs] = useState<ServerLogRecord[]>([]);
   const [metrics, setMetrics] = useState<ModelMetrics | null>(null);
   const [levelFilter, setLevelFilter] = useState<string>('ALL');
   const [searchFilter, setSearchFilter] = useState<string>('');
   const [isStreaming, setIsStreaming] = useState<boolean>(true);
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const [copied, setCopied] = useState<boolean>(false);
+  const [lastExportStatus, setLastExportStatus] = useState<string | null>(null);
   const [showInferenceTable, setShowInferenceTable] = useState<boolean>(true);
   const [logsError, setLogsError] = useState<string | null>(null);
   const [metricsError, setMetricsError] = useState<string | null>(null);
@@ -92,7 +98,7 @@ export const ServerLogsView: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${API_BASE}/auth/me`, { credentials: 'include' })
+    apiFetch(`${API_BASE}/auth/me`, { credentials: 'include' })
       .then(async (response) => (response.ok ? response.json() : null))
       .then((principal) => {
         if (!cancelled) {
@@ -118,16 +124,24 @@ export const ServerLogsView: React.FC = () => {
       fetchOverviewTelemetry(50),
     ]);
     if (logsResult.status === 'fulfilled') {
-      setLogs(logsResult.value.logs || []);
+      setLogs(normalizeServerLogList(logsResult.value.logs));
       setLogsError(null);
     } else {
-      setLogsError(logsResult.reason instanceof Error ? logsResult.reason.message : 'Falha ao carregar logs do servidor.');
+      setLogsError(
+        logsResult.reason instanceof Error
+          ? logsResult.reason.message
+          : 'Falha ao carregar logs do servidor.'
+      );
     }
     if (metricsResult.status === 'fulfilled') {
       setMetrics(toModelMetrics(metricsResult.value));
       setMetricsError(null);
     } else {
-      setMetricsError(metricsResult.reason instanceof Error ? metricsResult.reason.message : 'Falha ao carregar métricas.');
+      setMetricsError(
+        metricsResult.reason instanceof Error
+          ? metricsResult.reason.message
+          : 'Falha ao carregar métricas.'
+      );
     }
     setLoading(false);
   };
@@ -170,7 +184,7 @@ export const ServerLogsView: React.FC = () => {
         };
         eventSource.onmessage = (event) => {
           try {
-            const entry: LogEntry = JSON.parse(event.data);
+            const entry = normalizeServerLogEntry(JSON.parse(event.data));
             setLogs((prev) => {
               const next = [...prev, entry];
               return next.length > 500 ? next.slice(-500) : next;
@@ -201,6 +215,13 @@ export const ServerLogsView: React.FC = () => {
     };
   }, [isAdmin, isStreaming]);
 
+  const filteredLogs = useMemo(
+    () => filterServerLogs(logs, levelFilter, searchFilter),
+    [logs, levelFilter, searchFilter]
+  );
+
+  const hasActiveFilter = levelFilter !== 'ALL' || searchFilter.trim().length > 0;
+
   const handleClear = () => {
     if (!isAdmin) return;
     setConfirmClearOpen(true);
@@ -222,11 +243,12 @@ export const ServerLogsView: React.FC = () => {
   };
 
   const handleCopyLogs = () => {
-    const text = logs
+    const text = filteredLogs
       .map((l) => `[${l.timestamp}] [${l.level}] [${l.logger}]: ${l.message}`)
       .join('\n');
     if (!navigator.clipboard?.writeText) return;
-    navigator.clipboard.writeText(text)
+    navigator.clipboard
+      .writeText(text)
       .then(() => {
         setCopied(true);
         window.setTimeout(() => setCopied(false), 2000);
@@ -234,22 +256,61 @@ export const ServerLogsView: React.FC = () => {
       .catch(() => setLogsError('Não foi possível copiar os logs.'));
   };
 
+  const handleExportLogs = (format: LogExportFormat) => {
+    if (!isAdmin) return;
+    if (filteredLogs.length === 0) {
+      notify('Nenhum registro disponível para exportar com os filtros atuais.', 'info');
+      return;
+    }
+
+    try {
+      const filename = buildLogExportFilename(format);
+      if (format === 'json') {
+        const jsonContent = formatServerLogsAsJson(filteredLogs, {
+          levelFilter,
+          searchFilter,
+          totalBuffered: logs.length,
+        });
+        triggerTextFileDownload(jsonContent, filename, 'application/json;charset=utf-8');
+      } else {
+        const csvContent = formatServerLogsAsCsv(filteredLogs);
+        triggerTextFileDownload(csvContent, filename, 'text/csv;charset=utf-8');
+      }
+
+      const summary = `${filteredLogs.length} registro${filteredLogs.length === 1 ? '' : 's'} exportado${filteredLogs.length === 1 ? '' : 's'} para ${filename}`;
+      setLastExportStatus(summary);
+      notify(`Logs exportados em ${format.toUpperCase()}: ${filename}`, 'success');
+      window.setTimeout(() => {
+        setLastExportStatus((curr) => (curr === summary ? null : curr));
+      }, 6000);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Falha ao gerar arquivo de exportação.';
+      setLogsError(msg);
+      notify(msg, 'error');
+    }
+  };
+
   return (
     <div className="jarvis-page-shell">
       <PageHeader
         title="Logs do Servidor & Métricas"
-        subtitle="Telemetria de inferência, latência e registros de execução do FastAPI e Uvicorn em tempo real."
+        subtitle="Telemetria de inferência, latência e registros de execução em tempo real com exportação para auditoria externa."
         meta={
           isAdmin
             ? [
                 <span
                   key="stream-state"
-                  style={{ color: isStreaming ? '#4ade80' : 'var(--text-muted)', fontWeight: 600 }}
+                  style={{
+                    color: isStreaming ? 'var(--success-color)' : 'var(--text-muted)',
+                    fontWeight: 600,
+                  }}
                 >
                   {isStreaming ? 'Stream ativo' : 'Stream pausado'}
                 </span>,
                 <span key="events-count" className="jarvis-tabular">
-                  {logs.length} evento{logs.length === 1 ? '' : 's'}
+                  {hasActiveFilter
+                    ? `${filteredLogs.length} de ${logs.length} eventos`
+                    : `${logs.length} evento${logs.length === 1 ? '' : 's'}`}
                 </span>,
               ]
             : undefined
@@ -257,6 +318,40 @@ export const ServerLogsView: React.FC = () => {
         actions={
           isAdmin ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => handleExportLogs('json')}
+                disabled={filteredLogs.length === 0}
+                className="btn btn-primary btn-sm"
+                data-export-logs="json"
+                title={
+                  hasActiveFilter
+                    ? `Exportar ${filteredLogs.length} logs filtrados em formato JSON estruturado`
+                    : `Exportar todos os ${filteredLogs.length} logs em formato JSON estruturado`
+                }
+                aria-label="Exportar logs do servidor em JSON"
+              >
+                <FileJson size={14} />
+                <span>Exportar JSON</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleExportLogs('csv')}
+                disabled={filteredLogs.length === 0}
+                className="btn btn-secondary btn-sm"
+                data-export-logs="csv"
+                title={
+                  hasActiveFilter
+                    ? `Exportar ${filteredLogs.length} logs filtrados em planilha CSV (UTF-8)`
+                    : `Exportar todos os ${filteredLogs.length} logs em planilha CSV (UTF-8)`
+                }
+                aria-label="Exportar logs do servidor em CSV"
+              >
+                <FileSpreadsheet size={14} />
+                <span>Exportar CSV</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => setIsStreaming(!isStreaming)}
@@ -270,8 +365,9 @@ export const ServerLogsView: React.FC = () => {
               <button
                 type="button"
                 onClick={handleCopyLogs}
+                disabled={filteredLogs.length === 0}
                 className="btn btn-secondary btn-sm"
-                title="Copiar todos os logs exibidos para a área de transferência"
+                title="Copiar os logs exibidos para a área de transferência"
               >
                 {copied ? <Check size={13} /> : <Copy size={13} />}
                 <span>{copied ? 'Copiado' : 'Copiar'}</span>
@@ -298,12 +394,22 @@ export const ServerLogsView: React.FC = () => {
 
       {roleLoaded && !isAdmin && (
         <div className="jarvis-callout jarvis-callout--info">
-          Os logs globais do servidor e a limpeza do buffer são restritos a administradores. As métricas individuais de inferência permanecem disponíveis nos módulos autorizados da sua conta.
+          Os logs globais do servidor, exportação de auditoria (JSON/CSV) e limpeza do buffer são restritos a administradores. As métricas individuais de inferência permanecem disponíveis nos módulos autorizados da sua conta.
         </div>
       )}
 
       {isAdmin && (
         <>
+          {lastExportStatus && (
+            <div
+              role="status"
+              className="jarvis-callout jarvis-callout--success"
+              style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+            >
+              <Download size={15} />
+              <span>Auditoria pronta: {lastExportStatus}.</span>
+            </div>
+          )}
           {loading && (
             <div role="status" className="jarvis-callout jarvis-callout--info">
               Carregando logs e métricas…

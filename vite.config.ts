@@ -13,6 +13,22 @@ export default defineConfig({
     include: ['react', 'react-dom', 'qrcode', 'lucide-react'],
   },
   plugins: [
+    {
+      name: 'disable-vite-client-ws-when-hmr-off',
+      apply: 'serve',
+      transform(code, id) {
+        if (id.includes('vite/dist/client/client.mjs')) {
+          return {
+            code: code.replace(
+              /const transport = normalizeModuleRunnerTransport\([\s\S]*?(?=let willUnload = false;)/,
+              'const transport = { async connect() {}, async disconnect() {}, async send() {}, async invoke() {} };\n'
+            ),
+            map: null,
+          };
+        }
+        return null;
+      },
+    },
     react(),
     VitePWA({
       registerType: 'autoUpdate',
@@ -101,6 +117,8 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 3000,
     allowedHosts: true,
+    hmr: false,
+    ws: false,
     proxy: {
       '/api': {
         target: apiProxyTarget,

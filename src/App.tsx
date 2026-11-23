@@ -19,7 +19,17 @@ import {
   MessageSquare,
   Smartphone,
   ShieldCheck,
+  Sun,
+  Moon,
+  Monitor,
 } from 'lucide-react';
+import {
+  getNextQuickTheme,
+  loadThemePreferences,
+  saveAndApplyThemePreferences,
+  THEME_CHANGED_EVENT,
+  type ThemeMode,
+} from './services/themeEngine';
 import { useWakeWordListener } from './hooks/useWakeWordListener';
 import { SetupWizardModal } from './shared/common/SetupWizardModal';
 import { InitialPasswordChangeModal } from './shared/common/InitialPasswordChangeModal';
@@ -39,6 +49,17 @@ import {
   AssistantIdentityProvider,
   useAssistantIdentity,
 } from './context/AssistantIdentityContext';
+import {
+  fetchModulePacks,
+  installModulePack,
+  PACKS_UPDATED_EVENT,
+  type ModulePacksPayload,
+} from './services/api/packs';
+import {
+  findPackProvidingTab,
+  isTabUnlockedByPacks,
+  type ModulePackDefinition,
+} from './services/modulePackEngine';
 
 // Code splitting: cada tela é carregada sob demanda
 const Overview = lazy(() =>
@@ -64,6 +85,17 @@ const ModelManagerView = lazy(() =>
 );
 const SkillsManagerView = lazy(() =>
   import('./features/skills/SkillsManagerView').then((m) => ({ default: m.SkillsManagerView }))
+);
+const PackStoreView = lazy(() =>
+  import('./features/store/PackStoreView').then((m) => ({ default: m.PackStoreView }))
+);
+const PackStudioAdminView = lazy(() =>
+  import('./features/store/PackStudioAdminView').then((m) => ({ default: m.PackStudioAdminView }))
+);
+const ArchitectureAgentView = lazy(() =>
+  import('./features/architecture/ArchitectureAgentView').then((m) => ({
+    default: m.ArchitectureAgentView,
+  }))
 );
 const SecurityCenterView = lazy(() =>
   import('./features/security/SecurityCenterView').then((m) => ({ default: m.SecurityCenterView }))
@@ -139,7 +171,7 @@ const BrainServerHubView = lazy(() =>
 /**
  * Telas que ocupam toda a área útil com layout e cabeçalho internos próprios.
  */
-const FULLSCREEN_TABS = new Set(['chat', 'workflows', 'settings', 'learning', 'skills', 'store']);
+const FULLSCREEN_TABS = new Set(['chat', 'workflows', 'settings', 'learning', 'skills']);
 const NO_HEADER_TABS = new Set(['chat', 'workflows']);
 
 const TAB_LABELS: Record<string, { section: string; title: string }> = {
@@ -150,10 +182,12 @@ const TAB_LABELS: Record<string, { section: string; title: string }> = {
   workspace: { section: 'Principal', title: 'Projetos & Biblioteca' },
   coding: { section: 'Engenharia', title: 'Coding Agent' },
   agents: { section: 'Engenharia', title: 'Centro de Agentes' },
+  architecture: { section: 'Engenharia', title: 'Agente de Arquitetura' },
   models: { section: 'Engenharia', title: 'Modelos & Provedores' },
   knowledge: { section: 'Engenharia', title: 'Base de Conhecimento' },
   skills: { section: 'Engenharia', title: 'Habilidades dos Agentes' },
-  store: { section: 'Engenharia', title: 'Loja & Apps' },
+  store: { section: 'Pacotes', title: 'Loja de Pacotes & Núcleos' },
+  pack_studio: { section: 'Admin & Dev', title: 'Estúdio de Pacotes' },
   approvals: { section: 'Governança', title: 'Central de Aprovações' },
   usage: { section: 'Governança', title: 'Uso & Custos' },
   security: { section: 'Governança', title: 'Segurança & Auditoria' },
@@ -295,6 +329,26 @@ const DashboardApp: React.FC = () => {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showVoiceHud, setShowVoiceHud] = useState(false);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadThemePreferences().themeMode);
+
+  useEffect(() => {
+    const syncTheme = () => setThemeMode(loadThemePreferences().themeMode);
+    window.addEventListener(THEME_CHANGED_EVENT, syncTheme);
+    return () => window.removeEventListener(THEME_CHANGED_EVENT, syncTheme);
+  }, []);
+
+  const handleCycleTheme = () => {
+    const next = getNextQuickTheme(themeMode);
+    saveAndApplyThemePreferences({ themeMode: next });
+    setThemeMode(next);
+  };
+
+  const themeQuickLabel =
+    themeMode === 'friendly_light'
+      ? 'Tema: Claro Amigável (clique para Escuro)'
+      : themeMode === 'auto'
+        ? 'Tema: Automático do Sistema (clique para Claro)'
+        : 'Tema: Escuro Studio (clique para Automático)';
   const [pendingVoiceCommand, setPendingVoiceCommand] = useState<string | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfileData>(getUserProfile);
 
@@ -328,6 +382,41 @@ const DashboardApp: React.FC = () => {
   const [healthError, setHealthError] = useState<string | null>(null);
   const [approvalsError, setApprovalsError] = useState<string | null>(null);
   const [systemResources, setSystemResources] = useState<SystemResourceUsage | null>(null);
+  const [installedPackIds, setInstalledPackIds] = useState<string[] | null>(null);
+  const [customPacks, setCustomPacks] = useState<ModulePackDefinition[]>([]);
+  const [installingRequiredPack, setInstallingRequiredPack] = useState(false);
+
+  const canManagePacks = authRole === 'admin' || authRole === 'developer';
+
+  useEffect(() => {
+    if (!authLoaded) return;
+    let active = true;
+    fetchModulePacks()
+      .then((res) => {
+        if (active) {
+          setInstalledPackIds(res.installed_pack_ids);
+          setCustomPacks(res.custom_packs || []);
+        }
+      })
+      .catch(() => {
+        if (active) setInstalledPackIds(null);
+      });
+
+    const onPacksUpdated = (e: Event) => {
+      const detail = (e as CustomEvent<ModulePacksPayload>).detail;
+      if (detail?.installed_pack_ids) {
+        setInstalledPackIds(detail.installed_pack_ids);
+      }
+      if (detail?.custom_packs) {
+        setCustomPacks(detail.custom_packs);
+      }
+    };
+    window.addEventListener(PACKS_UPDATED_EVENT, onPacksUpdated);
+    return () => {
+      active = false;
+      window.removeEventListener(PACKS_UPDATED_EVENT, onPacksUpdated);
+    };
+  }, [authLoaded]);
 
   const [showDynamicIsland, setShowDynamicIsland] = useState<boolean>(() => {
     try {
@@ -584,6 +673,9 @@ const DashboardApp: React.FC = () => {
         mobileOpen={mobileNavOpen}
         onToggleCollapse={handleToggleSidebar}
         pendingApprovalsCount={pendingApprovalsCount}
+        installedPackIds={installedPackIds}
+        customPacks={customPacks}
+        canManagePacks={canManagePacks}
         onOpenSettings={() => navigate('settings')}
         onOpenHelp={() => navigate('learning')}
         onOpenProfile={() => setShowProfileModal(true)}
@@ -760,6 +852,23 @@ const DashboardApp: React.FC = () => {
               <button
                 type="button"
                 className="btn btn-ghost btn-icon"
+                onClick={handleCycleTheme}
+                data-theme-quick-toggle="true"
+                title={themeQuickLabel}
+                aria-label={themeQuickLabel}
+              >
+                {themeMode === 'friendly_light' ? (
+                  <Sun size={16} />
+                ) : themeMode === 'auto' ? (
+                  <Monitor size={16} />
+                ) : (
+                  <Moon size={16} />
+                )}
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-ghost btn-icon"
                 onClick={() => navigate('learning')}
                 title="Ajuda contextual e tutoriais"
                 aria-label="Abrir ajuda contextual"
@@ -792,8 +901,9 @@ const DashboardApp: React.FC = () => {
               ? '0'
               : activeTab === 'coding'
                 ? 'clamp(12px, 1.8vw, 20px)'
-                : 'clamp(16px, 2.4vw, 28px)',
+                : 'var(--page-padding-y) var(--page-padding-x)',
             backgroundColor: 'var(--bg-primary)',
+            backgroundImage: 'var(--app-canvas-gradient)',
           }}
         >
           {!authLoaded ? (
@@ -830,6 +940,63 @@ const DashboardApp: React.FC = () => {
             </section>
           ) : activeTab === 'not_found' ? (
             <NotFoundView onGoHome={() => navigate('overview')} />
+          ) : installedPackIds && !isTabUnlockedByPacks(activeTab, installedPackIds, customPacks) ? (
+            (() => {
+              const requiredPack = findPackProvidingTab(activeTab, customPacks);
+              return (
+                <section className="jarvis-locked-module-card" aria-label="Módulo modular não instalado">
+                  <p className="jarvis-kicker-text">
+                    <span>Módulo sob demanda</span>
+                    {requiredPack && (
+                      <>
+                        <span aria-hidden="true"> · </span>
+                        <span>{requiredPack.category_label}</span>
+                      </>
+                    )}
+                  </p>
+                  <h2 className="jarvis-locked-module-title">
+                    {requiredPack
+                      ? `Instale o pacote "${requiredPack.name}" para liberar este módulo`
+                      : 'Este módulo faz parte de um pacote opcional'}
+                  </h2>
+                  <p className="jarvis-locked-module-desc">
+                    {requiredPack
+                      ? requiredPack.description
+                      : 'Abra a Loja de Pacotes para ativar este conjunto de módulos, agentes especialistas e trilhas de estudo.'}
+                  </p>
+                  <div className="jarvis-locked-module-actions">
+                    {requiredPack && (
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        disabled={installingRequiredPack}
+                        onClick={async () => {
+                          setInstallingRequiredPack(true);
+                          try {
+                            const updated = await installModulePack(requiredPack.id);
+                            setInstalledPackIds(updated.installed_pack_ids);
+                            if (updated.custom_packs) setCustomPacks(updated.custom_packs);
+                          } finally {
+                            setInstallingRequiredPack(false);
+                          }
+                        }}
+                      >
+                        {installingRequiredPack
+                          ? 'Instalando pacote...'
+                          : `Instalar ${requiredPack.name}`}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => navigate('store')}
+                    >
+                      Abrir Loja de Pacotes
+                    </button>
+                  </div>
+                </section>
+              );
+            })()
           ) : (
             <div
               style={
@@ -858,9 +1025,35 @@ const DashboardApp: React.FC = () => {
                   {activeTab === 'workflows' && <WorkflowCanvasView />}
                   {activeTab === 'usage' && <UsageAnalyticsView />}
                   {activeTab === 'store' && (
-                    <SkillsManagerView
-                      initialTab="apps"
-                      onOpenGitHubImport={() => navigate('github_import')}
+                    <PackStoreView onNavigate={navigate} canManagePacks={canManagePacks} />
+                  )}
+                  {activeTab === 'pack_studio' &&
+                    (canManagePacks ? (
+                      <PackStudioAdminView onNavigate={navigate} />
+                    ) : (
+                      <section className="jarvis-locked-module-card" aria-label="Acesso restrito">
+                        <h2 className="jarvis-locked-module-title">
+                          Acesso restrito a administradores e desenvolvedores
+                        </h2>
+                        <p className="jarvis-locked-module-desc">
+                          O Estúdio de Pacotes permite criar e publicar novos pacotes na Loja.
+                          Solicite permissão de desenvolvedor ou administrador para acessar.
+                        </p>
+                        <div className="jarvis-locked-module-actions">
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={() => navigate('store')}
+                          >
+                            Voltar para a Loja de Pacotes
+                          </button>
+                        </div>
+                      </section>
+                    ))}
+                  {activeTab === 'architecture' && (
+                    <ArchitectureAgentView
+                      onAskArchitect={handleStartChatFromOverview}
+                      onNavigate={navigate}
                     />
                   )}
                   {activeTab === 'skills' && (
@@ -904,7 +1097,11 @@ const DashboardApp: React.FC = () => {
                     />
                   )}
                   {activeTab === 'agents' && (
-                    <AgentCenterView onOpenGitHubImport={() => navigate('github_import')} />
+                    <AgentCenterView
+                      onOpenGitHubImport={() => navigate('github_import')}
+                      onOpenPackStore={() => navigate('store')}
+                      onOpenArchitecture={() => navigate('architecture')}
+                    />
                   )}
                   {activeTab === 'tasks' && <TaskManagerView />}
                   {activeTab === 'backend_studio' && <BackendStudioView />}

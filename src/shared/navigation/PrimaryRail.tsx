@@ -38,9 +38,11 @@ import {
   Wand2,
   AppWindow,
   GitBranch,
+  Compass,
 } from 'lucide-react';
 import { useAssistantIdentity } from '../../context/AssistantIdentityContext';
 import { getAssistantInitial } from '../../services/assistantIdentity';
+import { isTabUnlockedByPacks, type ModulePackDefinition } from '../../services/modulePackEngine';
 
 export interface NavRailItem {
   id: string;
@@ -60,6 +62,9 @@ interface PrimaryRailProps {
   onOpenHelp?: () => void;
   onOpenProfile?: () => void;
   pendingApprovalsCount?: number;
+  installedPackIds?: string[] | null;
+  customPacks?: ModulePackDefinition[];
+  canManagePacks?: boolean;
 }
 
 interface NavGroup {
@@ -82,6 +87,9 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
   onOpenHelp,
   onOpenProfile,
   pendingApprovalsCount = 0,
+  installedPackIds = null,
+  customPacks = [],
+  canManagePacks = false,
 }) => {
   const { assistantName, experienceMode, setExperienceMode } = useAssistantIdentity();
   const isSimpleMode = experienceMode === 'simple';
@@ -195,6 +203,7 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
       collapsible: true,
       items: [
         { id: 'agents', label: 'Agentes', icon: Bot },
+        { id: 'architecture', label: 'Agente de Arquitetura', icon: Compass },
         { id: 'models', label: 'Modelos & Chaves', icon: Cpu },
         { id: 'knowledge', label: 'Conhecimento', icon: Database },
         { id: 'skills', label: 'Habilidades', icon: Layers },
@@ -230,6 +239,7 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
         { id: 'brain_server', label: 'Cérebros (Local / Docker)', icon: Server },
         { id: 'companion', label: 'Voz & Celular (PWA)', icon: Smartphone },
         { id: 'agents', label: 'Meus Agentes', icon: Bot },
+        { id: 'architecture', label: 'Agente de Arquitetura', icon: Compass },
         { id: 'github_import', label: 'Importar do GitHub', icon: GitBranch },
         { id: 'workflows', label: 'Meus Fluxos', icon: Workflow },
         { id: 'tasks', label: 'Tarefas', icon: ListTodo },
@@ -238,14 +248,22 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
     },
   ];
 
-  const activeNavGroups = isSimpleMode ? simpleNavGroups : navGroups;
+  const rawNavGroups = isSimpleMode ? simpleNavGroups : navGroups;
+  const activeNavGroups = installedPackIds
+    ? rawNavGroups
+        .map((group) => ({
+          ...group,
+          items: group.items.filter((item) =>
+            isTabUnlockedByPacks(item.id, installedPackIds, customPacks)
+          ),
+        }))
+        .filter((group) => group.items.length > 0)
+    : rawNavGroups;
 
   // Auto-expande o grupo caso o usuário navegue diretamente para uma tela dentro dele
   useEffect(() => {
     const ownerGroup = activeNavGroups.find(
-      (g) =>
-        g.collapsible &&
-        g.items.some((item) => item.id === activeTab || (item.id === 'skills' && activeTab === 'store'))
+      (g) => g.collapsible && g.items.some((item) => item.id === activeTab)
     );
     if (ownerGroup && !expandedGroups[ownerGroup.title]) {
       setExpandedGroups((prev) => ({ ...prev, [ownerGroup.title]: true }));
@@ -550,7 +568,7 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
                 {isExpanded &&
                   group.items.map((item) => {
                     const Icon = item.icon;
-                    const isActive = activeTab === item.id || (item.id === 'skills' && activeTab === 'store');
+                    const isActive = activeTab === item.id;
                     return (
                       <button
                         key={item.id}
@@ -621,15 +639,27 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
           )}
         </button>
 
-        {!isSimpleMode && (
+        <button
+          type="button"
+          onClick={() => onNavigate('store')}
+          className={`jarvis-sidebar-item ${activeTab === 'store' ? 'is-active' : ''}`}
+          title="Loja de Pacotes & Núcleos"
+          aria-current={activeTab === 'store' ? 'page' : undefined}
+        >
+          <Store size={16} />
+          {!collapsed && <span>Loja de Pacotes</span>}
+        </button>
+
+        {canManagePacks && (
           <button
             type="button"
-            onClick={() => onNavigate('store')}
-            className={`jarvis-sidebar-item ${activeTab === 'store' ? 'is-active' : ''}`}
-            title="Loja de Agentes, Habilidades & Apps"
+            onClick={() => onNavigate('pack_studio')}
+            className={`jarvis-sidebar-item ${activeTab === 'pack_studio' ? 'is-active' : ''}`}
+            title="Estúdio de Pacotes (Dev & Admin)"
+            aria-current={activeTab === 'pack_studio' ? 'page' : undefined}
           >
-            <Store size={16} />
-            {!collapsed && <span>Loja & Apps</span>}
+            <Wrench size={16} />
+            {!collapsed && <span>Estúdio de Pacotes</span>}
           </button>
         )}
 

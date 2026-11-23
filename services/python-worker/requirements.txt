@@ -1,0 +1,26 @@
+# JARVIS AI Hub — Worker Python 3.11 (FastAPI + LangChain/LangGraph + RAG OpenClaw)
+# Instale com: pip install --no-cache-dir -r requirements.txt
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+python-dotenv==1.0.1
+httpx==0.28.1
+
+# Persistência SQL (SQLite WAL local ou PostgreSQL + pgvector)
+sqlalchemy==2.0.36
+aiosqlite==0.20.0
+psycopg[binary]==3.2.3
+
+# Orquestração RAG & Grafos de Agentes (LangChain / LangGraph)
+langchain==0.3.14
+langchain-core==0.3.29
+langchain-community==0.3.14
+langgraph==0.2.62
+langchain-text-splitters==0.3.5
+
+# Embeddings locais e armazenamento vetorial compatível com OpenClaw
+sentence-transformers==3.3.1
+chromadb==0.5.23
+numpy==1.26.4

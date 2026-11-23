@@ -11,6 +11,12 @@ import {
   UserPlus,
   LogIn,
   Sparkles,
+  Eye,
+  EyeOff,
+  CheckCircle2,
+  Sun,
+  Moon,
+  Monitor,
 } from 'lucide-react';
 import { clearActiveAccountScope, setActiveAccountScope } from '../../services/accountScope';
 import { apiFetch, clearClientSessionToken, setClientSessionToken } from '../../services/sessionTransport';
@@ -21,6 +27,13 @@ import {
   WorkspaceExperienceMode,
   normalizeAssistantName,
 } from '../../services/assistantIdentity';
+import {
+  getNextQuickTheme,
+  loadThemePreferences,
+  saveAndApplyThemePreferences,
+  THEME_CHANGED_EVENT,
+  type ThemeMode,
+} from '../../services/themeEngine';
 
 type PrimaryTab = 'login' | 'register';
 type AdvancedMode = 'bootstrap' | 'admin';
@@ -54,11 +67,26 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
   const [primaryTab, setPrimaryTab] = useState<PrimaryTab>('login');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [advancedMode, setAdvancedMode] = useState<AdvancedMode>('admin');
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadThemePreferences().themeMode);
+
+  useEffect(() => {
+    const syncTheme = () => setThemeMode(loadThemePreferences().themeMode);
+    window.addEventListener(THEME_CHANGED_EVENT, syncTheme);
+    return () => window.removeEventListener(THEME_CHANGED_EVENT, syncTheme);
+  }, []);
+
+  const handleCycleAuthTheme = () => {
+    const next = getNextQuickTheme(themeMode);
+    saveAndApplyThemePreferences({ themeMode: next });
+    setThemeMode(next);
+  };
 
   // Login form state
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [token, setToken] = useState('');
+  const [showToken, setShowToken] = useState(false);
   const [busy, setBusy] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
   const [error, setError] = useState('');
@@ -70,6 +98,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
   const [regDisplayName, setRegDisplayName] = useState('');
   const [regUsername, setRegUsername] = useState('');
   const [regPassword, setRegPassword] = useState('');
+  const [showRegPassword, setShowRegPassword] = useState(false);
   const [regAssistantName, setRegAssistantName] = useState('Maria');
   const [regMode, setRegMode] = useState<WorkspaceExperienceMode>('simple');
 
@@ -460,25 +489,52 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
   }
 
   if (status === 'anonymous') {
+    const themeLabel =
+      themeMode === 'friendly_light'
+        ? 'Claro Amigável'
+        : themeMode === 'auto'
+          ? 'Automático'
+          : 'Escuro Studio';
+
     return (
-      <main style={styles.screen}>
-        <section style={styles.panel} aria-labelledby="login-title">
+      <main style={styles.screen} className="jarvis-auth-screen">
+        <div className="jarvis-auth-theme-bar">
+          <button
+            type="button"
+            onClick={handleCycleAuthTheme}
+            className="btn btn-secondary btn-sm"
+            data-auth-theme-toggle="true"
+            aria-label={`Alternar tema visual (atual: ${themeLabel})`}
+            title={`Alternar tema visual (atual: ${themeLabel})`}
+          >
+            {themeMode === 'friendly_light' ? (
+              <Sun size={15} />
+            ) : themeMode === 'auto' ? (
+              <Monitor size={15} />
+            ) : (
+              <Moon size={15} />
+            )}
+            <span>{themeLabel}</span>
+          </button>
+        </div>
+
+        <section style={styles.panel} className="jarvis-auth-panel" aria-labelledby="login-title">
           {/* Brand Header */}
           <div style={styles.brandRow}>
             <div style={styles.mark}>J</div>
             <div>
               <div style={styles.brand}>JARVIS AI HUB</div>
-              <div style={styles.brandSub}>Seu assistente pessoal · Obsidian & Laranja</div>
+              <div style={styles.brandSub}>Espaço inteligente, modular e amigável</div>
             </div>
           </div>
 
           <h1 id="login-title" style={styles.title}>
-            {primaryTab === 'login' ? 'Bem-vindo de volta' : 'Criar conta pessoal'}
+            {primaryTab === 'login' ? 'Bem-vindo de volta' : 'Criar sua conta'}
           </h1>
           <p style={styles.muted}>
             {primaryTab === 'login'
               ? 'Entre com o Google ou selecione o seu perfil para continuar com o seu assistente.'
-              : 'Crie um espaço privado em segundos e escolha o nome do seu assistente (ex.: Maria, João ou JARVIS).'}
+              : 'Crie um espaço pessoal em segundos e escolha o nome do seu assistente (ex.: Maria, João ou JARVIS).'}
           </p>
 
           {/* Primary 2-Tab Switcher */}
@@ -489,11 +545,11 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
               display: 'grid',
               gridTemplateColumns: '1fr 1fr',
               gap: '6px',
-              padding: '4px',
-              borderRadius: 'var(--radius-md)',
-              background: 'var(--bg-primary)',
+              padding: '5px',
+              borderRadius: '999px',
+              background: 'var(--bg-surface)',
               border: '1px solid var(--border-color)',
-              marginBottom: '18px',
+              marginBottom: '20px',
             }}
           >
             <button
@@ -647,7 +703,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
                 </div>
               )}
 
-              <form onSubmit={submitAccountLogin} style={styles.form}>
+              <form onSubmit={submitAccountLogin} style={styles.form} noValidate={false}>
                 <div>
                   <label style={styles.label} htmlFor="auth-user">
                     Utilizador
@@ -660,6 +716,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
                     placeholder="Ex: admin ou seu utilizador"
                     className="jarvis-input"
                     style={styles.input}
+                    aria-invalid={Boolean(error)}
                     required
                   />
                 </div>
@@ -667,17 +724,29 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
                   <label style={styles.label} htmlFor="auth-password">
                     Senha
                   </label>
-                  <input
-                    id="auth-password"
-                    type="password"
-                    autoComplete="current-password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Digite sua senha"
-                    className="jarvis-input"
-                    style={styles.input}
-                    required
-                  />
+                  <div className="jarvis-password-wrap">
+                    <input
+                      id="auth-password"
+                      type={showLoginPassword ? 'text' : 'password'}
+                      autoComplete="current-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Digite sua senha"
+                      className="jarvis-input jarvis-password-input"
+                      style={styles.input}
+                      aria-invalid={Boolean(error)}
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="jarvis-password-toggle"
+                      aria-label={showLoginPassword ? 'Ocultar senha de login' : 'Mostrar senha de login'}
+                      aria-pressed={showLoginPassword}
+                      onClick={() => setShowLoginPassword((prev) => !prev)}
+                    >
+                      {showLoginPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
                 {error && (
                   <div role="alert" style={styles.error}>
@@ -740,17 +809,28 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
                             ? 'Token inicial de ativação'
                             : 'Token de administrador'}
                         </label>
-                        <input
-                          id="auth-token"
-                          type="password"
-                          autoComplete="off"
-                          value={token}
-                          onChange={(e) => setToken(e.target.value)}
-                          placeholder="Cole o token de acesso"
-                          className="jarvis-input"
-                          style={styles.input}
-                          required
-                        />
+                        <div className="jarvis-password-wrap">
+                          <input
+                            id="auth-token"
+                            type={showToken ? 'text' : 'password'}
+                            autoComplete="off"
+                            value={token}
+                            onChange={(e) => setToken(e.target.value)}
+                            placeholder="Cole o token de acesso"
+                            className="jarvis-input jarvis-password-input"
+                            style={styles.input}
+                            required
+                          />
+                          <button
+                            type="button"
+                            className="jarvis-password-toggle"
+                            aria-label={showToken ? 'Ocultar token' : 'Mostrar token'}
+                            aria-pressed={showToken}
+                            onClick={() => setShowToken((prev) => !prev)}
+                          >
+                            {showToken ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+                        </div>
                       </div>
                       <button
                         type="submit"
@@ -766,7 +846,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
             </>
           ) : (
             <form onSubmit={submitPersonalRegistration} style={styles.form}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <div className="jarvis-auth-two-col">
                 <div>
                   <label style={styles.label} htmlFor="reg-name">
                     Seu nome
@@ -806,18 +886,63 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
                 <label style={styles.label} htmlFor="reg-password">
                   Escolha uma senha (mín. 8 caracteres)
                 </label>
-                <input
-                  id="reg-password"
-                  type="password"
-                  autoComplete="new-password"
-                  value={regPassword}
-                  onChange={(e) => setRegPassword(e.target.value)}
-                  placeholder="Mínimo de 8 caracteres"
-                  className="jarvis-input"
-                  style={styles.input}
-                  minLength={8}
-                  required
-                />
+                <div className="jarvis-password-wrap">
+                  <input
+                    id="reg-password"
+                    type={showRegPassword ? 'text' : 'password'}
+                    autoComplete="new-password"
+                    value={regPassword}
+                    onChange={(e) => setRegPassword(e.target.value)}
+                    placeholder="Mínimo de 8 caracteres"
+                    className="jarvis-input jarvis-password-input"
+                    style={styles.input}
+                    aria-describedby="reg-password-help"
+                    aria-invalid={Boolean(error)}
+                    minLength={8}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="jarvis-password-toggle"
+                    aria-label={showRegPassword ? 'Ocultar senha de cadastro' : 'Mostrar senha de cadastro'}
+                    aria-pressed={showRegPassword}
+                    onClick={() => setShowRegPassword((prev) => !prev)}
+                  >
+                    {showRegPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+                {(() => {
+                  const hasMinLen = regPassword.length >= 8;
+                  const hasLetterNum = /[a-zA-Z]/.test(regPassword) && /[0-9]/.test(regPassword);
+                  const hasSymbol = /[^a-zA-Z0-9]/.test(regPassword);
+                  const score = [hasMinLen, hasLetterNum, hasSymbol].filter(Boolean).length;
+                  const levelLabel =
+                    regPassword.length === 0
+                      ? 'Mínimo 8 caracteres'
+                      : score === 3
+                        ? 'Senha forte'
+                        : score === 2
+                          ? 'Senha boa'
+                          : 'Senha básica';
+                  return (
+                    <div id="reg-password-help" className="jarvis-pw-meter">
+                      <div className="jarvis-pw-bars" aria-hidden="true">
+                        <span className={`jarvis-pw-bar ${score >= 1 ? 'is-on' : ''}`} />
+                        <span className={`jarvis-pw-bar ${score >= 2 ? 'is-on' : ''}`} />
+                        <span className={`jarvis-pw-bar ${score >= 3 ? 'is-strong' : ''}`} />
+                      </div>
+                      <div className="jarvis-pw-hints">
+                        <span className={hasMinLen ? 'is-met' : ''}>
+                          <CheckCircle2 size={12} /> 8+ chars
+                        </span>
+                        <span className={hasLetterNum ? 'is-met' : ''}>
+                          <CheckCircle2 size={12} /> Letras & números
+                        </span>
+                        <span className="jarvis-pw-level">{levelLabel}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               <div
@@ -1236,16 +1361,16 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: '100dvh',
     display: 'grid',
     placeItems: 'center',
-    padding: 'clamp(16px, 4vw, 32px)',
+    padding: 'clamp(20px, 4vw, 38px)',
     backgroundColor: 'var(--bg-primary)',
-    backgroundImage:
-      'radial-gradient(circle at 50% 0%, rgba(249, 115, 22, 0.11) 0%, transparent 54%)',
+    backgroundImage: 'var(--auth-backdrop-gradient)',
     color: 'var(--text-primary)',
     fontFamily: 'var(--font-sans)',
+    position: 'relative',
   },
   panel: {
-    width: 'min(100%, 468px)',
-    padding: 'clamp(22px, 4.5vw, 34px)',
+    width: 'min(100%, 496px)',
+    padding: 'clamp(26px, 4.5vw, 38px)',
     border: '1px solid var(--border-color)',
     borderRadius: 'var(--radius-xl)',
     background: 'var(--bg-secondary)',
@@ -1254,46 +1379,46 @@ const styles: Record<string, React.CSSProperties> = {
   brandRow: {
     display: 'flex',
     alignItems: 'center',
-    gap: '12px',
-    marginBottom: '20px',
+    gap: '14px',
+    marginBottom: '22px',
   },
   mark: {
-    width: '40px',
-    height: '40px',
+    width: '46px',
+    height: '46px',
     display: 'grid',
     placeItems: 'center',
-    borderRadius: '10px',
-    background: 'linear-gradient(135deg, #f97316 0%, #c2410c 100%)',
-    fontSize: '1.2rem',
-    fontWeight: 700,
+    borderRadius: '16px',
+    background: 'var(--btn-primary-bg)',
+    fontSize: '1.3rem',
+    fontWeight: 800,
     color: '#ffffff',
     flexShrink: 0,
-    boxShadow: '0 4px 14px rgba(249, 115, 22, 0.28)',
+    boxShadow: '0 8px 20px var(--accent-glow)',
   },
   brand: {
     color: 'var(--text-primary)',
-    fontSize: '0.92rem',
-    letterSpacing: '0.04em',
-    fontWeight: 700,
+    fontSize: '0.98rem',
+    letterSpacing: '0.03em',
+    fontWeight: 800,
     lineHeight: 1.2,
   },
   brandSub: {
     color: 'var(--text-muted)',
-    fontSize: '0.76rem',
-    marginTop: '2px',
+    fontSize: '0.8rem',
+    marginTop: '3px',
   },
   title: {
-    fontSize: '1.45rem',
+    fontSize: '1.6rem',
     fontWeight: 700,
     letterSpacing: '-0.025em',
-    margin: '0 0 6px',
+    margin: '0 0 8px',
     color: 'var(--text-primary)',
   },
   muted: {
     color: 'var(--text-secondary)',
-    fontSize: '0.86rem',
-    lineHeight: 1.5,
-    margin: '0 0 18px',
+    fontSize: '0.88rem',
+    lineHeight: 1.55,
+    margin: '0 0 20px',
   },
   mutedSmall: {
     color: 'var(--text-secondary)',
@@ -1305,7 +1430,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     gap: '10px',
-    marginBottom: '14px',
+    marginBottom: '16px',
   },
   dividerLine: {
     flex: 1,
@@ -1313,55 +1438,57 @@ const styles: Record<string, React.CSSProperties> = {
     background: 'var(--border-color)',
   },
   dividerText: {
-    fontSize: '0.74rem',
+    fontSize: '0.76rem',
     color: 'var(--text-muted)',
+    fontWeight: 500,
   },
   form: {
     display: 'grid',
-    gap: '12px',
+    gap: '14px',
   },
   helpBox: {
-    padding: '10px 12px',
+    padding: '12px 14px',
     borderRadius: 'var(--radius-md)',
-    background: 'var(--bg-tertiary)',
+    background: 'var(--bg-surface)',
     border: '1px solid var(--border-color)',
     color: 'var(--text-secondary)',
-    fontSize: '0.78rem',
+    fontSize: '0.8rem',
     lineHeight: 1.5,
   },
   label: {
     display: 'block',
     color: 'var(--text-secondary)',
-    fontSize: '0.78rem',
-    fontWeight: 500,
-    marginBottom: '5px',
+    fontSize: '0.8rem',
+    fontWeight: 600,
+    marginBottom: '6px',
   },
   input: {
-    minHeight: '40px',
+    minHeight: '44px',
   },
   error: {
-    padding: '10px 12px',
+    padding: '11px 14px',
     borderRadius: 'var(--radius-md)',
     background: 'var(--danger-soft)',
-    border: '1px solid rgba(239, 68, 68, 0.35)',
-    color: '#fecaca',
-    fontSize: '0.82rem',
+    border: '1px solid rgba(220, 38, 38, 0.3)',
+    color: 'var(--danger-text)',
+    fontSize: '0.83rem',
+    fontWeight: 500,
   },
   securityNote: {
     display: 'flex',
     gap: '10px',
     alignItems: 'flex-start',
-    marginTop: '18px',
-    padding: '11px 12px',
+    marginTop: '20px',
+    padding: '12px 14px',
     borderRadius: 'var(--radius-md)',
-    background: 'var(--bg-tertiary)',
+    background: 'var(--bg-surface)',
     border: '1px solid var(--border-subtle)',
     color: 'var(--text-secondary)',
-    fontSize: '0.76rem',
-    lineHeight: 1.48,
+    fontSize: '0.78rem',
+    lineHeight: 1.5,
   },
   progress: {
-    height: '3px',
+    height: '4px',
     borderRadius: '999px',
     background: 'var(--accent-color)',
     marginTop: '18px',
@@ -1374,8 +1501,8 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'grid',
     placeItems: 'center',
     padding: '18px',
-    background: 'rgba(5, 7, 11, 0.78)',
-    backdropFilter: 'blur(6px)',
+    background: 'var(--modal-backdrop)',
+    backdropFilter: 'blur(8px)',
   },
   accessPanel: {
     width: 'min(100%, 580px)',
