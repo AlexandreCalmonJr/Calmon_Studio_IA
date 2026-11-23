@@ -156,14 +156,17 @@ import { createBrainRouter } from './server/brain/brainRouter.ts';
 import { verifyFirebaseIdToken } from './server/firebaseTokenVerifier.ts';
 
 const requestContext = new AsyncLocalStorage<{ ownerUserId: string }>();
-const realtimeClients = new Map<WebSocket, string>();
+const realtimeClients = new Map<WebSocket, { username: string; sessionId: string }>();
 function broadcastRealtimeEvent(type: string, payload: unknown, ownerUserId?: string) {
   // Resolve the owner from the authenticated request context; fail closed outside it.
   const eventOwner = ownerUserId || requestContext.getStore()?.ownerUserId;
   if (!eventOwner) return;
   const frame = JSON.stringify({ type, payload, timestamp: new Date().toISOString() });
-  realtimeClients.forEach((clientOwner, client) => {
-    if (clientOwner === eventOwner && client.readyState === WebSocket.OPEN) {
+  realtimeClients.forEach((clientIdentity, client) => {
+    const activeSession = sessions.get(clientIdentity.sessionId);
+    const activeUser = users.get(clientIdentity.username);
+    const sessionIsValid = activeSession && Date.now() - activeSession.created_at <= SESSION_TTL_MS;
+    if (clientIdentity.username === eventOwner && sessionIsValid && activeUser?.is_active && client.readyState === WebSocket.OPEN) {
       try { client.send(frame); } catch { /* ignore dropped socket */ }
     }
   });
@@ -8009,7 +8012,7 @@ async function startServer() {
       ws.close(1008, 'Authentication required');
       return;
     }
-    realtimeClients.set(ws, session.username);
+    realtimeClients.set(ws, { username: session.username, sessionId: session.session_id });
     try {
       ws.send(JSON.stringify({ type: 'connected', payload: { status: 'ready' } }));
     } catch {
