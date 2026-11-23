@@ -1348,7 +1348,7 @@ function buildApiRouter() {
       return;
     }
     const admin = users.get('admin');
-    if (!admin) {
+    if (!admin || admin.role !== 'admin') {
       res.status(503).json({ detail: 'A conta administrativa ainda não foi inicializada.' });
       return;
     }
@@ -1363,7 +1363,7 @@ function buildApiRouter() {
       return;
     }
     const admin = users.get('admin');
-    if (!admin) {
+    if (!admin || admin.role !== 'admin') {
       res.status(503).json({ detail: 'Configure JARVIS_ADMIN_PASSWORD (mínimo 12 caracteres) antes do primeiro acesso.' });
       return;
     }
@@ -1410,6 +1410,10 @@ function buildApiRouter() {
     }
     if (password.length < 8) {
       res.status(400).json({ detail: 'Escolha uma senha com pelo menos 8 caracteres.' });
+      return;
+    }
+    if (rawUsername === 'admin' || rawUsername === 'dev' || rawUsername.startsWith('fb_')) {
+      res.status(400).json({ detail: 'Este nome de utilizador está reservado.' });
       return;
     }
     if (users.has(rawUsername)) {
