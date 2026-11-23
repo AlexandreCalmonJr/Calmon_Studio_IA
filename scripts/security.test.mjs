@@ -92,3 +92,13 @@ test('each public authentication route is wired to a specific rate limit', () =>
   assert.match(source, /api\.post\('\/auth\/register-personal', createAuthRateLimit\('register', 5\)/);
   assert.match(source, /api\.post\('\/auth\/firebase-session', createAuthRateLimit\('firebase-login', 10\)/);
 });
+
+test('system account names cannot be claimed through public registration', () => {
+  assert.match(source, /rawUsername === 'admin' \|\| rawUsername === 'dev' \|\| rawUsername\.startsWith\('fb_'\)/);
+  assert.match(source, /admin\.role !== 'admin'/);
+});
+
+test('Firebase admin privilege is reconciled against the server allowlist', () => {
+  assert.match(source, /else if \(!isBootstrappedAdmin && user\.role === 'admin'\)/);
+  assert.match(source, /user\.role = 'developer'/);
+});
