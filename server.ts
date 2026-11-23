@@ -270,6 +270,20 @@ function permissionsForRole(role: 'admin' | 'developer' | 'auditor'): string[] {
 
 // Seeded local accounts
 const users = new Map<string, UserAccount>();
+const configuredAdminPassword = String(process.env.JARVIS_ADMIN_PASSWORD || '');
+if (configuredAdminPassword) {
+  if (configuredAdminPassword.length < 12) {
+    throw new Error('JARVIS_ADMIN_PASSWORD deve ter pelo menos 12 caracteres.');
+  }
+  users.set('admin', makeAccount('admin', 'Administrador', configuredAdminPassword, 'admin', false));
+}
+const configuredDeveloperPassword = String(process.env.JARVIS_DEV_PASSWORD || '');
+if (configuredDeveloperPassword) {
+  if (configuredDeveloperPassword.length < 12) {
+    throw new Error('JARVIS_DEV_PASSWORD deve ter pelo menos 12 caracteres.');
+  }
+  users.set('dev', makeAccount('dev', 'Desenvolvedor', configuredDeveloperPassword, 'developer', false));
+}
 
 const VALID_ADMIN_TOKENS = new Set<string>(process.env.JARVIS_ADMIN_TOKEN ? [process.env.JARVIS_ADMIN_TOKEN] : []);
 const VALID_BOOTSTRAP_TOKENS = new Set<string>(process.env.JARVIS_BOOTSTRAP_TOKEN ? [process.env.JARVIS_BOOTSTRAP_TOKEN] : []);
@@ -1348,22 +1362,15 @@ function buildApiRouter() {
       res.status(401).json({ detail: 'Token inicial inválido ou expirado.' });
       return;
     }
-    if (users.has('admin')) {
-      res.status(409).json({ detail: 'A configuração inicial já foi concluída.' });
+    const admin = users.get('admin');
+    if (!admin) {
+      res.status(503).json({ detail: 'Configure JARVIS_ADMIN_PASSWORD (mínimo 12 caracteres) antes do primeiro acesso.' });
       return;
     }
-    const admin = makeAccount('admin', 'Administrador', crypto.randomBytes(48).toString('hex'), 'admin', true);
-    users.set('admin', admin);
-    userProfiles.set('admin', {
-      displayName: 'Administrador', avatarIcon: 'J', developerRole: 'Administrador',
-      seniorityLevel: 'architect', responseStyle: 'detailed', customInstructions: '',
-      assistantName: 'JARVIS', assistantGreeting: '', experienceMode: 'engineering',
-    });
-    VALID_BOOTSTRAP_TOKENS.delete(token);
     const record = createSessionForUser(req, res, admin);
     res.json({
       status: 'authenticated', user_id: admin.username, role: admin.role,
-      must_change_password: true, session_token: record.session_id,
+      session_token: record.session_id,
     });
   });
 
