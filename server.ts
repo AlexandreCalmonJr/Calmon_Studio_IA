@@ -1224,6 +1224,10 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
   }
   (req as Request & { jarvisSession?: SessionRecord; jarvisUser?: UserAccount }).jarvisSession = session;
   (req as Request & { jarvisSession?: SessionRecord; jarvisUser?: UserAccount }).jarvisUser = user;
+  if (user.must_change_password && req.path !== '/auth/change-password') {
+    res.status(403).json({ detail: 'Altere a palavra-passe inicial antes de continuar.', code: 'PASSWORD_CHANGE_REQUIRED' });
+    return;
+  }
   requestContext.run({ ownerUserId: user.username }, next);
 }
 
