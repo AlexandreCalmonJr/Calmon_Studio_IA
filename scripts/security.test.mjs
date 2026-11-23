@@ -77,3 +77,18 @@ test('authentication and registration endpoints have rate limits', () => {
     assert.ok(source.includes(`/auth/${route}`), `expected route ${route}`);
   }
 });
+
+test('first administrator must set a personal password before using protected routes', () => {
+  assert.match(source, /user\.must_change_password && req\.path !== '\/auth\/change-password'/);
+  assert.match(authGate, /passwordChangeRequired && status === 'authenticated'/);
+  assert.match(authGate, /\/api\/v1\/auth\/change-password/);
+  assert.match(authGate, /setPasswordChangeRequired\(Boolean\(nextSession\.must_change_password\)\)/);
+});
+
+test('each public authentication route is wired to a specific rate limit', () => {
+  assert.match(source, /api\.post\('\/auth\/password-login', createAuthRateLimit\('password-login', 10\)/);
+  assert.match(source, /api\.post\('\/auth\/login', createAuthRateLimit\('admin-login', 5\)/);
+  assert.match(source, /api\.post\('\/auth\/bootstrap\/exchange', createAuthRateLimit\('bootstrap', 5\)/);
+  assert.match(source, /api\.post\('\/auth\/register-personal', createAuthRateLimit\('register', 5\)/);
+  assert.match(source, /api\.post\('\/auth\/firebase-session', createAuthRateLimit\('firebase-login', 10\)/);
+});
