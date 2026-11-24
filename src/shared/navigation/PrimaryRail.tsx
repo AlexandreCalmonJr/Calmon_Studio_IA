@@ -160,7 +160,7 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
       }
     } catch {}
     return {
-      'Engenharia & IA': false,
+      'Engenharia & Ecossistema': false,
       'Estúdios & Governança': false,
     };
   });

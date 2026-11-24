@@ -407,7 +407,7 @@ export const AgentOfficeView: React.FC<AgentOfficeViewProps> = ({ onSelectForCha
             <div className="glass-card" style={{ padding: '14px 16px' }}>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Em atividade agora</div>
               <div className="tabular-nums" style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--success-text)', marginTop: '4px' }}>
-                {liveStatuses.filter((s) => s.mood !== 'idle').length}
+                {liveStatuses.filter((s) => Boolean(s.mood && s.mood !== 'idle')).length}
               </div>
             </div>
             <div className="glass-card" style={{ padding: '14px 16px' }}>

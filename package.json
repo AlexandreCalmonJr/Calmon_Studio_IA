@@ -18,6 +18,11 @@
     "test:security": "tsx --test src/services/sentinelSecurity.test.ts firestore.rules.test.ts server/providerEngine.test.ts",
     "test:agents": "tsx --test src/services/agent*.test.ts",
     "test:brain": "tsx --test server/brain/*.test.ts src/services/secondBrain.test.ts src/services/brainArchitectureEngine.test.ts",
+    "test:store": "tsx --test src/services/unifiedStoreEngine.test.ts src/services/modulePackEngine.test.ts",
+    "test:logs": "tsx --test src/services/logExportEngine.test.ts",
+    "test:models": "tsx --test src/services/providerHealthMetrics.test.ts src/services/providerPingValidation.test.ts server/providerEngine.test.ts",
+    "test:skills": "tsx --test src/services/unifiedStoreEngine.test.ts",
+    "test:architecture": "tsx --test server/architectureAnalyzer.test.ts src/services/brainArchitectureEngine.test.ts",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:report": "playwright show-report"
