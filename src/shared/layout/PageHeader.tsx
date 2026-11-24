@@ -6,6 +6,7 @@ export interface PageHeaderProps {
   meta?: Array<string | React.ReactNode>;
   actions?: React.ReactNode;
   icon?: React.ReactNode;
+  variant?: 'card' | 'flat';
   className?: string;
 }
 
@@ -15,12 +16,14 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   meta,
   actions,
   icon,
+  variant = 'card',
   className = '',
 }) => {
   const filteredMeta = (meta || []).filter(Boolean);
+  const variantClass = variant === 'flat' ? ' jarvis-page-header--flat' : '';
 
   return (
-    <header className={`jarvis-page-header${className ? ` ${className}` : ''}`}>
+    <header className={`jarvis-page-header${variantClass}${className ? ` ${className}` : ''}`}>
       <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {icon && (

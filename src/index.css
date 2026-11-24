@@ -1886,6 +1886,19 @@ textarea {
   box-shadow: var(--shadow-panel);
 }
 
+.jarvis-page-header--flat {
+  padding: 0 0 18px;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-color);
+  box-shadow: none;
+}
+
+.jarvis-page-header--flat .jarvis-page-header__title {
+  font-size: clamp(1.24rem, 1.8vw, 1.45rem);
+}
+
 .jarvis-page-header__title {
   margin: 0;
   font-size: 1.5rem;
@@ -4602,6 +4615,7 @@ textarea {
   .jarvis-view-enter,
   .jarvis-settings-card,
   .jarvis-pack-card,
+  .jarvis-store-card,
   .jarvis-choice-card,
   .jarvis-schema-card,
   .jarvis-kpi-card,
@@ -4716,6 +4730,270 @@ textarea {
   box-shadow: var(--shadow-panel);
   animation: jarvisCardFadeIn 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
+
+/* ==========================================================================
+   Unified Store Split-Pane Catalog (Reference Split Navigation + 2-Col Grid)
+   ========================================================================== */
+.jarvis-store-layout {
+  background: var(--bg-primary);
+}
+
+.jarvis-store-nav-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+@media (max-width: 900px) {
+  .jarvis-store-nav-footer {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .jarvis-store-nav-footer .jarvis-subnav-btn {
+    width: auto;
+  }
+}
+
+.jarvis-store-container {
+  width: 100%;
+  max-width: 1040px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+.jarvis-store-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.jarvis-store-search-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.jarvis-store-search-input {
+  flex: 1 1 260px;
+  max-width: 440px;
+  min-height: 38px;
+  background: var(--bg-secondary);
+}
+
+.jarvis-store-segmented {
+  max-width: 100%;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  -webkit-overflow-scrolling: touch;
+  align-self: flex-start;
+}
+
+.jarvis-store-segmented .jarvis-segmented-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-size: 0.79rem;
+  padding: 6px 11px;
+}
+
+.jarvis-store-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  min-width: 0;
+}
+
+.jarvis-store-grid > *:nth-child(2) {
+  animation-delay: 25ms;
+}
+
+.jarvis-store-grid > *:nth-child(3) {
+  animation-delay: 50ms;
+}
+
+.jarvis-store-grid > *:nth-child(4) {
+  animation-delay: 75ms;
+}
+
+.jarvis-store-grid > *:nth-child(n + 5) {
+  animation-delay: 100ms;
+}
+
+@media (max-width: 820px) {
+  .jarvis-store-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.jarvis-store-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 18px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+  transition: border-color 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease;
+  animation: jarvisCardFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.jarvis-store-card:hover {
+  border-color: var(--border-hover);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-panel);
+}
+
+.jarvis-store-card.is-installed {
+  border-color: rgba(34, 197, 94, 0.32);
+}
+
+.jarvis-store-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.jarvis-store-card__identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.jarvis-store-card__titles {
+  min-width: 0;
+  flex: 1;
+}
+
+.jarvis-store-card__title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.jarvis-store-card__title {
+  margin: 0;
+  font-size: 0.94rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jarvis-store-card__handle {
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  color: var(--accent-light);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.jarvis-store-card__subtitle {
+  margin-top: 2px;
+  font-size: 0.77rem;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jarvis-store-card__badge {
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.jarvis-store-card__badge.is-active {
+  color: var(--success-text);
+}
+
+.jarvis-store-card__desc {
+  margin: 0;
+  font-size: 0.81rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.jarvis-store-card__meta-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.jarvis-store-card__expand {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.jarvis-store-card__footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 2px;
+}
+
+.jarvis-store-card__primary-btn {
+  flex: 1;
+  min-width: 0;
+  border-radius: var(--radius-sm);
+  min-height: 36px;
+}
+
+.jarvis-store-card__secondary-btn {
+  border-radius: var(--radius-sm);
+  min-height: 36px;
+  flex-shrink: 0;
+}
+
+.jarvis-store-icon-badge {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid var(--border-color);
+}
+
+.jarvis-store-section-divider {
+  margin-top: 4px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-color);
+}
+
 
 
 

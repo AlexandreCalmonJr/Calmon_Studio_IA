@@ -1,4 +1,4 @@
-import type { ModulePackWithState } from './modulePackEngine';
+import type { ModulePackCategory, ModulePackWithState } from './modulePackEngine';
 import type { SkillInfo } from '../types';
 
 export type UnifiedStoreSection = 'packs' | 'skills' | 'templates' | 'apps';
@@ -92,6 +92,48 @@ export function filterStoreSkills(
       .toLowerCase();
     return haystack.includes(q);
   });
+}
+
+export function countStoreSkillsByCategory(
+  skills: SkillInfo[]
+): Record<SkillCategoryFilter, number> {
+  const counts: Record<SkillCategoryFilter, number> = {
+    all: skills.length,
+    arch: 0,
+    sec: 0,
+    qa: 0,
+    custom: 0,
+  };
+  for (const skill of skills) {
+    const bucket = classifySkillBucket(skill);
+    counts[bucket] += 1;
+  }
+  return counts;
+}
+
+export type PackStoreFilter = 'all' | 'installed' | 'custom' | ModulePackCategory;
+
+export function countPacksByFilter(
+  packs: ModulePackWithState[]
+): Record<PackStoreFilter, number> {
+  const counts: Record<PackStoreFilter, number> = {
+    all: packs.length,
+    installed: 0,
+    custom: 0,
+    engineering: 0,
+    development: 0,
+    security: 0,
+    productivity: 0,
+    infrastructure: 0,
+  };
+  for (const pack of packs) {
+    if (pack.installed) counts.installed += 1;
+    if (pack.is_custom) counts.custom += 1;
+    if (pack.category in counts) {
+      counts[pack.category] += 1;
+    }
+  }
+  return counts;
 }
 
 export function sanitizeUnifiedStoreSection(raw?: string | null): UnifiedStoreSection {

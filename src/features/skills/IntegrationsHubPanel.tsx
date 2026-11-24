@@ -54,9 +54,13 @@ const SOURCE_TYPE_LABELS: Record<ContextSetRecord['source_type'], string> = {
 
 interface IntegrationsHubPanelProps {
   onSkillImported?: () => void;
+  embedded?: boolean;
 }
 
-export const IntegrationsHubPanel: React.FC<IntegrationsHubPanelProps> = ({ onSkillImported }) => {
+export const IntegrationsHubPanel: React.FC<IntegrationsHubPanelProps> = ({
+  onSkillImported,
+  embedded = false,
+}) => {
   const [connectors, setConnectors] = useState<IntegrationConnectorRecord[]>([]);
   const [contextSets, setContextSets] = useState<ContextSetRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -306,9 +310,10 @@ export const IntegrationsHubPanel: React.FC<IntegrationsHubPanelProps> = ({ onSk
   return (
     <div
       data-testid="integrations-hub-panel"
-      style={{ maxWidth: '1040px', width: '100%', display: 'flex', flexDirection: 'column', gap: '24px' }}
+      style={{ maxWidth: '1040px', width: '100%', display: 'flex', flexDirection: 'column', gap: '20px' }}
     >
       <PageHeader
+        variant={embedded ? 'flat' : 'card'}
         title="Integrações Reais & Context Sets"
         subtitle="Conecte GitHub, Figma e Hugging Face com controle granular de quais agentes especialistas podem ler cada fonte."
         meta={[
@@ -320,7 +325,7 @@ export const IntegrationsHubPanel: React.FC<IntegrationsHubPanelProps> = ({ onSk
             <button
               type="button"
               onClick={() => setShowContextModal(true)}
-              className="btn btn-primary btn-sm"
+              className={embedded ? 'btn btn-secondary btn-sm' : 'btn btn-primary btn-sm'}
               style={{ whiteSpace: 'nowrap' }}
             >
               <Plus size={14} />

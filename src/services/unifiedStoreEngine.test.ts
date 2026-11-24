@@ -3,10 +3,19 @@ import assert from 'node:assert/strict';
 import {
   classifySkillBucket,
   computeUnifiedStoreSummary,
+  countPacksByFilter,
+  countStoreSkillsByCategory,
   filterStoreSkills,
   isSkillActive,
   sanitizeUnifiedStoreSection,
 } from './unifiedStoreEngine';
+import {
+  STORE_APPS,
+  countStoreAppsByCategory,
+  createCustomStoreApp,
+  filterStoreApps,
+  loadConnectedAppIds,
+} from './storeAppsCatalog';
 import type { SkillInfo } from '../types';
 import type { ModulePackWithState } from './modulePackEngine';
 
@@ -166,4 +175,53 @@ test('sanitizeUnifiedStoreSection defaults invalid values to packs', () => {
   assert.equal(sanitizeUnifiedStoreSection('apps'), 'apps');
   assert.equal(sanitizeUnifiedStoreSection('unknown'), 'packs');
   assert.equal(sanitizeUnifiedStoreSection(null), 'packs');
+});
+
+test('countStoreSkillsByCategory and countPacksByFilter compute exact counts', () => {
+  const skillCounts = countStoreSkillsByCategory(SAMPLE_SKILLS);
+  assert.deepEqual(skillCounts, {
+    all: 4,
+    arch: 1,
+    sec: 1,
+    qa: 1,
+    custom: 1,
+  });
+
+  const packCounts = countPacksByFilter(SAMPLE_PACKS);
+  assert.equal(packCounts.all, 2);
+  assert.equal(packCounts.installed, 1);
+  assert.equal(packCounts.custom, 0);
+  assert.equal(packCounts.development, 1);
+  assert.equal(packCounts.security, 1);
+});
+
+test('storeAppsCatalog filters apps, counts categories, creates custom connectors, and safely falls back in SSR', () => {
+  const counts = countStoreAppsByCategory(STORE_APPS);
+  assert.equal(counts.all, 15);
+  assert.equal(counts.productivity, 6);
+  assert.equal(counts.documents, 4);
+  assert.equal(counts.development, 3);
+  assert.equal(counts.ai, 2);
+
+  const filteredMcp = filterStoreApps(STORE_APPS, { query: 'mcp', category: 'all' });
+  assert.deepEqual(filteredMcp.map((a) => a.id), ['context7', 'huggingface']);
+
+  const filteredDocs = filterStoreApps(STORE_APPS, { query: 'documentação', category: 'all' });
+  assert.deepEqual(filteredDocs.map((a) => a.id), ['context7']);
+
+  const filteredDev = filterStoreApps(STORE_APPS, { query: '', category: 'development' });
+  assert.deepEqual(filteredDev.map((a) => a.id), ['github', 'vercel', 'canva']);
+
+  const customApp = createCustomStoreApp({
+    name: 'Notion MCP',
+    connectionType: 'mcp',
+    endpoint: 'npx -y @notionhq/mcp',
+  });
+  assert.equal(customApp.isCustom, true);
+  assert.equal(customApp.category, 'ai');
+  assert.equal(customApp.iconType, 'mcp');
+  assert.ok(customApp.id.startsWith('custom_notion_mcp_'));
+
+  const defaults = loadConnectedAppIds();
+  assert.equal(defaults.length, 7);
 });

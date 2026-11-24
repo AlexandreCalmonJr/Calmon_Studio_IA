@@ -1,8 +1,19 @@
 import React from 'react';
-import { Users, CheckCircle, XCircle, Trash2, BookOpen, Wrench } from 'lucide-react';
+import {
+  Users,
+  CheckCircle,
+  XCircle,
+  Trash2,
+  BookOpen,
+  Wrench,
+  ShieldCheck,
+  Sparkles,
+  FlaskConical,
+} from 'lucide-react';
 import { SkillInfo, AgentInfo } from '../../types';
 import { ALL_26_AGENTS } from '../../data/agentsCatalog';
 import { resolveSkillDomainLabel } from '../../services/domainCatalog';
+import { classifySkillBucket } from '../../services/unifiedStoreEngine';
 
 interface SkillCardProps {
   skill: SkillInfo;
@@ -40,6 +51,18 @@ export const SkillCard: React.FC<SkillCardProps> = ({
         ? 'Custom'
         : null;
 
+  const bucket = classifySkillBucket(skill);
+  const iconTone =
+    bucket === 'sec'
+      ? { bg: 'var(--success-soft)', color: 'var(--success-text)', border: 'rgba(34, 197, 94, 0.28)', Icon: ShieldCheck }
+      : bucket === 'qa'
+        ? { bg: 'var(--info-soft)', color: 'var(--info-text)', border: 'rgba(56, 189, 248, 0.28)', Icon: FlaskConical }
+        : bucket === 'custom'
+          ? { bg: 'var(--purple-soft)', color: 'var(--purple-text)', border: 'rgba(139, 92, 246, 0.28)', Icon: Sparkles }
+          : { bg: 'var(--accent-soft)', color: 'var(--accent-light)', border: 'var(--border-accent)', Icon: BookOpen };
+
+  const DomainIcon = iconTone.Icon;
+
   const assigned = (skill.assigned_agents || []).map((role) => {
     const liveAg = agents.find((a) => a.role === role);
     if (liveAg) {
@@ -61,245 +84,173 @@ export const SkillCard: React.FC<SkillCardProps> = ({
     );
   });
 
-  const visibleAvatars = assigned.slice(0, 4);
-  const remainingCount = Math.max(0, assigned.length - 4);
+  const visibleAvatars = assigned.slice(0, 3);
+  const remainingCount = Math.max(0, assigned.length - 3);
 
   return (
-    <article
-      className="jarvis-settings-card"
-      style={{
-        justifyContent: 'space-between',
-        gap: '14px',
-        minWidth: 0,
-      }}
-    >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', minWidth: 0 }}>
-        {/* Top Metadata & Status Control */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '8px',
-            flexWrap: 'wrap',
-          }}
-        >
+    <article className={`jarvis-store-card ${isApproved ? 'is-installed' : ''}`}>
+      {/* Header: Icon Badge + Name/Subtitle + Uppercase Status */}
+      <div className="jarvis-store-card__header">
+        <div className="jarvis-store-card__identity">
           <div
+            className="jarvis-store-icon-badge"
             style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              flexWrap: 'wrap',
-              fontSize: '0.7rem',
-              fontWeight: 600,
-              letterSpacing: '0.04em',
-              textTransform: 'uppercase',
-              color: 'var(--text-muted)',
-              minWidth: 0,
+              backgroundColor: iconTone.bg,
+              borderColor: iconTone.border,
+              color: iconTone.color,
             }}
+            aria-hidden="true"
           >
-            <span style={{ color: 'var(--text-secondary)' }}>{domainLabel}</span>
-            <span aria-hidden="true">·</span>
-            <span className="jarvis-tabular" style={{ fontFamily: 'var(--font-mono)', textTransform: 'none' }}>
-              v{skill.version}
-            </span>
-            {originLabel && (
-              <>
-                <span aria-hidden="true">·</span>
-                <span style={{ color: 'var(--accent-light)' }}>{originLabel}</span>
-              </>
-            )}
+            <DomainIcon size={18} />
           </div>
-
-          {canManageThisSkill ? (
-            <button
-              type="button"
-              onClick={() => onToggle(skill.id)}
-              aria-pressed={isApproved}
-              className={`btn btn-xs ${isApproved ? 'btn-success' : 'btn-secondary'}`}
-              title={isApproved ? 'Habilidade ativa — clique para desativar' : 'Habilidade inativa — clique para ativar'}
-            >
-              {isApproved ? <CheckCircle size={12} /> : <XCircle size={12} />}
-              <span>{isApproved ? 'Ativa' : 'Desativada'}</span>
-            </button>
-          ) : (
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '5px',
-                fontSize: '0.72rem',
-                fontWeight: 500,
-                color: isApproved ? 'var(--success-color)' : 'var(--text-muted)',
-              }}
-            >
-              <span aria-hidden="true">{isApproved ? '●' : '○'}</span>
-              <span>{isApproved ? 'Ativa' : 'Desativada'}</span>
-            </span>
-          )}
+          <div className="jarvis-store-card__titles">
+            <h4 className="jarvis-store-card__title">{skill.name}</h4>
+            <div className="jarvis-store-card__subtitle">
+              {domainLabel} · v{skill.version}
+              {originLabel ? ` · ${originLabel}` : ''}
+            </div>
+          </div>
         </div>
 
-        {/* Title & Description */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 }}>
-          <h4
-            style={{
-              fontSize: '0.94rem',
-              fontWeight: 600,
-              color: 'var(--text-primary)',
-              margin: 0,
-              lineHeight: 1.35,
-            }}
-          >
-            {skill.name}
-          </h4>
-
-          <p
-            style={{
-              fontSize: '0.8rem',
-              color: 'var(--text-secondary)',
-              margin: 0,
-              lineHeight: 1.48,
-              display: '-webkit-box',
-              WebkitLineClamp: 2,
-              WebkitBoxOrient: 'vertical',
-              overflow: 'hidden',
-            }}
-          >
-            {skill.description}
-          </p>
-        </div>
-
-        {/* Authorized MCP Tools */}
-        {skill.allowed_tools && skill.allowed_tools.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
-            <Wrench size={11} color="var(--text-muted)" />
-            {skill.allowed_tools.slice(0, 3).map((tool) => (
-              <span
-                key={tool}
-                style={{
-                  fontSize: '0.68rem',
-                  fontFamily: 'var(--font-mono)',
-                  padding: '1px 6px',
-                  borderRadius: '4px',
-                  backgroundColor: 'var(--bg-tertiary)',
-                  color: 'var(--text-secondary)',
-                  border: '1px solid var(--border-subtle)',
-                }}
-              >
-                {tool}
-              </span>
-            ))}
-            {skill.allowed_tools.length > 3 && (
-              <span className="jarvis-tabular" style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
-                +{skill.allowed_tools.length - 3}
-              </span>
-            )}
-          </div>
-        )}
+        <span className={`jarvis-store-card__badge ${isApproved ? 'is-active' : ''}`}>
+          {isApproved ? 'ATIVA' : 'INATIVA'}
+        </span>
       </div>
 
-      {/* Footer: Assigned Agent Avatars & Actions */}
-      <div
-        style={{
-          borderTop: '1px solid var(--border-subtle)',
-          paddingTop: '12px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '8px',
-          flexWrap: 'wrap',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+      {/* Description */}
+      <p className="jarvis-store-card__desc">{skill.description}</p>
+
+      {/* Compact Meta Strip (Specialists + Tools) */}
+      <div className="jarvis-store-card__meta-line">
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
           {visibleAvatars.length > 0 && (
-            <div style={{ display: 'flex', alignItems: 'center' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center' }}>
               {visibleAvatars.map((ag, i) => (
-                <div
+                <span
                   key={ag.role}
                   title={`${ag.name} (${'categoryLabel' in ag && ag.categoryLabel ? ag.categoryLabel : 'Especialista'})`}
                   style={{
-                    width: '24px',
-                    height: '24px',
+                    width: '20px',
+                    height: '20px',
                     borderRadius: '6px',
                     backgroundColor: ag.color || 'var(--accent-color)',
-                    display: 'flex',
+                    display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     color: '#ffffff',
-                    fontSize: '0.68rem',
+                    fontSize: '0.62rem',
                     fontWeight: 700,
-                    marginLeft: i > 0 ? '-6px' : 0,
-                    border: '2px solid var(--bg-secondary)',
+                    marginLeft: i > 0 ? '-5px' : 0,
+                    border: '1.5px solid var(--bg-secondary)',
                   }}
                 >
                   {ag.name.charAt(0)}
-                </div>
+                </span>
               ))}
               {remainingCount > 0 && (
-                <div
+                <span
                   className="jarvis-tabular"
                   style={{
-                    width: '24px',
-                    height: '24px',
+                    width: '20px',
+                    height: '20px',
                     borderRadius: '6px',
                     backgroundColor: 'var(--bg-tertiary)',
-                    display: 'flex',
+                    display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     color: 'var(--text-secondary)',
-                    fontSize: '0.65rem',
+                    fontSize: '0.6rem',
                     fontWeight: 700,
-                    marginLeft: '-6px',
-                    border: '2px solid var(--bg-secondary)',
+                    marginLeft: '-5px',
+                    border: '1.5px solid var(--bg-secondary)',
                   }}
                 >
                   +{remainingCount}
-                </div>
+                </span>
               )}
             </div>
           )}
-
-          <span className="jarvis-tabular" style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+          <span className="jarvis-tabular">
             {assigned.length} {assigned.length === 1 ? 'especialista' : 'especialistas'}
           </span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          {onViewInstructions && (
-            <button
-              type="button"
-              onClick={() => onViewInstructions(skill)}
-              className="btn btn-secondary btn-xs"
-              title="Ver diretrizes e instruções de prompt"
-            >
-              <BookOpen size={12} />
-              <span>Diretrizes</span>
-            </button>
-          )}
+        {skill.allowed_tools && skill.allowed_tools.length > 0 && (
+          <span
+            className="jarvis-tabular"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.7rem',
+            }}
+            title={skill.allowed_tools.join(', ')}
+          >
+            <Wrench size={11} />
+            <span>{skill.allowed_tools.length} MCP</span>
+          </span>
+        )}
+      </div>
 
-          {canManageThisSkill && (
-            <button
-              type="button"
-              onClick={() => onEditAgents(skill)}
-              className="btn btn-secondary btn-xs"
-            >
-              <Users size={12} />
-              <span>Vincular</span>
-            </button>
-          )}
+      {/* Footer Actions */}
+      <div className="jarvis-store-card__footer">
+        {canManageThisSkill ? (
+          <button
+            type="button"
+            onClick={() => onToggle(skill.id)}
+            aria-pressed={isApproved}
+            className={`btn btn-sm jarvis-store-card__primary-btn ${isApproved ? 'btn-secondary' : 'btn-secondary'}`}
+            title={isApproved ? 'Habilidade ativa — clique para desativar' : 'Habilidade inativa — clique para ativar'}
+          >
+            {isApproved ? <CheckCircle size={13} color="var(--success-color)" /> : <XCircle size={13} />}
+            <span>{isApproved ? 'Ativa · Desativar' : 'Ativar habilidade'}</span>
+          </button>
+        ) : onViewInstructions ? (
+          <button
+            type="button"
+            onClick={() => onViewInstructions(skill)}
+            className="btn btn-secondary btn-sm jarvis-store-card__primary-btn"
+          >
+            <BookOpen size={13} />
+            <span>Ver diretrizes</span>
+          </button>
+        ) : null}
 
-          {onDelete && canManageThisSkill && isPrivateSkill && (
-            <button
-              type="button"
-              onClick={() => onDelete(skill.id, skill.name)}
-              className="btn btn-danger-ghost btn-icon-sm"
-              title={`Excluir habilidade ${skill.name}`}
-              aria-label={`Excluir habilidade ${skill.name}`}
-            >
-              <Trash2 size={13} />
-            </button>
-          )}
-        </div>
+        {canManageThisSkill && onViewInstructions && (
+          <button
+            type="button"
+            onClick={() => onViewInstructions(skill)}
+            className="btn btn-ghost btn-sm jarvis-store-card__secondary-btn"
+            title="Ver diretrizes e instruções de prompt"
+          >
+            <span>Diretrizes</span>
+          </button>
+        )}
+
+        {canManageThisSkill && (
+          <button
+            type="button"
+            onClick={() => onEditAgents(skill)}
+            className="btn btn-ghost btn-sm jarvis-store-card__secondary-btn"
+            title="Vincular agentes especialistas"
+          >
+            <Users size={13} />
+            <span>Vincular</span>
+          </button>
+        )}
+
+        {onDelete && canManageThisSkill && isPrivateSkill && (
+          <button
+            type="button"
+            onClick={() => onDelete(skill.id, skill.name)}
+            className="btn btn-danger-ghost btn-icon-sm"
+            title={`Excluir habilidade ${skill.name}`}
+            aria-label={`Excluir habilidade ${skill.name}`}
+          >
+            <Trash2 size={13} />
+          </button>
+        )}
       </div>
     </article>
   );

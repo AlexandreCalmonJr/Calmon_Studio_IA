@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BookOpen,
+  GitBranch,
   Layers,
   Loader2,
   Plus,
@@ -19,11 +20,13 @@ import { API_BASE } from '../../services/api/client';
 import { apiFetch } from '../../services/sessionTransport';
 import type { AgentInfo, SkillInfo } from '../../types';
 import {
+  countStoreSkillsByCategory,
   filterStoreSkills,
   isSkillActive,
   type SkillCategoryFilter,
   type SkillStatusFilter,
 } from '../../services/unifiedStoreEngine';
+import { PageHeader } from '../../shared/layout/PageHeader';
 import { SkillCard } from './SkillCard';
 import { SkillAgentModal } from './SkillAgentModal';
 import { CreateSkillModal } from './CreateSkillModal';
@@ -35,6 +38,8 @@ interface SkillsCatalogPanelProps {
   onSkillsCountChange?: (total: number, active: number) => void;
   compactHeader?: boolean;
   onOpenStore?: () => void;
+  onOpenGitHubImport?: () => void;
+  variant?: 'panel' | 'store';
 }
 
 const CATEGORY_TABS: Array<{ id: SkillCategoryFilter; label: string }> = [
@@ -49,6 +54,8 @@ export const SkillsCatalogPanel: React.FC<SkillsCatalogPanelProps> = ({
   onSkillsCountChange,
   compactHeader = false,
   onOpenStore,
+  onOpenGitHubImport,
+  variant = 'panel',
 }) => {
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -68,6 +75,9 @@ export const SkillsCatalogPanel: React.FC<SkillsCatalogPanelProps> = ({
   const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  const onSkillsCountChangeRef = useRef(onSkillsCountChange);
+  onSkillsCountChangeRef.current = onSkillsCountChange;
+
   const loadCatalog = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -79,15 +89,15 @@ export const SkillsCatalogPanel: React.FC<SkillsCatalogPanelProps> = ({
       const list = Array.isArray(skillsData) ? skillsData : [];
       setSkills(list);
       setAgents(Array.isArray(agentsData) ? agentsData : []);
-      if (onSkillsCountChange) {
-        onSkillsCountChange(list.length, list.filter(isSkillActive).length);
+      if (onSkillsCountChangeRef.current) {
+        onSkillsCountChangeRef.current(list.length, list.filter(isSkillActive).length);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha ao carregar catálogo de habilidades.');
     } finally {
       setLoading(false);
     }
-  }, [onSkillsCountChange]);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -121,6 +131,16 @@ export const SkillsCatalogPanel: React.FC<SkillsCatalogPanelProps> = ({
     [skills, search, category, status]
   );
 
+  const categoryCounts = useMemo(() => {
+    const statusFiltered = skills.filter((skill) => {
+      const active = isSkillActive(skill);
+      if (status === 'active' && !active) return false;
+      if (status === 'inactive' && active) return false;
+      return true;
+    });
+    return countStoreSkillsByCategory(statusFiltered);
+  }, [skills, status]);
+
   const activeCount = useMemo(() => skills.filter(isSkillActive).length, [skills]);
 
   const handleToggle = async (id: string) => {
@@ -148,20 +168,78 @@ export const SkillsCatalogPanel: React.FC<SkillsCatalogPanelProps> = ({
     }
   };
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-      {/* Action & Filter Bar */}
-      <div
-        className="glass-panel"
-        style={{
-          padding: '16px 18px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '14px',
+  const actionButtons = (
+    <>
+      {onOpenStore && (
+        <button type="button" className="btn btn-secondary btn-sm" onClick={onOpenStore}>
+          <Layers size={14} />
+          <span>Explorar na Loja Unificada</span>
+        </button>
+      )}
+      {onOpenGitHubImport && (
+        <button type="button" className="btn btn-secondary btn-sm" onClick={onOpenGitHubImport}>
+          <GitBranch size={14} />
+          <span>Importar GitHub</span>
+        </button>
+      )}
+      <button
+        type="button"
+        className="btn btn-secondary btn-sm"
+        onClick={() => {
+          setCreateTab('import');
+          setShowCreateModal(true);
         }}
       >
+        <Upload size={14} />
+        <span>Importar ECC / MD</span>
+      </button>
+      <button
+        type="button"
+        className="btn btn-primary btn-sm"
+        onClick={() => {
+          setCreateTab('create');
+          setShowCreateModal(true);
+        }}
+      >
+        <Plus size={14} />
+        <span>Nova Habilidade</span>
+      </button>
+      <button
+        type="button"
+        className="btn btn-ghost btn-icon-sm"
+        onClick={() => void loadCatalog()}
+        disabled={loading}
+        aria-label="Atualizar catálogo de habilidades"
+        title="Atualizar catálogo de habilidades"
+      >
+        <RefreshCw size={14} className={loading ? 'spin' : ''} />
+      </button>
+    </>
+  );
+
+  return (
+    <div className="jarvis-store-controls" style={{ gap: '18px' }}>
+      {variant === 'store' ? (
+        <PageHeader
+          variant="flat"
+          icon={<BookOpen size={16} />}
+          title="Catálogo de Habilidades (Skills)"
+          subtitle="Ative playbooks especializados, importe receitas Markdown/ECC ou vincule habilidades diretamente aos seus agentes."
+          meta={[
+            <span key="active" className="jarvis-tabular">
+              {activeCount}/{skills.length} ativas
+            </span>,
+            <span key="agents" className="jarvis-tabular">
+              {agents.length} agentes na equipe
+            </span>,
+          ]}
+          actions={actionButtons}
+        />
+      ) : (
         <div
+          className="glass-panel"
           style={{
+            padding: '16px 18px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -170,7 +248,14 @@ export const SkillsCatalogPanel: React.FC<SkillsCatalogPanelProps> = ({
           }}
         >
           <div>
-            <h2 style={{ margin: 0, fontSize: compactHeader ? '1rem' : '1.1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: compactHeader ? '1rem' : '1.1rem',
+                fontWeight: 700,
+                color: 'var(--text-primary)',
+              }}
+            >
               Catálogo de Habilidades (Skills)
             </h2>
             <p style={{ margin: '3px 0 0', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
@@ -180,117 +265,73 @@ export const SkillsCatalogPanel: React.FC<SkillsCatalogPanelProps> = ({
               </strong>
             </p>
           </div>
-
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            {onOpenStore && (
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={onOpenStore}
-              >
-                <Layers size={14} />
-                <span>Explorar na Loja Unificada</span>
-              </button>
-            )}
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => {
-                setCreateTab('import');
-                setShowCreateModal(true);
-              }}
-            >
-              <Upload size={14} />
-              <span>Importar ECC / MD</span>
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={() => {
-                setCreateTab('create');
-                setShowCreateModal(true);
-              }}
-            >
-              <Plus size={14} />
-              <span>Nova Habilidade</span>
-            </button>
+            {actionButtons}
+          </div>
+        </div>
+      )}
+
+      {/* Search + Status Row */}
+      <div className="jarvis-store-search-row">
+        <div className="jarvis-search-box jarvis-store-search-input">
+          <Search size={15} />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar habilidade por nome, domínio ou especialista..."
+            aria-label="Buscar habilidades"
+            className="jarvis-search-box__input"
+          />
+          {search && (
             <button
               type="button"
               className="btn btn-ghost btn-icon-sm"
-              onClick={() => void loadCatalog()}
-              disabled={loading}
-              aria-label="Atualizar catálogo de habilidades"
-              title="Atualizar catálogo de habilidades"
+              onClick={() => setSearch('')}
+              aria-label="Limpar busca de habilidades"
+              style={{ width: '24px', height: '24px' }}
             >
-              <RefreshCw size={14} className={loading ? 'spin' : ''} />
+              <X size={13} />
             </button>
-          </div>
+          )}
         </div>
 
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: '12px',
-          }}
-        >
-          <div className="jarvis-search-box" style={{ flex: '1 1 260px', maxWidth: '420px' }}>
-            <Search size={15} />
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar habilidade, domínio ou especialista..."
-              aria-label="Buscar habilidades"
-              className="jarvis-search-box__input"
-            />
-            {search && (
-              <button
-                type="button"
-                className="btn btn-ghost btn-icon-sm"
-                onClick={() => setSearch('')}
-                aria-label="Limpar busca de habilidades"
-                style={{ width: '24px', height: '24px' }}
-              >
-                <X size={13} />
-              </button>
-            )}
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <div className="jarvis-segmented" role="group" aria-label="Filtrar por categoria">
-              {CATEGORY_TABS.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setCategory(tab.id)}
-                  className={`jarvis-segmented-btn ${category === tab.id ? 'is-active' : ''}`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="jarvis-segmented" role="group" aria-label="Filtrar por status">
-              {([
-                { id: 'all', label: 'Todos' },
-                { id: 'active', label: 'Ativas' },
-                { id: 'inactive', label: 'Inativas' },
-              ] as const).map((st) => (
-                <button
-                  key={st.id}
-                  type="button"
-                  onClick={() => setStatus(st.id)}
-                  className={`jarvis-segmented-btn ${status === st.id ? 'is-active' : ''}`}
-                >
-                  {st.label}
-                </button>
-              ))}
-            </div>
-          </div>
+        <div className="jarvis-segmented" role="group" aria-label="Filtrar por status">
+          {([
+            { id: 'all', label: 'Todos' },
+            { id: 'active', label: 'Ativas' },
+            { id: 'inactive', label: 'Inativas' },
+          ] as const).map((st) => (
+            <button
+              key={st.id}
+              type="button"
+              onClick={() => setStatus(st.id)}
+              className={`jarvis-segmented-btn ${status === st.id ? 'is-active' : ''}`}
+            >
+              {st.label}
+            </button>
+          ))}
         </div>
+      </div>
+
+      {/* Category Filter Tabs with Counts */}
+      <div
+        className="jarvis-segmented jarvis-store-segmented"
+        role="group"
+        aria-label="Filtrar por categoria"
+      >
+        {CATEGORY_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setCategory(tab.id)}
+            className={`jarvis-segmented-btn ${category === tab.id ? 'is-active' : ''}`}
+          >
+            <span>
+              {tab.label} ({categoryCounts[tab.id] ?? 0})
+            </span>
+          </button>
+        ))}
       </div>
 
       {error && (
@@ -322,14 +363,7 @@ export const SkillsCatalogPanel: React.FC<SkillsCatalogPanelProps> = ({
           </button>
         </div>
       ) : (
-        <div
-          className="jarvis-pack-grid"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 320px), 1fr))',
-            gap: '16px',
-          }}
-        >
+        <div className="jarvis-store-grid">
           {filtered.map((skill) => (
             <SkillCard
               key={skill.id}

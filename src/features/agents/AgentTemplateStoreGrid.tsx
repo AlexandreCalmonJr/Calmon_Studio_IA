@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import {
-  CheckCircle2,
-  Download,
   Eye,
+  MessageSquare,
+  Plus,
   Search,
   Sparkles,
   Trash2,
@@ -17,6 +17,7 @@ import {
   canUninstallAgent,
   filterAgentTemplates,
   findInstalledAgentForTemplate,
+  isTemplateInstalled,
 } from '../../services/agentTemplates';
 import { deleteAgent } from '../../services/api/agents';
 import { MascotAvatar } from '../../shared/common/MascotAvatar';
@@ -28,12 +29,24 @@ interface AgentTemplateStoreGridProps {
   installedAgents: AgentInfo[];
   onRefreshAgents: () => Promise<void> | void;
   onOpenChat?: (agent: AgentInfo) => void;
+  variant?: 'default' | 'store';
 }
+
+const CATEGORY_SHORT_BADGES: Record<Exclude<AgentTemplateCategory, 'all'>, string> = {
+  dia_a_dia: 'DIA A DIA',
+  estudos: 'ESTUDOS',
+  financas: 'FINANÇAS',
+  criativo: 'CRIATIVO',
+  dados: 'DADOS & BI',
+  tecnologia: 'ENGENHARIA',
+  seguranca: 'SEGURANÇA',
+};
 
 export const AgentTemplateStoreGrid: React.FC<AgentTemplateStoreGridProps> = ({
   installedAgents,
   onRefreshAgents,
   onOpenChat,
+  variant = 'store',
 }) => {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<AgentTemplateCategory>('all');
@@ -56,13 +69,25 @@ export const AgentTemplateStoreGrid: React.FC<AgentTemplateStoreGridProps> = ({
     [search, category, onlyAvailable, installedAgents]
   );
 
-  const installedCount = useMemo(
-    () =>
-      AGENT_TEMPLATE_LIBRARY.filter((tpl) =>
-        Boolean(findInstalledAgentForTemplate(tpl, installedAgents))
-      ).length,
-    [installedAgents]
-  );
+  const categoryCounts = useMemo(() => {
+    const base = onlyAvailable
+      ? AGENT_TEMPLATE_LIBRARY.filter((tpl) => !isTemplateInstalled(tpl, installedAgents))
+      : AGENT_TEMPLATE_LIBRARY;
+    const counts: Record<AgentTemplateCategory, number> = {
+      all: base.length,
+      dia_a_dia: 0,
+      estudos: 0,
+      financas: 0,
+      criativo: 0,
+      dados: 0,
+      tecnologia: 0,
+      seguranca: 0,
+    };
+    for (const tpl of base) {
+      counts[tpl.category] = (counts[tpl.category] || 0) + 1;
+    }
+    return counts;
+  }, [onlyAvailable, installedAgents]);
 
   const handleConfirmUninstall = async () => {
     if (!pendingUninstall) return;
@@ -81,50 +106,16 @@ export const AgentTemplateStoreGrid: React.FC<AgentTemplateStoreGridProps> = ({
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      {/* Faixa explicativa direta para usuários comuns */}
-      <div
-        className="jarvis-callout jarvis-callout--info"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '12px',
-          flexWrap: 'wrap',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: '1 1 280px' }}>
-          <Sparkles size={16} color="var(--accent-light)" style={{ flexShrink: 0 }} />
-          <span>
-            <strong style={{ color: 'var(--text-primary)' }}>
-              Prontos para usar em 1 clique:
-            </strong>{' '}
-            clique em <strong>Instalar</strong> para ver todas as habilidades, exemplos e ativar o
-            agente sem preencher formulários. Você pode desinstalar os que não usar quando quiser.
-          </span>
-        </div>
-        <span
-          className="jarvis-tabular"
-          style={{
-            fontSize: '0.76rem',
-            fontFamily: 'var(--font-mono)',
-            color: 'var(--accent-light)',
-            fontWeight: 600,
-          }}
-        >
-          {installedAgents.length} na equipe · {AGENT_TEMPLATE_LIBRARY.length - installedCount} disponíveis na loja
-        </span>
-      </div>
-
-      {/* Barra de Busca e Filtros */}
-      <div className="jarvis-filter-bar">
-        <div className="jarvis-search-box" style={{ flex: '1 1 240px', maxWidth: '380px' }}>
-          <Search size={14} />
+    <div className="jarvis-store-controls" style={{ gap: '16px' }}>
+      {/* Barra de Busca e Filtro Disponíveis */}
+      <div className="jarvis-store-search-row">
+        <div className="jarvis-search-box jarvis-store-search-input">
+          <Search size={15} />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar agente ou habilidade (ex.: geladeira, inglês, contrato, Excel...)"
+            placeholder="Buscar agente por nome, especialidade ou missão..."
             aria-label="Buscar templates de agentes prontos"
             className="jarvis-search-box__input"
           />
@@ -134,9 +125,9 @@ export const AgentTemplateStoreGrid: React.FC<AgentTemplateStoreGridProps> = ({
               onClick={() => setSearch('')}
               className="btn btn-ghost btn-icon-sm"
               aria-label="Limpar busca de templates"
-              style={{ width: '22px', height: '22px', padding: 0 }}
+              style={{ width: '24px', height: '24px', padding: 0 }}
             >
-              <X size={12} />
+              <X size={13} />
             </button>
           )}
         </div>
@@ -146,7 +137,7 @@ export const AgentTemplateStoreGrid: React.FC<AgentTemplateStoreGridProps> = ({
             display: 'inline-flex',
             alignItems: 'center',
             gap: '7px',
-            fontSize: '0.78rem',
+            fontSize: '0.8rem',
             color: 'var(--text-secondary)',
             cursor: 'pointer',
             userSelect: 'none',
@@ -157,16 +148,15 @@ export const AgentTemplateStoreGrid: React.FC<AgentTemplateStoreGridProps> = ({
             checked={onlyAvailable}
             onChange={(e) => setOnlyAvailable(e.target.checked)}
           />
-          <span>Somente disponíveis para instalar</span>
+          <span>Somente não instalados</span>
         </label>
       </div>
 
-      {/* Abas de Categoria */}
+      {/* Abas de Categoria com Contagem */}
       <div
-        className="jarvis-segmented"
+        className="jarvis-segmented jarvis-store-segmented"
         role="tablist"
         aria-label="Categorias da biblioteca de agentes prontos"
-        style={{ overflowX: 'auto', flexWrap: 'nowrap', maxWidth: '100%' }}
       >
         {TEMPLATE_CATEGORY_TABS.map((tab) => (
           <button
@@ -176,14 +166,15 @@ export const AgentTemplateStoreGrid: React.FC<AgentTemplateStoreGridProps> = ({
             aria-selected={category === tab.id}
             onClick={() => setCategory(tab.id)}
             className={`jarvis-segmented-btn ${category === tab.id ? 'is-active' : ''}`}
-            style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
           >
-            {tab.label}
+            <span>
+              {tab.label} ({categoryCounts[tab.id] ?? 0})
+            </span>
           </button>
         ))}
       </div>
 
-      {/* Grid de Cards */}
+      {/* Grid de Cards em 2 Colunas */}
       {filteredTemplates.length === 0 ? (
         <div className="jarvis-empty-state">
           <Sparkles size={22} color="var(--text-muted)" />
@@ -199,17 +190,11 @@ export const AgentTemplateStoreGrid: React.FC<AgentTemplateStoreGridProps> = ({
               setOnlyAvailable(false);
             }}
           >
-            Mostrar todos os templates
+            Mostrar todos os agentes
           </button>
         </div>
       ) : (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 320px), 1fr))',
-            gap: '14px',
-          }}
-        >
+        <div className="jarvis-store-grid" data-store-variant={variant}>
           {filteredTemplates.map((tpl) => {
             const installedMatch = findInstalledAgentForTemplate(tpl, installedAgents);
             const isInstalled = Boolean(installedMatch);
@@ -218,201 +203,91 @@ export const AgentTemplateStoreGrid: React.FC<AgentTemplateStoreGridProps> = ({
             return (
               <article
                 key={tpl.templateId}
-                className="jarvis-settings-card"
-                style={{
-                  justifyContent: 'space-between',
-                  gap: '12px',
-                  minWidth: 0,
-                  borderColor: isInstalled ? 'rgba(16, 185, 129, 0.32)' : undefined,
-                }}
+                className={`jarvis-store-card ${isInstalled ? 'is-installed' : ''}`}
               >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', minWidth: 0 }}>
-                  {/* Cabeçalho */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                {/* Cabeçalho: Avatar + Título/Subtítulo + Tag Uppercase */}
+                <div className="jarvis-store-card__header">
+                  <div className="jarvis-store-card__identity">
                     <MascotAvatar
                       mascot={tpl.mascot}
                       role={tpl.role}
                       name={tpl.proper_name}
-                      size={46}
+                      size={40}
                     />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: '6px',
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', minWidth: 0 }}>
-                          <h3
-                            style={{
-                              margin: 0,
-                              fontSize: '0.96rem',
-                              fontWeight: 700,
-                              color: 'var(--text-primary)',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            {tpl.proper_name}
-                          </h3>
-                          <span
-                            style={{
-                              fontSize: '0.72rem',
-                              fontFamily: 'var(--font-mono)',
-                              color: 'var(--accent-light)',
-                              fontWeight: 600,
-                              flexShrink: 0,
-                            }}
-                          >
-                            {tpl.handle}
-                          </span>
-                        </div>
-
-                        {isInstalled ? (
-                          <span
-                            style={{
-                              fontSize: '0.67rem',
-                              fontWeight: 700,
-                              padding: '2px 7px',
-                              borderRadius: '6px',
-                              backgroundColor: 'rgba(16, 185, 129, 0.14)',
-                              border: '1px solid rgba(16, 185, 129, 0.35)',
-                              color: '#34d399',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                              flexShrink: 0,
-                            }}
-                          >
-                            <CheckCircle2 size={11} /> Instalado
-                          </span>
-                        ) : (
-                          <span
-                            style={{
-                              fontSize: '0.66rem',
-                              fontWeight: 600,
-                              padding: '2px 7px',
-                              borderRadius: '6px',
-                              backgroundColor: 'var(--bg-tertiary)',
-                              border: '1px solid var(--border-color)',
-                              color: 'var(--text-muted)',
-                              flexShrink: 0,
-                            }}
-                          >
-                            {tpl.audience}
-                          </span>
-                        )}
+                    <div className="jarvis-store-card__titles">
+                      <div className="jarvis-store-card__title-row">
+                        <h3 className="jarvis-store-card__title">{tpl.proper_name}</h3>
+                        <span className="jarvis-store-card__handle">{tpl.handle}</span>
                       </div>
-
-                      <div
-                        style={{
-                          fontSize: '0.77rem',
-                          color: 'var(--text-secondary)',
-                          marginTop: '2px',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {tpl.title}
-                      </div>
+                      <div className="jarvis-store-card__subtitle">{tpl.title}</div>
                     </div>
                   </div>
 
-                  {/* Descrição curta */}
-                  <p
-                    style={{
-                      margin: 0,
-                      fontSize: '0.81rem',
-                      color: 'var(--text-secondary)',
-                      lineHeight: 1.48,
-                    }}
+                  <span
+                    className={`jarvis-store-card__badge ${isInstalled ? 'is-active' : ''}`}
                   >
-                    {tpl.tagline}
-                  </p>
-
-                  {/* Preview rápido das Habilidades */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                    <span
-                      style={{
-                        fontSize: '0.68rem',
-                        fontFamily: 'var(--font-mono)',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.04em',
-                        color: 'var(--text-muted)',
-                      }}
-                    >
-                      {tpl.skills.length} habilidades prontas
-                    </span>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
-                      {tpl.skills.slice(0, 3).map((sk) => (
-                        <span
-                          key={sk.id}
-                          style={{
-                            fontSize: '0.71rem',
-                            padding: '3px 8px',
-                            borderRadius: '6px',
-                            backgroundColor: 'var(--bg-primary)',
-                            border: '1px solid var(--border-subtle)',
-                            color: 'var(--text-secondary)',
-                          }}
-                        >
-                          {sk.name}
-                        </span>
-                      ))}
-                      {tpl.skills.length > 3 && (
-                        <span
-                          style={{
-                            fontSize: '0.71rem',
-                            padding: '3px 8px',
-                            borderRadius: '6px',
-                            backgroundColor: 'var(--accent-soft)',
-                            border: '1px solid var(--border-accent)',
-                            color: 'var(--accent-light)',
-                            fontWeight: 600,
-                          }}
-                        >
-                          +{tpl.skills.length - 3} mais
-                        </span>
-                      )}
-                    </div>
-                  </div>
+                    {isInstalled ? 'INSTALADO' : CATEGORY_SHORT_BADGES[tpl.category]}
+                  </span>
                 </div>
 
+                {/* Descrição concisa */}
+                <p className="jarvis-store-card__desc">{tpl.tagline || tpl.mission}</p>
+
                 {/* Rodapé de Ações */}
-                <div style={{ display: 'flex', gap: '8px', paddingTop: '6px' }}>
+                <div className="jarvis-store-card__footer">
                   {!isInstalled ? (
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      style={{ flex: 1 }}
-                      onClick={() => setPreviewTemplate(tpl)}
-                    >
-                      <Download size={13} />
-                      <span>Instalar</span>
-                    </button>
-                  ) : (
                     <>
                       <button
                         type="button"
-                        className="btn btn-secondary btn-sm"
-                        style={{ flex: 1 }}
+                        className="btn btn-secondary btn-sm jarvis-store-card__primary-btn"
                         onClick={() => setPreviewTemplate(tpl)}
                       >
-                        <Eye size={13} />
-                        <span>Ver habilidades</span>
+                        <Plus size={14} />
+                        <span>Instalar na equipe</span>
                       </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm jarvis-store-card__secondary-btn"
+                        onClick={() => setPreviewTemplate(tpl)}
+                      >
+                        <span className="jarvis-tabular">{tpl.skills.length} skills</span>
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      {onOpenChat && installedMatch ? (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm jarvis-store-card__primary-btn"
+                          onClick={() => onOpenChat(installedMatch)}
+                        >
+                          <MessageSquare size={14} />
+                          <span>Conversar</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm jarvis-store-card__primary-btn"
+                          onClick={() => setPreviewTemplate(tpl)}
+                        >
+                          <Eye size={14} />
+                          <span>Ver habilidades</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm jarvis-store-card__secondary-btn"
+                        onClick={() => setPreviewTemplate(tpl)}
+                      >
+                        <span>Habilidades</span>
+                      </button>
+
                       {installedMatch && allowUninstall && (
                         <button
                           type="button"
-                          className="btn btn-ghost btn-sm"
-                          style={{
-                            color: '#f87171',
-                            borderColor: 'rgba(239, 68, 68, 0.28)',
-                          }}
+                          className="btn btn-danger-ghost btn-icon-sm"
+                          title={`Desinstalar ${tpl.proper_name}`}
                           aria-label={`Desinstalar ${tpl.proper_name}`}
                           onClick={() =>
                             setPendingUninstall({
@@ -421,8 +296,7 @@ export const AgentTemplateStoreGrid: React.FC<AgentTemplateStoreGridProps> = ({
                             })
                           }
                         >
-                          <Trash2 size={13} />
-                          <span>Desinstalar</span>
+                          <Trash2 size={14} />
                         </button>
                       )}
                     </>

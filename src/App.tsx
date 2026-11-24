@@ -172,7 +172,7 @@ const BrainServerHubView = lazy(() =>
 /**
  * Telas que ocupam toda a área útil com layout e cabeçalho internos próprios.
  */
-const FULLSCREEN_TABS = new Set(['chat', 'workflows', 'settings', 'learning', 'skills']);
+const FULLSCREEN_TABS = new Set(['chat', 'workflows', 'settings', 'learning', 'skills', 'store']);
 const NO_HEADER_TABS = new Set(['chat', 'workflows']);
 
 const TAB_LABELS: Record<string, { section: string; title: string }> = {
@@ -577,15 +577,25 @@ const DashboardApp: React.FC = () => {
       navigate('brain_server');
     };
 
+    const handleOpenAgentChat = (e: Event) => {
+      const detail = (e as CustomEvent<{ agentId?: string }>).detail;
+      if (detail?.agentId) {
+        setTargetChatSessionId(`agent_${detail.agentId}`);
+        navigate('chat');
+      }
+    };
+
     window.addEventListener('popstate', handlePopState);
     window.addEventListener('keydown', handleGlobalKeyDown);
     window.addEventListener('jarvis:open-android-pairing', handleOpenAndroidPairing);
     window.addEventListener('jarvis:open-brain-manager', handleOpenBrainManager);
+    window.addEventListener('jarvis:open-agent-chat', handleOpenAgentChat);
     return () => {
       window.removeEventListener('popstate', handlePopState);
       window.removeEventListener('keydown', handleGlobalKeyDown);
       window.removeEventListener('jarvis:open-android-pairing', handleOpenAndroidPairing);
       window.removeEventListener('jarvis:open-brain-manager', handleOpenBrainManager);
+      window.removeEventListener('jarvis:open-agent-chat', handleOpenAgentChat);
     };
   }, []);
 
@@ -1064,7 +1074,14 @@ const DashboardApp: React.FC = () => {
                   {activeTab === 'workflows' && <WorkflowCanvasView />}
                   {activeTab === 'usage' && <UsageAnalyticsView />}
                   {activeTab === 'store' && (
-                    <PackStoreView onNavigate={navigate} canManagePacks={canManagePacks} />
+                    <PackStoreView
+                      onNavigate={navigate}
+                      canManagePacks={canManagePacks}
+                      onOpenAgentChat={(agentRole) => {
+                        setTargetChatSessionId(`agent_${agentRole}`);
+                        navigate('chat');
+                      }}
+                    />
                   )}
                   {activeTab === 'pack_studio' &&
                     (canManagePacks ? (
