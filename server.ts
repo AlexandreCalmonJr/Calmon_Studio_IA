@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express, { Request, Response, NextFunction } from 'express';
 import { createServer as createViteServer } from 'vite';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -305,7 +306,16 @@ export async function startServer() {
 }
 
 // Inicia o servidor se executado diretamente
-if (process.env.NODE_ENV !== 'test') {
+const isDirectRun = (): boolean => {
+  if (process.env.NODE_ENV === 'test') return false;
+  try {
+    return Boolean(process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]));
+  } catch {
+    return false;
+  }
+};
+
+if (isDirectRun()) {
   startServer().catch((err) => {
     console.error('Failed to start JARVIS AI Hub server:', err);
     process.exit(1);

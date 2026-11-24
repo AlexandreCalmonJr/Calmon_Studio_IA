@@ -12,6 +12,32 @@ export default defineConfig({
   optimizeDeps: {
     include: ['react', 'react-dom', 'qrcode', 'lucide-react'],
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          const norm = id.replace(/\\/g, '/');
+          if (norm.includes('node_modules')) {
+            if (norm.includes('/react/') || norm.includes('/react-dom/') || norm.includes('/scheduler/')) {
+              return 'vendor-react';
+            }
+            if (norm.includes('/recharts/') || norm.includes('/d3-')) {
+              return 'vendor-charts';
+            }
+            if (norm.includes('/@firebase/firestore') || norm.includes('/firebase/firestore')) {
+              return 'vendor-firestore';
+            }
+            if (norm.includes('/firebase/') || norm.includes('/@firebase/')) {
+              return 'vendor-firebase';
+            }
+            if (norm.includes('/lucide-react/')) {
+              return 'vendor-icons';
+            }
+          }
+        },
+      },
+    },
+  },
   plugins: [
     {
       name: 'disable-vite-client-ws-when-hmr-off',

@@ -43,6 +43,7 @@ import { VoiceLiveHudModal } from './features/companion/VoiceLiveHudModal';
 import { ErrorBanner } from './shared/layout/StateFeedback';
 import { pathForTab, tabFromLocation } from './router';
 import { API_BASE } from './services/api/client';
+import { subscribeJarvisRealtime } from './services/api/brain';
 import { apiFetch } from './services/sessionTransport';
 import { getAccountStorageKey } from './services/accountScope';
 import {
@@ -627,10 +628,46 @@ const DashboardApp: React.FC = () => {
 
   useEffect(() => {
     loadData({ initial: true });
+
+    // Polling suavizado para 60 segundos (reduzindo sobrecarga de requisições de 8s para 60s)
     const interval = setInterval(() => {
       if (document.visibilityState === 'visible') loadData();
-    }, 8000);
-    return () => clearInterval(interval);
+    }, 60000);
+
+    // Revalidação imediata quando o usuário retorna o foco à aba
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadData();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Sincronização inteligente acionada por eventos do canal WebSocket em tempo real (com debounce contra rajadas)
+    let wsDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribeWs = subscribeJarvisRealtime((event) => {
+      if (
+        event.type === 'sentinel_incident' ||
+        event.type === 'companion_update' ||
+        event.type === 'office_agent_event' ||
+        event.type === 'roundtable_started' ||
+        event.type === 'roundtable_verdict' ||
+        event.type === 'connected'
+      ) {
+        if (document.visibilityState === 'visible') {
+          if (wsDebounceTimer) clearTimeout(wsDebounceTimer);
+          wsDebounceTimer = setTimeout(() => {
+            loadData();
+          }, 1000);
+        }
+      }
+    });
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (wsDebounceTimer) clearTimeout(wsDebounceTimer);
+      unsubscribeWs();
+    };
   }, []);
 
   const pendingApprovalsCount = approvals.filter((a) => a.status === 'pending').length;

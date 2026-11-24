@@ -1,5 +1,3 @@
-import PptxGenJS from 'pptxgenjs';
-import { jsPDF } from 'jspdf';
 import type { StructuredArtifactPayload } from '../../server/artifactEngine';
 
 function slugifyFilename(title: string, ext: string): string {
@@ -14,6 +12,8 @@ function slugifyFilename(title: string, ext: string): string {
 }
 
 export async function exportArtifactToPptx(artifact: StructuredArtifactPayload): Promise<string> {
+  const pptxModule = await import('pptxgenjs');
+  const PptxGenJS = (typeof pptxModule.default === 'function' ? pptxModule.default : (pptxModule.default as any)?.default || pptxModule) as any;
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_16x9';
   pptx.author = artifact.author || 'JARVIS AI Hub';
@@ -58,7 +58,7 @@ export async function exportArtifactToPptx(artifact: StructuredArtifactPayload):
     color: '9CA3AF',
     fontFace: 'Calibri',
   });
-  cover.addText(`${artifact.author} · ${new Date(artifact.created_at).toLocaleDateString('pt-BR')}`, {
+  cover.addText(`${artifact.author || 'JARVIS AI Hub'} · ${new Date(artifact.created_at || Date.now()).toLocaleDateString('pt-BR')}`, {
     x: 0.7,
     y: 4.85,
     w: 8.0,
@@ -126,7 +126,9 @@ export async function exportArtifactToPptx(artifact: StructuredArtifactPayload):
   return filename;
 }
 
-export function exportArtifactToPdf(artifact: StructuredArtifactPayload): string {
+export async function exportArtifactToPdf(artifact: StructuredArtifactPayload): Promise<string> {
+  const jspdfModule = await import('jspdf');
+  const jsPDF = jspdfModule.jsPDF || (jspdfModule.default as any)?.jsPDF || jspdfModule.default;
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
@@ -149,7 +151,7 @@ export function exportArtifactToPdf(artifact: StructuredArtifactPayload): string
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10.5);
   doc.text(
-    `${artifact.subtitle || 'Documento Gerado'}  ·  ${artifact.author}  ·  ${new Date(artifact.created_at).toLocaleDateString('pt-BR')}`,
+    `${artifact.subtitle || 'Documento Gerado'}  ·  ${artifact.author || 'JARVIS AI Hub'}  ·  ${new Date(artifact.created_at || Date.now()).toLocaleDateString('pt-BR')}`,
     margin,
     104
   );

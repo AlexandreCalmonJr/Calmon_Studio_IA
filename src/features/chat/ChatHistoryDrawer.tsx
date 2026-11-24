@@ -22,6 +22,42 @@ export interface LocalSessionMeta {
 }
 
 export const STORAGE_CATALOG_KEY = 'jarvis_sessions_catalog_v1';
+export const MAX_PERSISTED_MESSAGES_PER_SESSION = 100;
+export const MAX_PERSISTED_CATALOG_ITEMS = 60;
+
+/**
+ * Detecta se uma exceção do localStorage é decorrente de quota estourada no navegador.
+ */
+export function isQuotaExceededError(err: unknown): boolean {
+  if (!err) return false;
+  if (typeof err === 'object') {
+    const error = err as any;
+    if (
+      error.name === 'QuotaExceededError' ||
+      error.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+      error.code === 22 ||
+      error.code === 1014
+    ) {
+      return true;
+    }
+    if (typeof error.message === 'string' && /quota|storage full|exceeded/i.test(error.message)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Limita o número de mensagens para persistência local mantendo as mais recentes.
+ */
+export function clampMessagesForPersistence(
+  messages: ChatMessage[],
+  maxCount: number = MAX_PERSISTED_MESSAGES_PER_SESSION
+): ChatMessage[] {
+  if (!Array.isArray(messages)) return [];
+  if (messages.length <= maxCount) return messages;
+  return messages.slice(-maxCount);
+}
 
 export function getLocalSessionsCatalog(): LocalSessionMeta[] {
   try {
@@ -36,19 +72,190 @@ export function getLocalSessionsCatalog(): LocalSessionMeta[] {
   return [];
 }
 
-export function saveLocalSessionsCatalog(catalog: LocalSessionMeta[]): void {
+/**
+ * Descarta as sessões locais mais antigas para liberar quota no localStorage.
+ * Retorna a quantidade de sessões descartadas.
+ */
+export function pruneOldestLocalSessions(
+  keepSessionId?: string,
+  countToPrune: number = 3
+): number {
   try {
-    localStorage.setItem(getAccountStorageKey(STORAGE_CATALOG_KEY), JSON.stringify(catalog));
+    const catalog = getLocalSessionsCatalog();
+    let pruned = 0;
+    const remainingCatalog: LocalSessionMeta[] = [];
+
+    if (catalog && catalog.length > 0) {
+      // Ordena do mais antigo para o mais recente
+      const sorted = [...catalog].sort((a, b) => {
+        const timeA = new Date(a.updatedAt || a.createdAt || 0).getTime() || 0;
+        const timeB = new Date(b.updatedAt || b.createdAt || 0).getTime() || 0;
+        return timeA - timeB;
+      });
+
+      for (const session of sorted) {
+        if (session.id !== keepSessionId && pruned < countToPrune) {
+          try {
+            localStorage.removeItem(getAccountStorageKey(`jarvis_session_messages_${session.id}`));
+          } catch {
+            // ignore
+          }
+          pruned++;
+        } else {
+          remainingCatalog.push(session);
+        }
+      }
+
+      if (pruned > 0) {
+        // Reordena pelo mais recente para o catálogo remanescente
+        remainingCatalog.sort((a, b) => {
+          const timeA = new Date(a.updatedAt || a.createdAt || 0).getTime() || 0;
+          const timeB = new Date(b.updatedAt || b.createdAt || 0).getTime() || 0;
+          return timeB - timeA;
+        });
+        saveLocalSessionsCatalog(remainingCatalog);
+      }
+    }
+
+    // Se ainda precisa purgar ou o catálogo estava vazio/só continha a sessão ativa,
+    // busca por chaves órfãs de mensagens no localStorage que não pertençam à sessão ativa
+    if (pruned < countToPrune && typeof localStorage !== 'undefined') {
+      try {
+        const accountSuffix = getAccountStorageKey('__probe__').slice('__probe__'.length);
+        const prefix = 'jarvis_session_messages_';
+        const activeKey = keepSessionId ? getAccountStorageKey(`jarvis_session_messages_${keepSessionId}`) : null;
+        const keysToRemove: string[] = [];
+
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith(prefix) && key.endsWith(accountSuffix) && key !== activeKey) {
+            keysToRemove.push(key);
+            if (pruned + keysToRemove.length >= countToPrune) break;
+          }
+        }
+
+        for (const k of keysToRemove) {
+          try {
+            localStorage.removeItem(k);
+            pruned++;
+          } catch {
+            // ignore
+          }
+        }
+      } catch {
+        // ignore localStorage scan issues
+      }
+    }
+
+    return pruned;
   } catch (e) {
-    console.warn('Erro ao salvar catálogo local de sessões:', e);
+    console.warn('Erro ao descartar sessões antigas para liberar quota:', e);
+    return 0;
   }
 }
 
-export function saveSessionMessagesLocally(sessionId: string, messages: ChatMessage[]): void {
+export function saveLocalSessionsCatalog(catalog: LocalSessionMeta[]): void {
   try {
-    localStorage.setItem(getAccountStorageKey(`jarvis_session_messages_${sessionId}`), JSON.stringify(messages));
+    const list = Array.isArray(catalog) ? catalog : [];
+    const clamped = list.slice(0, MAX_PERSISTED_CATALOG_ITEMS);
+
+    // Remove mensagens de sessões que foram cortadas além do teto do catálogo
+    if (list.length > MAX_PERSISTED_CATALOG_ITEMS) {
+      const dropped = list.slice(MAX_PERSISTED_CATALOG_ITEMS);
+      for (const d of dropped) {
+        if (d && d.id) {
+          try {
+            localStorage.removeItem(getAccountStorageKey(`jarvis_session_messages_${d.id}`));
+          } catch {
+            // ignore
+          }
+        }
+      }
+    }
+
+    localStorage.setItem(getAccountStorageKey(STORAGE_CATALOG_KEY), JSON.stringify(clamped));
   } catch (e) {
-    console.warn('Erro ao persistir mensagens da sessão:', e);
+    if (isQuotaExceededError(e)) {
+      console.warn('[QuotaExceededError] Quota estourada ao salvar catálogo. Reduzindo para itens essenciais...');
+      try {
+        const minimal = (Array.isArray(catalog) ? catalog : []).slice(0, 20);
+        localStorage.setItem(getAccountStorageKey(STORAGE_CATALOG_KEY), JSON.stringify(minimal));
+      } catch (inner) {
+        console.warn('Falha ao salvar catálogo mínimo:', inner);
+      }
+    } else {
+      console.warn('Erro ao salvar catálogo local de sessões:', e);
+    }
+  }
+}
+
+export function saveSessionMessagesLocally(sessionId: string, messages: ChatMessage[]): boolean {
+  if (!sessionId) return false;
+  const storageKey = getAccountStorageKey(`jarvis_session_messages_${sessionId}`);
+  let messagesToSave = clampMessagesForPersistence(messages, MAX_PERSISTED_MESSAGES_PER_SESSION);
+
+  // Tentativa primária: salvar respeitando o teto de 100 mensagens
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(messagesToSave));
+    return true;
+  } catch (e) {
+    if (!isQuotaExceededError(e)) {
+      console.warn('Erro ao persistir mensagens da sessão:', e);
+      return false;
+    }
+    console.warn(`[QuotaExceededError] Quota do localStorage atingida para ${sessionId}. Iniciando purga defensiva...`);
+  }
+
+  // Nível 1: purga das 3 sessões mais antigas
+  pruneOldestLocalSessions(sessionId, 3);
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(messagesToSave));
+    return true;
+  } catch (e2) {
+    if (!isQuotaExceededError(e2)) {
+      console.warn('Erro após purga nível 1:', e2);
+      return false;
+    }
+  }
+
+  // Nível 2: purga de mais 5 sessões e redução defensiva para 50 mensagens
+  pruneOldestLocalSessions(sessionId, 5);
+  messagesToSave = clampMessagesForPersistence(messages, 50);
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(messagesToSave));
+    return true;
+  } catch (e3) {
+    if (!isQuotaExceededError(e3)) {
+      console.warn('Erro após purga nível 2:', e3);
+      return false;
+    }
+  }
+
+  // Nível 3: emergência — descarte agressivo mantendo apenas as últimas 15 mensagens
+  messagesToSave = clampMessagesForPersistence(messages, 15);
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(messagesToSave));
+    return true;
+  } catch (e4) {
+    if (!isQuotaExceededError(e4)) {
+      console.warn('Erro após purga nível 3:', e4);
+      return false;
+    }
+  }
+
+  // Nível 4: emergência máxima — compactação removendo metadados pesados (ex: taskData volumoso)
+  // e retendo as últimas 8 mensagens essenciais
+  try {
+    const compactMessages: ChatMessage[] = clampMessagesForPersistence(messages, 8).map((m) => ({
+      sender: m.sender,
+      text: typeof m.text === 'string' && m.text.length > 2000 ? m.text.slice(0, 2000) + '... [truncado por quota]' : m.text,
+      timestamp: m.timestamp,
+    }));
+    localStorage.setItem(storageKey, JSON.stringify(compactMessages));
+    return true;
+  } catch (finalErr) {
+    console.error('Falha crítica de quota no localStorage mesmo após compactação extrema:', finalErr);
+    return false;
   }
 }
 
