@@ -82,8 +82,10 @@ const SAMPLE_PACKS: ModulePackWithState[] = [
     agents: [],
     skills: ['clean_architecture'],
     mcp_presets: [],
+    workflows: [],
     study_tracks: [],
     installed: true,
+    installed_at: '2026-01-01T00:00:00.000Z',
   },
   {
     id: 'pack_sec',
@@ -98,8 +100,10 @@ const SAMPLE_PACKS: ModulePackWithState[] = [
     agents: [],
     skills: ['owasp_sec_audit'],
     mcp_presets: [],
+    workflows: [],
     study_tracks: [],
     installed: false,
+    installed_at: null,
   },
 ];
 

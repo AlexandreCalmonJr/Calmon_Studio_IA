@@ -6,4 +6,5 @@ dev-dist
 .jarvis-brain/*.db-shm
 .jarvis-brain/workspaces/*/*.db-wal
 .jarvis-brain/workspaces/*/*.db-shm
+test-results/
 
