@@ -57,6 +57,12 @@ import {
   validateProviderBaseUrl,
 } from './server/providerEngine.ts';
 import {
+  handleGlobalServerError,
+  isBootstrapAdminUser,
+  parseCookies,
+  verifyWebSocketUpgrade,
+} from './server/serverHardening.ts';
+import {
   AssistantPeer,
   AssistantRelayMessage,
   BrainLayer,
@@ -1170,19 +1176,6 @@ let tasksList: Array<Record<string, unknown>> = [
   },
 ];
 
-function parseCookies(header?: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (!header) return out;
-  for (const part of header.split(';')) {
-    const idx = part.indexOf('=');
-    if (idx === -1) continue;
-    const key = part.slice(0, idx).trim();
-    const val = decodeURIComponent(part.slice(idx + 1).trim());
-    out[key] = val;
-  }
-  return out;
-}
-
 function getSessionFromReq(req: Request): SessionRecord | null {
   const cookies = parseCookies(req.headers.cookie);
   const headerToken = String(req.headers['x-jarvis-session'] || '').trim();
@@ -1432,7 +1425,7 @@ function buildApiRouter() {
     }
 
     const username = `fb_${uid.slice(0, 20).toLowerCase()}`;
-    const isBootstrappedAdmin = email_verified && email === 'alexandrecalmonjunior@gmail.com';
+    const isBootstrappedAdmin = isBootstrapAdminUser(email_verified, email, process.env.BOOTSTRAP_ADMIN_EMAIL);
     const role: 'admin' | 'developer' = isBootstrappedAdmin ? 'admin' : 'developer';
 
     let user = users.get(username);
@@ -1450,9 +1443,14 @@ function buildApiRouter() {
         assistantGreeting: '',
         experienceMode: isBootstrappedAdmin ? 'engineering' : 'simple',
       });
-    } else if (!user.is_active) {
-      res.status(403).json({ detail: 'Conta desativada pelo administrador.' });
-      return;
+    } else {
+      if (isBootstrappedAdmin && user.role !== 'admin') {
+        user.role = 'admin';
+      }
+      if (!user.is_active) {
+        res.status(403).json({ detail: 'Conta desativada pelo administrador.' });
+        return;
+      }
     }
 
     const record = createSessionForUser(req, res, user);
@@ -7915,6 +7913,11 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
+  // Global Error Handler Middleware (Standardized JSON Error Envelope)
+  app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+    handleGlobalServerError(err, req, res, next);
+  });
+
   const server = http.createServer(app);
   const wss = new WebSocketServer({ noServer: true });
 
@@ -7931,12 +7934,50 @@ async function startServer() {
   });
 
   server.on('upgrade', (request, socket, head) => {
-    const urlPath = (request.url || '').split('?')[0];
-    if (urlPath === '/ws') {
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        wss.emit('connection', ws, request);
-      });
-    } else {
+    socket.on('error', () => {
+      socket.destroy();
+    });
+
+    try {
+      const urlPath = (request.url || '').split('?')[0];
+      if (urlPath === '/ws') {
+        const upgradeCheck = verifyWebSocketUpgrade(request, {
+          isProduction: process.env.NODE_ENV === 'production',
+          sessionMap: sessions,
+          userMap: users,
+        });
+
+        if (!upgradeCheck.authorized) {
+          if (socket.writable) {
+            socket.write(
+              'HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n{"error":"Unauthorized WebSocket connection"}\r\n'
+            );
+          }
+          socket.destroy();
+          return;
+        }
+
+        wss.handleUpgrade(request, socket, head, (ws) => {
+          if (upgradeCheck.session) {
+            (ws as WebSocket & { jarvisSession?: SessionRecord }).jarvisSession = upgradeCheck.session;
+          }
+          wss.emit('connection', ws, request);
+        });
+      } else {
+        if (socket.writable) {
+          socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
+        }
+        socket.destroy();
+      }
+    } catch (err) {
+      console.error('[JARVIS WebSocket Upgrade Error]:', err);
+      try {
+        if (socket.writable) {
+          socket.write('HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n');
+        }
+      } catch {
+        // ignore write failure
+      }
       socket.destroy();
     }
   });

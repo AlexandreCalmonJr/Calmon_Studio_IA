@@ -33,8 +33,14 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    // Bootstrapped administrator fallback.
+    // In server runtime (Node.js): configured via process.env.BOOTSTRAP_ADMIN_EMAIL || 'alexandrecalmonjunior@gmail.com'.
+    // In Firestore Rules (CEL runtime): verifies verified email matches bootstrapped administrator.
     function isBootstrappedAdmin() {
-      return isVerifiedUser() && request.auth.token.email == 'Alexandrecalmonjunior@gmail.com';
+      return isVerifiedUser() && (
+        request.auth.token.email == 'Alexandrecalmonjunior@gmail.com' ||
+        request.auth.token.email == 'alexandrecalmonjunior@gmail.com'
+      );
     }
 
     function isAdmin() {
