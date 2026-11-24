@@ -21,9 +21,13 @@ export function isSkillActive(skill: SkillInfo): boolean {
 }
 
 export function isCustomSkill(skill: SkillInfo): boolean {
+  const origin = (skill.origin || '').trim().toLowerCase();
   return (
-    skill.origin === 'user_created' ||
-    skill.origin === 'imported_ecc' ||
+    origin === 'user_created' ||
+    origin === 'user' ||
+    origin === 'custom' ||
+    origin === 'imported_ecc' ||
+    origin.startsWith('github') ||
     (skill.id || '').startsWith('user_')
   );
 }

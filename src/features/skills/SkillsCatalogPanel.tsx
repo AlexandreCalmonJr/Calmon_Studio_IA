@@ -84,11 +84,13 @@ export const SkillsCatalogPanel: React.FC<SkillsCatalogPanelProps> = ({
     try {
       const [skillsData, agentsData] = await Promise.all([
         fetchSkills(),
-        fetchAgents().catch(() => [] as AgentInfo[]),
+        fetchAgents().catch(() => null),
       ]);
       const list = Array.isArray(skillsData) ? skillsData : [];
       setSkills(list);
-      setAgents(Array.isArray(agentsData) ? agentsData : []);
+      if (Array.isArray(agentsData)) {
+        setAgents(agentsData);
+      }
       if (onSkillsCountChangeRef.current) {
         onSkillsCountChangeRef.current(list.length, list.filter(isSkillActive).length);
       }
@@ -105,18 +107,22 @@ export const SkillsCatalogPanel: React.FC<SkillsCatalogPanelProps> = ({
       .then((res) => (res.ok ? res.json() : null))
       .then((principal) => {
         if (!active) return;
-        const admin = principal?.kind === 'human' && principal?.role === 'admin';
+        const human = principal?.kind === 'human';
+        const admin = human && principal?.role === 'admin';
         const perms: string[] = Array.isArray(principal?.permissions) ? principal.permissions : [];
         setIsAdmin(admin);
         setCanManageSkills(
-          principal?.kind === 'human' &&
-            (admin || perms.includes('*') || perms.includes('skills:write') || perms.includes('skills:read'))
+          human &&
+            (admin ||
+              principal?.role === 'developer' ||
+              perms.includes('*') ||
+              perms.includes('skills:write'))
         );
       })
       .catch(() => {
         if (active) {
           setIsAdmin(false);
-          setCanManageSkills(true);
+          setCanManageSkills(false);
         }
       });
 
@@ -182,28 +188,32 @@ export const SkillsCatalogPanel: React.FC<SkillsCatalogPanelProps> = ({
           <span>Importar GitHub</span>
         </button>
       )}
-      <button
-        type="button"
-        className="btn btn-secondary btn-sm"
-        onClick={() => {
-          setCreateTab('import');
-          setShowCreateModal(true);
-        }}
-      >
-        <Upload size={14} />
-        <span>Importar ECC / MD</span>
-      </button>
-      <button
-        type="button"
-        className="btn btn-primary btn-sm"
-        onClick={() => {
-          setCreateTab('create');
-          setShowCreateModal(true);
-        }}
-      >
-        <Plus size={14} />
-        <span>Nova Habilidade</span>
-      </button>
+      {canManageSkills && (
+        <>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => {
+              setCreateTab('import');
+              setShowCreateModal(true);
+            }}
+          >
+            <Upload size={14} />
+            <span>Importar ECC / MD</span>
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={() => {
+              setCreateTab('create');
+              setShowCreateModal(true);
+            }}
+          >
+            <Plus size={14} />
+            <span>Nova Habilidade</span>
+          </button>
+        </>
+      )}
       <button
         type="button"
         className="btn btn-ghost btn-icon-sm"
@@ -305,6 +315,7 @@ export const SkillsCatalogPanel: React.FC<SkillsCatalogPanelProps> = ({
             <button
               key={st.id}
               type="button"
+              aria-pressed={status === st.id}
               onClick={() => setStatus(st.id)}
               className={`jarvis-segmented-btn ${status === st.id ? 'is-active' : ''}`}
             >
@@ -324,6 +335,7 @@ export const SkillsCatalogPanel: React.FC<SkillsCatalogPanelProps> = ({
           <button
             key={tab.id}
             type="button"
+            aria-pressed={category === tab.id}
             onClick={() => setCategory(tab.id)}
             className={`jarvis-segmented-btn ${category === tab.id ? 'is-active' : ''}`}
           >

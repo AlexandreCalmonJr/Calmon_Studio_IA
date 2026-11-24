@@ -170,14 +170,82 @@ export const STORE_APPS: StoreAppItem[] = [
 
 export const STORE_APPS_UPDATED_EVENT = 'jarvis:store-apps-updated';
 
-function hasLocalStorage(): boolean {
-  return typeof localStorage !== 'undefined';
+export interface StoreAppsUpdatedDetail {
+  connectedAppIds?: string[];
+  customApps?: StoreAppItem[];
 }
 
-function broadcastStoreAppsUpdated(): void {
-  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
-    window.dispatchEvent(new CustomEvent(STORE_APPS_UPDATED_EVENT));
+const VALID_STORE_CATEGORIES: readonly StoreAppCategory[] = [
+  'productivity',
+  'documents',
+  'development',
+  'ai',
+];
+
+let customAppSeq = 0;
+
+function hasLocalStorage(): boolean {
+  try {
+    return (
+      typeof localStorage !== 'undefined' &&
+      localStorage !== null &&
+      typeof localStorage.getItem === 'function' &&
+      typeof localStorage.setItem === 'function'
+    );
+  } catch {
+    return false;
   }
+}
+
+function broadcastStoreAppsUpdated(detail?: StoreAppsUpdatedDetail): void {
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new CustomEvent<StoreAppsUpdatedDetail>(STORE_APPS_UPDATED_EVENT, { detail }));
+  }
+}
+
+function normalizeStoreAppCategory(raw: unknown, fallbackConnectionType?: string): StoreAppCategory {
+  if (typeof raw === 'string' && (VALID_STORE_CATEGORIES as readonly string[]).includes(raw)) {
+    return raw as StoreAppCategory;
+  }
+  return fallbackConnectionType === 'mcp' ? 'ai' : 'development';
+}
+
+function normalizeStoredCustomApp(raw: unknown): StoreAppItem | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const item = raw as Record<string, unknown>;
+  const id = typeof item.id === 'string' ? item.id.trim() : '';
+  const name = typeof item.name === 'string' ? item.name.trim() : '';
+  if (!id || !name) return null;
+
+  const connectionType =
+    item.connectionType === 'mcp' || item.connectionType === 'webhook' || item.connectionType === 'custom_tool'
+      ? item.connectionType
+      : undefined;
+  const category = normalizeStoreAppCategory(item.category, connectionType);
+  const endpoint = typeof item.endpoint === 'string' ? item.endpoint : undefined;
+  const description =
+    typeof item.description === 'string'
+      ? item.description
+      : endpoint
+        ? `Conector personalizado · ${endpoint}`
+        : 'Conector personalizado';
+  const iconType =
+    typeof item.iconType === 'string' && item.iconType.trim()
+      ? item.iconType.trim()
+      : connectionType || 'mcp';
+  const color = typeof item.color === 'string' && item.color.trim() ? item.color.trim() : '#f97316';
+
+  return {
+    id,
+    name,
+    description,
+    category,
+    color,
+    iconType,
+    isCustom: true,
+    connectionType,
+    endpoint,
+  };
 }
 
 export function loadConnectedAppIds(): string[] {
@@ -186,20 +254,36 @@ export function loadConnectedAppIds(): string[] {
     const raw = localStorage.getItem(getAccountStorageKey('jarvis_connected_apps'));
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed.map(String);
+      if (Array.isArray(parsed)) {
+        return Array.from(
+          new Set(
+            parsed
+              .filter((id): id is string => typeof id === 'string')
+              .map((id) => id.trim())
+              .filter(Boolean)
+          )
+        );
+      }
     }
   } catch {}
   return [...DEFAULT_CONNECTED_APP_IDS];
 }
 
 export function saveConnectedAppIds(ids: string[]): string[] {
-  const unique = Array.from(new Set(ids.map(String)));
+  const unique = Array.from(
+    new Set(
+      (Array.isArray(ids) ? ids : [])
+        .filter((id): id is string => typeof id === 'string')
+        .map((id) => id.trim())
+        .filter(Boolean)
+    )
+  );
   if (hasLocalStorage()) {
     try {
       localStorage.setItem(getAccountStorageKey('jarvis_connected_apps'), JSON.stringify(unique));
     } catch {}
   }
-  broadcastStoreAppsUpdated();
+  broadcastStoreAppsUpdated({ connectedAppIds: unique });
   return unique;
 }
 
@@ -210,10 +294,16 @@ export function loadCustomStoreApps(): StoreAppItem[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed.filter(
-          (item): item is StoreAppItem =>
-            Boolean(item && typeof item.id === 'string' && typeof item.name === 'string')
-        );
+        const seen = new Set<string>();
+        const normalized: StoreAppItem[] = [];
+        for (const item of parsed) {
+          const app = normalizeStoredCustomApp(item);
+          if (app && !seen.has(app.id)) {
+            seen.add(app.id);
+            normalized.push(app);
+          }
+        }
+        return normalized;
       }
     }
   } catch {}
@@ -221,13 +311,22 @@ export function loadCustomStoreApps(): StoreAppItem[] {
 }
 
 export function saveCustomStoreApps(apps: StoreAppItem[]): StoreAppItem[] {
+  const seen = new Set<string>();
+  const sanitized: StoreAppItem[] = [];
+  for (const item of Array.isArray(apps) ? apps : []) {
+    const app = normalizeStoredCustomApp(item);
+    if (app && !seen.has(app.id)) {
+      seen.add(app.id);
+      sanitized.push(app);
+    }
+  }
   if (hasLocalStorage()) {
     try {
-      localStorage.setItem(getAccountStorageKey('jarvis_custom_store_apps'), JSON.stringify(apps));
+      localStorage.setItem(getAccountStorageKey('jarvis_custom_store_apps'), JSON.stringify(sanitized));
     } catch {}
   }
-  broadcastStoreAppsUpdated();
-  return apps;
+  broadcastStoreAppsUpdated({ customApps: sanitized });
+  return sanitized;
 }
 
 export function createCustomStoreApp(input: {
@@ -242,9 +341,11 @@ export function createCustomStoreApp(input: {
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .slice(0, 32);
+  customAppSeq = (customAppSeq + 1) % 1_000_000;
+  const suffix = `${Date.now().toString(36)}_${customAppSeq.toString(36)}`;
 
   return {
-    id: `custom_${slug || 'connector'}_${Date.now().toString(36)}`,
+    id: `custom_${slug || 'connector'}_${suffix}`,
     name: cleanName,
     description: `${
       input.connectionType === 'mcp'
@@ -274,10 +375,11 @@ export function filterStoreApps(
   return apps.filter((app) => {
     if (category !== 'all' && app.category !== category) return false;
     if (!q) return true;
+    const categoryLabel = APP_CATEGORY_LABELS[app.category] || '';
     return (
-      app.name.toLowerCase().includes(q) ||
-      app.description.toLowerCase().includes(q) ||
-      APP_CATEGORY_LABELS[app.category].toLowerCase().includes(q)
+      (app.name || '').toLowerCase().includes(q) ||
+      (app.description || '').toLowerCase().includes(q) ||
+      categoryLabel.toLowerCase().includes(q)
     );
   });
 }
@@ -293,7 +395,9 @@ export function countStoreAppsByCategory(
     ai: 0,
   };
   for (const app of apps) {
-    counts[app.category] = (counts[app.category] || 0) + 1;
+    if (app.category in counts) {
+      counts[app.category] += 1;
+    }
   }
   return counts;
 }

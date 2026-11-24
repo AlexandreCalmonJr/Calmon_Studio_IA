@@ -23,7 +23,6 @@ import {
   X,
 } from 'lucide-react';
 import {
-  MODULE_PACK_CATEGORY_LABELS,
   type ModulePackCategory,
   type ModulePackWithState,
 } from '../../services/modulePackEngine';
@@ -58,6 +57,7 @@ import {
   saveCustomStoreApps,
   type StoreAppCategory,
   type StoreAppItem,
+  type StoreAppsUpdatedDetail,
 } from '../../services/storeAppsCatalog';
 import { PageHeader } from '../../shared/layout/PageHeader';
 import { Modal } from '../../shared/common/Modal';
@@ -194,11 +194,36 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
     }
   }, []);
 
+  const refreshCatalogSideEffects = useCallback(() => {
+    void fetchAgents()
+      .then((agentsData) => {
+        if (Array.isArray(agentsData)) {
+          setInstalledAgents(agentsData);
+        }
+      })
+      .catch(() => {});
+    void fetchSkills()
+      .then((skillsData) => {
+        if (Array.isArray(skillsData)) {
+          setSkillsSnapshot(skillsData);
+          setSkillsCountOverride({
+            total: skillsData.length,
+            active: skillsData.filter(isSkillActive).length,
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     void loadStoreData();
     const onAgentsUpdated = () => {
       void fetchAgents()
-        .then((agentsData) => setInstalledAgents(Array.isArray(agentsData) ? agentsData : []))
+        .then((agentsData) => {
+          if (Array.isArray(agentsData)) {
+            setInstalledAgents(agentsData);
+          }
+        })
         .catch(() => {});
     };
     const onPacksUpdated = (e: Event) => {
@@ -208,10 +233,12 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
       } else {
         void fetchModulePacks().then(setPayload).catch(() => {});
       }
+      refreshCatalogSideEffects();
     };
-    const onStoreAppsUpdated = () => {
-      setConnectedAppIds(loadConnectedAppIds());
-      setCustomApps(loadCustomStoreApps());
+    const onStoreAppsUpdated = (e: Event) => {
+      const detail = (e as CustomEvent<StoreAppsUpdatedDetail>).detail;
+      setConnectedAppIds(detail?.connectedAppIds ?? loadConnectedAppIds());
+      setCustomApps(detail?.customApps ?? loadCustomStoreApps());
     };
     window.addEventListener('jarvis:agents-updated', onAgentsUpdated);
     window.addEventListener(PACKS_UPDATED_EVENT, onPacksUpdated);
@@ -221,7 +248,7 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
       window.removeEventListener(PACKS_UPDATED_EVENT, onPacksUpdated);
       window.removeEventListener(STORE_APPS_UPDATED_EVENT, onStoreAppsUpdated);
     };
-  }, [loadStoreData]);
+  }, [loadStoreData, refreshCatalogSideEffects]);
 
   const handleInstall = async (pack: ModulePackWithState) => {
     setBusyPackId(pack.id);
@@ -234,6 +261,7 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
         `Pacote "${pack.name}" instalado: ${pack.tabs.length} módulos liberados na barra lateral e ${pack.agents.length} agente(s) provisionado(s) com núcleo próprio.`
       );
       window.dispatchEvent(new CustomEvent('jarvis:agents-updated'));
+      refreshCatalogSideEffects();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível instalar o pacote.');
     } finally {
@@ -251,6 +279,8 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
       setFeedback(
         `Pacote "${pack.name}" removido da barra lateral. Você pode reinstalá-lo a qualquer momento em 1 clique.`
       );
+      window.dispatchEvent(new CustomEvent('jarvis:agents-updated'));
+      refreshCatalogSideEffects();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível remover o pacote.');
     } finally {
@@ -286,15 +316,22 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
   };
 
   const confirmAppConnection = () => {
-    if (!selectedAppForModal) return;
+    if (!selectedAppForModal || connectingApp) return;
     setConnectingApp(true);
-    setTimeout(() => {
+    try {
+      const wasConnected = connectedAppIds.includes(selectedAppForModal.id);
       updateConnectedApps([...connectedAppIds, selectedAppForModal.id]);
-      notify(`App "${selectedAppForModal.name}" conectado com sucesso!`, 'success');
-      setConnectingApp(false);
+      notify(
+        wasConnected
+          ? `Configuração de "${selectedAppForModal.name}" atualizada.`
+          : `App "${selectedAppForModal.name}" conectado com sucesso!`,
+        'success'
+      );
       setAppTokenInput('');
       setSelectedAppForModal(null);
-    }, 250);
+    } finally {
+      setConnectingApp(false);
+    }
   };
 
   const disconnectApp = (appId: string) => {
@@ -312,6 +349,13 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
       setSelectedAppForModal(null);
     }
     notify(`Conector "${app.name}" removido.`, 'info');
+  };
+
+  const closeCustomAppModal = () => {
+    setShowCustomAppModal(false);
+    setCustomAppName('');
+    setCustomAppType('mcp');
+    setCustomAppEndpoint('');
   };
 
   const handleSaveCustomConnector = (e: React.FormEvent) => {
@@ -333,10 +377,7 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
       setAppCategory('all');
     }
     notify(`Conector "${newApp.name}" cadastrado e conectado com sucesso!`, 'success');
-    setCustomAppName('');
-    setCustomAppType('mcp');
-    setCustomAppEndpoint('');
-    setShowCustomAppModal(false);
+    closeCustomAppModal();
   };
 
   const packsList = payload?.packs || [];
@@ -612,6 +653,7 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
                     <button
                       key={opt.id}
                       type="button"
+                      aria-pressed={categoryFilter === opt.id}
                       onClick={() => setCategoryFilter(opt.id)}
                       className={`jarvis-segmented-btn ${categoryFilter === opt.id ? 'is-active' : ''}`}
                     >
@@ -1115,8 +1157,10 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
                 variant="store"
                 installedAgents={installedAgents}
                 onRefreshAgents={async () => {
-                  const updated = await fetchAgents().catch(() => [] as AgentInfo[]);
-                  setInstalledAgents(Array.isArray(updated) ? updated : []);
+                  const updated = await fetchAgents().catch(() => null);
+                  if (Array.isArray(updated)) {
+                    setInstalledAgents(updated);
+                  }
                 }}
                 onOpenChat={(agent) => {
                   if (onOpenAgentChat) {
@@ -1192,7 +1236,11 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
                 onClick={confirmAppConnection}
                 className="btn btn-primary btn-sm"
               >
-                {connectingApp ? 'Conectando...' : 'Salvar & Conectar'}
+                {connectingApp
+                  ? 'Conectando...'
+                  : connectedAppIds.includes(selectedAppForModal.id)
+                    ? 'Atualizar conexão'
+                    : 'Salvar & Conectar'}
               </button>
             </div>
           ) : undefined
@@ -1203,6 +1251,17 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
             <p style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.55 }}>
               {selectedAppForModal.description}. Autorize o JARVIS AI Hub a interagir com este serviço através das suas chaves de API ou webhook seguro.
             </p>
+
+            {selectedAppForModal.isCustom && selectedAppForModal.endpoint && (
+              <div className="jarvis-settings-subcard">
+                <div className="jarvis-pack-spec-label" style={{ marginBottom: '4px' }}>
+                  Endpoint / Comando ({selectedAppForModal.connectionType?.toUpperCase() || 'MCP'})
+                </div>
+                <code className="mono" style={{ fontSize: '0.78rem', color: 'var(--text-primary)', wordBreak: 'break-all' }}>
+                  {selectedAppForModal.endpoint}
+                </code>
+              </div>
+            )}
 
             <div>
               <label htmlFor="store-app-token-input" className="user-profile-field-label">
@@ -1227,7 +1286,7 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
       {/* Modal: Adicionar Conector Personalizado */}
       <Modal
         isOpen={showCustomAppModal}
-        onClose={() => setShowCustomAppModal(false)}
+        onClose={closeCustomAppModal}
         title="Adicionar Conector Personalizado"
         subtitle="Integre servidores MCP externos, webhooks customizados ou APIs REST aos seus agentes."
         icon={<Plug size={18} color="var(--accent-light)" />}
@@ -1284,7 +1343,7 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>
             <button
               type="button"
-              onClick={() => setShowCustomAppModal(false)}
+              onClick={closeCustomAppModal}
               className="btn btn-secondary btn-sm"
             >
               Cancelar

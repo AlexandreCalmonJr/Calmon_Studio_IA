@@ -13,7 +13,7 @@ import {
 import { SkillInfo, AgentInfo } from '../../types';
 import { ALL_26_AGENTS } from '../../data/agentsCatalog';
 import { resolveSkillDomainLabel } from '../../services/domainCatalog';
-import { classifySkillBucket } from '../../services/unifiedStoreEngine';
+import { classifySkillBucket, isCustomSkill } from '../../services/unifiedStoreEngine';
 
 interface SkillCardProps {
   skill: SkillInfo;
@@ -37,10 +37,7 @@ export const SkillCard: React.FC<SkillCardProps> = ({
   isAdmin = false,
 }) => {
   const isApproved = skill.is_approved && !skill.is_revoked;
-  const isPrivateSkill =
-    skill.origin === 'user_created' ||
-    skill.origin === 'imported_ecc' ||
-    skill.id.startsWith('user_');
+  const isPrivateSkill = isCustomSkill(skill);
   const canManageThisSkill = canManageSkills && (isAdmin || isPrivateSkill);
 
   const domainLabel = resolveSkillDomainLabel(skill.domain);

@@ -200,6 +200,40 @@ test('Fase 2 Modular Backend: buildApiRouter mounts all 15 domain routers and en
       const skillsJson = await skillsRes.json();
       assert.ok(Array.isArray(skillsJson));
 
+      const invalidEccRes = await fetch(`${baseUrl}/skills/import-ecc`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ content: 'sem frontmatter' }),
+      });
+      assert.equal(invalidEccRes.status, 400);
+
+      const importEccRes = await fetch(`${baseUrl}/skills/import-ecc`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          content: `---\nname: "ECC Teste"\nversion: "1.0.0"\ndomain: "qa"\nlicense: "MIT"\ndescription: "Valida fluxo ECC"\n---\n# Diretrizes\nPassos de teste.`,
+        }),
+      });
+      assert.equal(importEccRes.status, 201);
+      const importedEcc = await importEccRes.json();
+      assert.equal(importedEcc.skill?.name, 'ECC Teste');
+      assert.equal(importedEcc.skill?.origin, 'imported_ecc');
+
+      const delEccRes = await fetch(`${baseUrl}/skills/${encodeURIComponent(importedEcc.skill.id)}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      });
+      assert.equal(delEccRes.status, 200);
+      const delEccJson = await delEccRes.json();
+      assert.equal(delEccJson.deleted, true);
+      assert.equal(delEccJson.status, 'deleted');
+
+      const delMissingRes = await fetch(`${baseUrl}/skills/nonexistent_skill_id`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      });
+      assert.equal(delMissingRes.status, 404);
+
       // 9. Knowledge Router
       const knowledgeRes = await fetch(`${baseUrl}/knowledge/documents`, { headers: authHeaders });
       assert.equal(knowledgeRes.status, 200);

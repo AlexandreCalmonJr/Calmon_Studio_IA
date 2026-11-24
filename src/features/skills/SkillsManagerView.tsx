@@ -44,6 +44,7 @@ import {
   saveConnectedAppIds,
   saveCustomStoreApps,
   type StoreAppItem,
+  type StoreAppsUpdatedDetail,
 } from '../../services/storeAppsCatalog';
 import { StoreAppIcon } from '../store/StoreAppIcon';
 
@@ -119,16 +120,23 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
   };
 
   const confirmAppConnection = () => {
-    if (!selectedAppForModal) return;
+    if (!selectedAppForModal || connectingApp) return;
     setConnectingApp(true);
-    setTimeout(() => {
+    try {
+      const wasConnected = connectedApps.includes(selectedAppForModal.id);
       const next = Array.from(new Set([...connectedApps, selectedAppForModal.id]));
       saveConnectedApps(next);
-      notify(`App "${selectedAppForModal.name}" conectado com sucesso!`, 'success');
-      setConnectingApp(false);
+      notify(
+        wasConnected
+          ? `Configuração de "${selectedAppForModal.name}" atualizada.`
+          : `App "${selectedAppForModal.name}" conectado com sucesso!`,
+        'success'
+      );
       setAppTokenInput('');
       setSelectedAppForModal(null);
-    }, 350);
+    } finally {
+      setConnectingApp(false);
+    }
   };
 
   const disconnectApp = (appId: string) => {
@@ -137,6 +145,13 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
     notify('App desconectado com sucesso!', 'info');
     setAppTokenInput('');
     setSelectedAppForModal(null);
+  };
+
+  const closeCustomAppModal = () => {
+    setShowCustomAppModal(false);
+    setCustomAppName('');
+    setCustomAppType('mcp');
+    setCustomAppEndpoint('');
   };
 
   const handleSaveCustomConnector = (e: React.FormEvent) => {
@@ -152,11 +167,9 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
     });
     setCustomApps(saveCustomStoreApps([...customApps, created]));
     saveConnectedApps([...connectedApps, created.id]);
+    setAppSearchQuery('');
     notify(`Conector "${created.name}" cadastrado e conectado com sucesso!`, 'success');
-    setCustomAppName('');
-    setCustomAppType('mcp');
-    setCustomAppEndpoint('');
-    setShowCustomAppModal(false);
+    closeCustomAppModal();
   };
 
   const loadData = async () => {
@@ -210,7 +223,9 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
     setDeletingSkill(true);
     try {
       const result = await deleteUserSkill(skillId);
-      if (result?.status !== 'deleted') throw new Error('A habilidade não foi encontrada na sua conta.');
+      if (result?.status !== 'deleted' && !result?.deleted) {
+        throw new Error('A habilidade não foi encontrada na sua conta.');
+      }
       notify(`Habilidade "${skillName}" excluída com sucesso!`, 'success');
       setPendingDeleteSkill(null);
       await loadData();
@@ -257,9 +272,10 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
     const onAgentsUpdated = () => {
       loadData();
     };
-    const onStoreAppsUpdated = () => {
-      setConnectedApps(loadConnectedAppIds());
-      setCustomApps(loadCustomStoreApps());
+    const onStoreAppsUpdated = (e: Event) => {
+      const detail = (e as CustomEvent<StoreAppsUpdatedDetail>).detail;
+      setConnectedApps(detail?.connectedAppIds ?? loadConnectedAppIds());
+      setCustomApps(detail?.customApps ?? loadCustomStoreApps());
     };
     window.addEventListener('jarvis:agents-updated', onAgentsUpdated);
     window.addEventListener(STORE_APPS_UPDATED_EVENT, onStoreAppsUpdated);
@@ -453,7 +469,7 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
       </aside>
 
       {/* Área Principal */}
-      <main className="jarvis-settings-content">
+      <div className="jarvis-settings-content">
         {/* VIEW 1: APPS */}
         {activeStoreTab === 'apps' && (
           <div style={{ maxWidth: '1040px', width: '100%', display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -922,7 +938,7 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
         {activeStoreTab === 'integrations' && (
           <IntegrationsHubPanel onSkillImported={loadData} />
         )}
-      </main>
+      </div>
 
       {/* Modal: Conectar / Gerenciar App */}
       <Modal
@@ -1000,7 +1016,7 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
       {/* Modal: Adicionar Conector Personalizado */}
       <Modal
         isOpen={showCustomAppModal}
-        onClose={() => setShowCustomAppModal(false)}
+        onClose={closeCustomAppModal}
         title="Adicionar Conector Personalizado"
         subtitle="Integre servidores MCP externos, webhooks customizados ou APIs REST aos seus agentes."
         icon={<Plug size={18} color="var(--accent-light)" />}
@@ -1057,7 +1073,7 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>
             <button
               type="button"
-              onClick={() => setShowCustomAppModal(false)}
+              onClick={closeCustomAppModal}
               className="btn btn-secondary btn-sm"
             >
               Cancelar
