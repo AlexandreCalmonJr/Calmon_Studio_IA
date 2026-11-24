@@ -474,9 +474,14 @@ export const WorkflowCanvasView: React.FC = () => {
       {/* Top Header: Switcher, Cron Schedule & Primary Run CTA */}
       <header
         style={{
-          padding: '10px 18px',
-          backgroundColor: 'var(--bg-secondary)',
-          borderBottom: '1px solid var(--border-color)',
+          margin: '10px 16px 0',
+          padding: '8px 16px',
+          background: 'var(--topbar-glass-bg, rgba(18,22,32,0.80))',
+          backdropFilter: 'blur(20px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+          border: '1px solid var(--topbar-glass-border, rgba(255,255,255,0.09))',
+          borderRadius: '16px',
+          boxShadow: 'var(--topbar-glass-shadow, 0 4px 20px rgba(0,0,0,0.22))',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -690,9 +695,14 @@ export const WorkflowCanvasView: React.FC = () => {
           void handleGenerateFromPrompt();
         }}
         style={{
-          padding: '10px 18px',
-          backgroundColor: 'rgba(18, 22, 31, 0.92)',
-          borderBottom: '1px solid var(--border-color)',
+          margin: '8px 16px 0',
+          padding: '8px 16px',
+          background: 'var(--topbar-glass-bg, rgba(18,22,32,0.80))',
+          backdropFilter: 'blur(20px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+          border: '1px solid var(--topbar-glass-border, rgba(255,255,255,0.09))',
+          borderRadius: '14px',
+          boxShadow: 'var(--topbar-glass-shadow, 0 4px 20px rgba(0,0,0,0.22))',
           display: 'flex',
           alignItems: 'center',
           gap: '10px',

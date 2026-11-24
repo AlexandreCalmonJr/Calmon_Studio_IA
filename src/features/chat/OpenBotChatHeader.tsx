@@ -95,16 +95,21 @@ export const OpenBotChatHeader: React.FC<OpenBotChatHeaderProps> = ({
   return (
     <header
       style={{
-        height: 'var(--topbar-height)',
+        height: 'calc(var(--topbar-height) - 4px)',
+        margin: '10px 16px 0',
         padding: '0 16px',
-        backgroundColor: 'var(--bg-secondary)',
-        borderBottom: '1px solid var(--border-color)',
+        background: 'var(--topbar-glass-bg, rgba(18,22,32,0.80))',
+        backdropFilter: 'blur(20px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+        border: '1px solid var(--topbar-glass-border, rgba(255,255,255,0.09))',
+        borderRadius: '18px',
+        boxShadow: 'var(--topbar-glass-shadow, 0 4px 28px rgba(0,0,0,0.30))',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         flexShrink: 0,
         gap: '12px',
-        zIndex: 20,
+        zIndex: 60,
         position: 'relative',
       }}
     >
