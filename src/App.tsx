@@ -1,16 +1,18 @@
-import React, { useState, useEffect, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useRef, useMemo, Suspense, lazy } from 'react';
 import { AuthGate } from './features/auth/AuthGate';
 import { PrimaryRail } from './shared/navigation/PrimaryRail';
 import { AgentDock } from './shared/navigation/AgentDock';
 import { DynamicIsland } from './shared/navigation/DynamicIsland';
-import { SystemHealth, ApprovalRequestItem } from './types';
-import { fetchHealth, fetchApprovals } from './api';
+import { LaunchpadOverlay } from './shared/navigation/LaunchpadOverlay';
+import { LaunchpadGlyph } from './shared/navigation/NavIcon';
+import { SystemHealth, ApprovalRequestItem, AgentInfo } from './types';
+import { fetchHealth, fetchApprovals, fetchAgents } from './api';
 import { fetchResources, SystemResourceUsage } from './services/api/system';
 import {
   ShieldAlert,
   Search,
   PanelLeft,
-  PanelRight,
+  PanelBottom,
   CircleHelp,
   Plus,
   Mic,
@@ -35,9 +37,24 @@ import { SetupWizardModal } from './shared/common/SetupWizardModal';
 import { InitialPasswordChangeModal } from './shared/common/InitialPasswordChangeModal';
 import { GuidedTour } from './shared/common/GuidedTour';
 import { UserProfileModal, getUserProfile, UserProfileData } from './shared/common/UserProfileModal';
-import { ToastContainer } from './shared/common/Toast';
+import { ToastContainer, notify } from './shared/common/Toast';
 import { ApprovalPromptHost } from './shared/common/ApprovalPromptHost';
 import { CommandPalette } from './shared/common/CommandPalette';
+import {
+  computeDockClearancePx,
+  DOCK_FAVORITES_UPDATED_EVENT,
+  DOCK_MINIMIZED_UPDATED_EVENT,
+  loadDockFavorites,
+  loadDockMinimized,
+  loadSidebarHidden,
+  resolveDockFavoriteItems,
+  resolveVisibleNavModules,
+  saveDockFavorites,
+  saveDockMinimized,
+  saveSidebarHidden,
+  SIDEBAR_HIDDEN_UPDATED_EVENT,
+  toggleDockFavorite,
+} from './services/navigationShell';
 import { OfflineIndicator, PWAInstallButton } from './shared/pwa/PWAInstallButton';
 import { VoiceLiveHudModal } from './features/companion/VoiceLiveHudModal';
 import { ErrorBanner } from './shared/layout/StateFeedback';
@@ -281,7 +298,7 @@ const NotFoundView: React.FC<{ onGoHome: () => void }> = ({ onGoHome }) => (
 );
 
 const DashboardApp: React.FC = () => {
-  const { assistantName, experienceMode, profile: identityProfile, updateIdentityProfile } = useAssistantIdentity();
+  const { assistantName, experienceMode, setExperienceMode, profile: identityProfile, updateIdentityProfile } = useAssistantIdentity();
   const isSimpleMode = experienceMode === 'simple';
   const [authPermissions, setAuthPermissions] = useState<string[]>([]);
   const [authRole, setAuthRole] = useState<string | null>(null);
@@ -372,6 +389,15 @@ const DashboardApp: React.FC = () => {
       return false;
     }
   });
+  const [isSidebarHidden, setIsSidebarHidden] = useState<boolean>(() => loadSidebarHidden());
+  const sidebarHiddenRef = useRef(isSidebarHidden);
+  useEffect(() => {
+    sidebarHiddenRef.current = isSidebarHidden;
+  }, [isSidebarHidden]);
+  const [isDockMinimized, setIsDockMinimized] = useState<boolean>(() => loadDockMinimized());
+  const [dockFavorites, setDockFavorites] = useState<string[]>(() => loadDockFavorites());
+  const [launchpadOpen, setLaunchpadOpen] = useState(false);
+  const [installedAgents, setInstalledAgents] = useState<AgentInfo[]>([]);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [attachedProjectId, setAttachedProjectId] = useState<string | null>(null);
   const [targetChatSessionId, setTargetChatSessionId] = useState<string | null>(null);
@@ -444,16 +470,51 @@ const DashboardApp: React.FC = () => {
         setShowDynamicIsland(islandVal !== null ? islandVal !== 'false' : true);
         const dockVal = localStorage.getItem(getAccountStorageKey('jarvis_pref_agent_dock'));
         setShowAgentDock(dockVal !== null ? dockVal !== 'false' : true);
+        setIsSidebarHidden(loadSidebarHidden());
+        setIsDockMinimized(loadDockMinimized());
+        setDockFavorites(loadDockFavorites());
       } catch {}
     };
 
+    const syncFavorites = () => setDockFavorites(loadDockFavorites());
+    const syncSidebarHidden = () => setIsSidebarHidden(loadSidebarHidden());
+    const syncDockMinimized = () => setIsDockMinimized(loadDockMinimized());
+
     window.addEventListener('jarvis_ui_preferences_changed', syncPreferences);
     window.addEventListener('storage', syncPreferences);
+    window.addEventListener(DOCK_FAVORITES_UPDATED_EVENT, syncFavorites);
+    window.addEventListener(SIDEBAR_HIDDEN_UPDATED_EVENT, syncSidebarHidden);
+    window.addEventListener(DOCK_MINIMIZED_UPDATED_EVENT, syncDockMinimized);
     return () => {
       window.removeEventListener('jarvis_ui_preferences_changed', syncPreferences);
       window.removeEventListener('storage', syncPreferences);
+      window.removeEventListener(DOCK_FAVORITES_UPDATED_EVENT, syncFavorites);
+      window.removeEventListener(SIDEBAR_HIDDEN_UPDATED_EVENT, syncSidebarHidden);
+      window.removeEventListener(DOCK_MINIMIZED_UPDATED_EVENT, syncDockMinimized);
     };
   }, []);
+
+  useEffect(() => {
+    if (!authLoaded) return;
+    let active = true;
+    const syncAgents = () => {
+      fetchAgents()
+        .then((list) => {
+          if (active && Array.isArray(list)) setInstalledAgents(list);
+        })
+        .catch(() => {});
+    };
+    syncAgents();
+    window.addEventListener('jarvis:agents-updated', syncAgents);
+    window.addEventListener('jarvis:dock-updated', syncAgents);
+    window.addEventListener(PACKS_UPDATED_EVENT, syncAgents);
+    return () => {
+      active = false;
+      window.removeEventListener('jarvis:agents-updated', syncAgents);
+      window.removeEventListener('jarvis:dock-updated', syncAgents);
+      window.removeEventListener(PACKS_UPDATED_EVENT, syncAgents);
+    };
+  }, [authLoaded]);
 
   const [chatLoaded, setChatLoaded] = useState(
     () => tabFromLocation(window.location.pathname, window.location.search) === 'chat'
@@ -507,6 +568,7 @@ const DashboardApp: React.FC = () => {
     if (path === '/404') return;
     setActiveTab(tab);
     setMobileNavOpen(false);
+    setLaunchpadOpen(false);
     if (tab === 'chat') setChatLoaded(true);
     if (window.location.pathname !== path) {
       window.history.pushState({ tab }, '', path);
@@ -518,6 +580,11 @@ const DashboardApp: React.FC = () => {
       setMobileNavOpen((prev) => !prev);
       return;
     }
+    if (sidebarHiddenRef.current) {
+      saveSidebarHidden(false);
+      setIsSidebarHidden(false);
+      return;
+    }
     setIsSidebarCollapsed((prev) => {
       const next = !prev;
       try {
@@ -527,13 +594,42 @@ const DashboardApp: React.FC = () => {
     });
   };
 
+  const handleToggleSidebarHidden = () => {
+    const next = !sidebarHiddenRef.current;
+    saveSidebarHidden(next);
+    setIsSidebarHidden(next);
+  };
+
   const handleToggleAgentDock = () => {
     setShowAgentDock((prev) => {
       const next = !prev;
       try {
         localStorage.setItem(getAccountStorageKey('jarvis_pref_agent_dock'), String(next));
+        window.dispatchEvent(new Event('jarvis_ui_preferences_changed'));
       } catch {}
       return next;
+    });
+  };
+
+  const handleToggleDockMinimized = () => {
+    setIsDockMinimized((prev) => {
+      const next = !prev;
+      saveDockMinimized(next);
+      return next;
+    });
+  };
+
+  const handleToggleDockFavorite = (tabId: string) => {
+    setDockFavorites((prev) => {
+      const res = toggleDockFavorite(tabId, prev);
+      if (res.limitReached) {
+        notify('Limite de 6 favoritos no Dock atingido. Remova um ícone fixado antes de adicionar outro.', 'info');
+        return prev;
+      }
+      const saved = saveDockFavorites(res.favorites);
+      if (res.added) notify('Módulo fixado nos Favoritos do Dock.', 'success');
+      else if (res.removed) notify('Módulo removido dos Favoritos do Dock.', 'info');
+      return saved;
     });
   };
 
@@ -559,14 +655,30 @@ const DashboardApp: React.FC = () => {
     };
 
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setShowCommandPalette((prev) => !prev);
+        return;
       }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        setShowCommandPalette(false);
+        setLaunchpadOpen((prev) => !prev);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'b') {
         e.preventDefault();
         handleToggleSidebar();
       }
+    };
+
+    const handleToggleLaunchpadEvent = () => {
+      setLaunchpadOpen((prev) => !prev);
+    };
+
+    const handleToggleSidebarHiddenEvent = () => {
+      handleToggleSidebarHidden();
     };
 
     const handleOpenAndroidPairing = () => {
@@ -590,12 +702,16 @@ const DashboardApp: React.FC = () => {
     window.addEventListener('jarvis:open-android-pairing', handleOpenAndroidPairing);
     window.addEventListener('jarvis:open-brain-manager', handleOpenBrainManager);
     window.addEventListener('jarvis:open-agent-chat', handleOpenAgentChat);
+    window.addEventListener('jarvis:toggle-launchpad', handleToggleLaunchpadEvent);
+    window.addEventListener('jarvis:toggle-sidebar-hidden', handleToggleSidebarHiddenEvent);
     return () => {
       window.removeEventListener('popstate', handlePopState);
       window.removeEventListener('keydown', handleGlobalKeyDown);
       window.removeEventListener('jarvis:open-android-pairing', handleOpenAndroidPairing);
       window.removeEventListener('jarvis:open-brain-manager', handleOpenBrainManager);
       window.removeEventListener('jarvis:open-agent-chat', handleOpenAgentChat);
+      window.removeEventListener('jarvis:toggle-launchpad', handleToggleLaunchpadEvent);
+      window.removeEventListener('jarvis:toggle-sidebar-hidden', handleToggleSidebarHiddenEvent);
     };
   }, []);
 
@@ -683,19 +799,55 @@ const DashboardApp: React.FC = () => {
   const pendingApprovalsCount = approvals.filter((a) => a.status === 'pending').length;
   const activeMeta = TAB_LABELS[activeTab] || { section: 'JARVIS', title: 'Workspace' };
   const isFullscreenTab = FULLSCREEN_TABS.has(activeTab);
+  const showEscapePill = isSidebarHidden && !showAgentDock && NO_HEADER_TABS.has(activeTab);
+  const dockClearance = computeDockClearancePx({
+    showDock: showAgentDock,
+    isMinimized: isDockMinimized,
+    showEscapePill,
+  });
+
+  const launchpadModules = useMemo(
+    () =>
+      resolveVisibleNavModules({
+        isSimpleMode,
+        installedPackIds,
+        customPacks,
+        canManagePacks,
+        canAccessTab,
+        includeLaunchpadOnly: true,
+      }),
+    [isSimpleMode, installedPackIds, customPacks, canManagePacks, authPermissions, authRole, authKind]
+  );
+
+  const dockFavoriteItems = useMemo(
+    () =>
+      resolveDockFavoriteItems(dockFavorites, {
+        isSimpleMode,
+        installedPackIds,
+        customPacks,
+        canManagePacks,
+        canAccessTab,
+      }),
+    [dockFavorites, isSimpleMode, installedPackIds, customPacks, canManagePacks, authPermissions, authRole, authKind]
+  );
 
   return (
     <div
-      style={{
-        display: 'flex',
-        height: '100dvh',
-        width: '100%',
-        minWidth: 0,
-        overflow: 'hidden',
-        backgroundColor: 'var(--bg-primary)',
-        fontFamily: 'var(--font-sans)',
-        position: 'relative',
-      }}
+      className="jarvis-app-root"
+      style={
+        {
+          display: 'flex',
+          height: '100dvh',
+          width: '100%',
+          minWidth: 0,
+          overflow: 'hidden',
+          backgroundColor: 'var(--bg-primary)',
+          backgroundImage: 'var(--app-canvas-gradient)',
+          fontFamily: 'var(--font-sans)',
+          position: 'relative',
+          '--jarvis-dock-clearance': dockClearance,
+        } as React.CSSProperties
+      }
     >
       {/* Backdrop móvel quando a gaveta estiver aberta */}
       {mobileNavOpen && (
@@ -712,17 +864,23 @@ const DashboardApp: React.FC = () => {
         />
       )}
 
-      {/* Sidebar Colapsável (244px expandida / 68px compacta / gaveta no mobile) */}
+      {/* Sidebar Flutuante macOS (256px expandida / 74px compacta / ocultável / gaveta no mobile) */}
       <PrimaryRail
         activeTab={activeTab}
         onNavigate={navigate}
         collapsed={isSidebarCollapsed}
+        hidden={isSidebarHidden}
         mobileOpen={mobileNavOpen}
         onToggleCollapse={handleToggleSidebar}
+        onToggleHidden={handleToggleSidebarHidden}
         pendingApprovalsCount={pendingApprovalsCount}
         installedPackIds={installedPackIds}
         customPacks={customPacks}
         canManagePacks={canManagePacks}
+        canAccessTab={canAccessTab}
+        assistantName={assistantName}
+        experienceMode={experienceMode}
+        onToggleExperienceMode={() => void setExperienceMode(isSimpleMode ? 'engineering' : 'simple')}
         onOpenSettings={() => navigate('settings')}
         onOpenHelp={() => navigate('learning')}
         onOpenProfile={() => setShowProfileModal(true)}
@@ -730,6 +888,7 @@ const DashboardApp: React.FC = () => {
 
       {/* Área Central */}
       <div
+        className="jarvis-main-stage"
         style={{
           flex: 1,
           minWidth: 0,
@@ -738,21 +897,33 @@ const DashboardApp: React.FC = () => {
           height: '100dvh',
           overflow: 'hidden',
           backgroundColor: 'var(--bg-primary)',
+          position: 'relative',
         }}
       >
         {/* Top Bar Global (Contrato SaaS limpo, sem sobreposição) */}
         {!NO_HEADER_TABS.has(activeTab) && (
           <header className="jarvis-topbar">
-            {/* Esquerda: Toggle Sidebar + Breadcrumb Contextual */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+            {/* Esquerda: Toggle Sidebar + Launchpad + Breadcrumb Contextual */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
               <button
                 type="button"
                 onClick={handleToggleSidebar}
-                className="btn btn-ghost btn-icon"
-                title="Alternar barra lateral (Ctrl+B)"
-                aria-label="Alternar barra lateral"
+                className={`btn btn-ghost btn-icon ${isSidebarHidden ? 'is-active' : ''}`}
+                title={isSidebarHidden ? 'Mostrar barra lateral (Ctrl+B)' : 'Alternar barra lateral (Ctrl+B)'}
+                aria-label={isSidebarHidden ? 'Mostrar barra lateral' : 'Alternar barra lateral'}
               >
                 <PanelLeft size={16} />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setLaunchpadOpen((prev) => !prev)}
+                className={`btn btn-ghost btn-icon ${launchpadOpen ? 'is-active' : ''}`}
+                title="Abrir Launchpad de Módulos (Ctrl+Shift+L)"
+                aria-label="Abrir Launchpad de Módulos"
+                aria-pressed={launchpadOpen}
+              >
+                <LaunchpadGlyph size={16} />
               </button>
 
               <div
@@ -764,10 +935,10 @@ const DashboardApp: React.FC = () => {
                   minWidth: 0,
                 }}
               >
-                <span className="hide-mobile" style={{ color: 'var(--text-muted)' }}>
+                <span className="hide-mobile jarvis-topbar-hide-narrow" style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                   {activeMeta.section}
                 </span>
-                <span className="hide-mobile" style={{ color: 'var(--border-hover)' }}>
+                <span className="hide-mobile jarvis-topbar-hide-narrow" style={{ color: 'var(--border-hover)' }}>
                   /
                 </span>
                 <span
@@ -787,7 +958,7 @@ const DashboardApp: React.FC = () => {
             {/* Direita: Telemetria Inline (DynamicIsland), Comando Ctrl+K, Ação Principal, Perfil */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
               {showDynamicIsland && !isSimpleMode && (
-                <div className="hide-mobile">
+                <div className="hide-mobile jarvis-topbar-hide-tablet">
                   <DynamicIsland
                     variant="inline"
                     activeAgentName={`${assistantName} AI Hub`}
@@ -800,7 +971,9 @@ const DashboardApp: React.FC = () => {
                 </div>
               )}
 
-              <PWAInstallButton compact />
+              <div className="jarvis-topbar-hide-narrow">
+                <PWAInstallButton compact />
+              </div>
 
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                 <button
@@ -815,7 +988,7 @@ const DashboardApp: React.FC = () => {
                   style={{ borderColor: 'var(--border-accent)', color: 'var(--accent-light)' }}
                 >
                   <Mic size={13} />
-                  <span className="hide-mobile">Ei {assistantName}</span>
+                  <span className="hide-mobile jarvis-topbar-hide-narrow">Ei {assistantName}</span>
                 </button>
                 <button
                   type="button"
@@ -842,11 +1015,12 @@ const DashboardApp: React.FC = () => {
                 onClick={() => setShowCommandPalette(true)}
                 className="btn btn-secondary btn-sm"
                 title="Paleta de Comandos (Ctrl+K)"
+                aria-label="Abrir busca rápida e comandos (Ctrl+K)"
               >
                 <Search size={13} />
-                <span className="hide-mobile">Buscar...</span>
+                <span className="hide-mobile jarvis-topbar-hide-narrow">Buscar...</span>
                 <kbd
-                  className="hide-mobile"
+                  className="hide-mobile jarvis-topbar-hide-tablet"
                   style={{
                     marginLeft: '4px',
                     backgroundColor: 'var(--bg-secondary)',
@@ -876,24 +1050,26 @@ const DashboardApp: React.FC = () => {
               <button
                 type="button"
                 className="btn btn-primary btn-sm hide-mobile"
+                title="Novo chat"
+                aria-label="Novo chat"
                 onClick={() => {
                   setTargetChatSessionId('new_' + Date.now());
                   navigate('chat');
                 }}
               >
                 <Plus size={14} />
-                <span>Novo chat</span>
+                <span className="jarvis-topbar-hide-narrow">Novo chat</span>
               </button>
 
               <button
                 type="button"
-                className={`btn btn-ghost btn-icon hide-tablet ${showAgentDock ? 'is-active' : ''}`}
+                className={`btn btn-ghost btn-icon hide-mobile ${showAgentDock ? 'is-active' : ''}`}
                 onClick={handleToggleAgentDock}
-                title={showAgentDock ? 'Ocultar painel de especialistas' : 'Mostrar painel de especialistas'}
-                aria-label={showAgentDock ? 'Ocultar painel de especialistas' : 'Mostrar painel de especialistas'}
+                title={showAgentDock ? 'Ocultar Dock macOS' : 'Mostrar Dock macOS'}
+                aria-label={showAgentDock ? 'Ocultar Dock macOS' : 'Mostrar Dock macOS'}
                 aria-pressed={showAgentDock}
               >
-                <PanelRight size={16} />
+                <PanelBottom size={16} />
               </button>
 
               <button
@@ -941,14 +1117,14 @@ const DashboardApp: React.FC = () => {
         <main
           style={{
             flex: 1,
-            overflowY: isFullscreenTab || activeTab === 'coding' ? 'hidden' : 'auto',
+            overflowY: isFullscreenTab ? 'hidden' : 'auto',
             minWidth: 0,
             minHeight: 0,
             padding: isFullscreenTab
               ? '0'
               : activeTab === 'coding'
-                ? 'clamp(12px, 1.8vw, 20px)'
-                : 'var(--page-padding-y) var(--page-padding-x)',
+                ? 'clamp(12px, 1.8vw, 20px) clamp(12px, 1.8vw, 20px) calc(14px + var(--jarvis-dock-clearance, 0px))'
+                : 'var(--page-padding-y) var(--page-padding-x) calc(var(--page-padding-y) + var(--jarvis-dock-clearance, 0px))',
             backgroundColor: 'var(--bg-primary)',
             backgroundImage: 'var(--app-canvas-gradient)',
           }}
@@ -1194,24 +1370,94 @@ const DashboardApp: React.FC = () => {
             </div>
           )}
         </main>
+
+        {/* Dock Flutuante Inferior Estilo macOS (Favoritos | Agentes Instalados | Controles) */}
+        {showAgentDock && (
+          <AgentDock
+            activeAgentId={
+              activeTab === 'chat' && targetChatSessionId?.startsWith('agent_')
+                ? targetChatSessionId.slice(6)
+                : undefined
+            }
+            onSelectAgent={(agentId) => {
+              setTargetChatSessionId('agent_' + agentId);
+              navigate('chat');
+            }}
+            onAddAgent={() => navigate('agents')}
+            onHideDock={handleToggleAgentDock}
+            activeTab={activeTab}
+            onNavigate={navigate}
+            favoriteItems={dockFavoriteItems}
+            pendingApprovalsCount={pendingApprovalsCount}
+            isLaunchpadOpen={launchpadOpen}
+            onToggleLaunchpad={() => setLaunchpadOpen((prev) => !prev)}
+            isSidebarHidden={isSidebarHidden}
+            onToggleSidebarHidden={handleToggleSidebarHidden}
+            isMinimized={isDockMinimized}
+            onToggleMinimized={handleToggleDockMinimized}
+          />
+        )}
+
+        {/* Válvula de escape centralizada caso barra lateral e Dock estejam ocultos em tela sem cabeçalho */}
+        {showEscapePill && (
+          <div className="jarvis-macos-dock-layer hide-mobile" aria-label="Restaurar navegação">
+            <div className="jarvis-macos-dock-mini">
+              <button
+                type="button"
+                onClick={handleToggleSidebarHidden}
+                className="jarvis-macos-dock-mini__btn"
+                title="Mostrar barra lateral (Ctrl+B)"
+                aria-label="Mostrar barra lateral"
+              >
+                <PanelLeft size={13} />
+                <span>Barra</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleToggleAgentDock}
+                className="jarvis-macos-dock-mini__btn"
+                title="Mostrar Dock macOS"
+                aria-label="Mostrar Dock macOS"
+              >
+                <PanelBottom size={13} />
+                <span>Dock</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setLaunchpadOpen(true)}
+                className="jarvis-macos-dock-mini__btn"
+                title="Abrir Launchpad (Ctrl+Shift+L)"
+                aria-label="Abrir Launchpad"
+              >
+                <LaunchpadGlyph size={13} />
+                <span>Launchpad</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Rail Lateral Direito Não-Sobreposto de Agentes */}
-      {showAgentDock && (
-        <AgentDock
-          activeAgentId={
-            activeTab === 'chat' && targetChatSessionId?.startsWith('agent_')
-              ? targetChatSessionId.slice(6)
-              : undefined
-          }
-          onSelectAgent={(agentId) => {
-            setTargetChatSessionId('agent_' + agentId);
-            navigate('chat');
-          }}
-          onAddAgent={() => navigate('agents')}
-          onHideDock={handleToggleAgentDock}
-        />
-      )}
+      {/* Launchpad macOS (Grade de Módulos) */}
+      <LaunchpadOverlay
+        isOpen={launchpadOpen}
+        onClose={() => setLaunchpadOpen(false)}
+        activeTab={activeTab}
+        onNavigate={navigate}
+        modules={launchpadModules}
+        favoriteIds={dockFavorites}
+        onToggleFavorite={handleToggleDockFavorite}
+        pendingApprovalsCount={pendingApprovalsCount}
+        isSidebarHidden={isSidebarHidden}
+        onToggleSidebarHidden={handleToggleSidebarHidden}
+        isSimpleMode={isSimpleMode}
+        onToggleSimpleMode={() => void setExperienceMode(isSimpleMode ? 'engineering' : 'simple')}
+        assistantName={assistantName}
+        installedAgents={installedAgents}
+        onSelectAgent={(agentId) => {
+          setTargetChatSessionId('agent_' + agentId);
+          navigate('chat');
+        }}
+      />
 
       {/* Modais e Overlays Globais */}
       <InitialPasswordChangeModal

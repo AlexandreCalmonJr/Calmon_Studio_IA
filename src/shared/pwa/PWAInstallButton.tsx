@@ -146,7 +146,7 @@ export const OfflineIndicator: React.FC = () => {
       aria-live="polite"
       style={{
         position: 'fixed',
-        bottom: '18px',
+        bottom: 'calc(18px + var(--jarvis-dock-clearance, 0px))',
         left: '18px',
         zIndex: 450,
         display: 'flex',

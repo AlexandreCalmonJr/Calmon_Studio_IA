@@ -25,6 +25,8 @@ import {
   AppWindow,
   GitBranch,
   Smartphone,
+  LayoutGrid,
+  PanelLeft,
 } from 'lucide-react';
 import { openWorkspaceRoot, savePonytailLevel } from '../../api';
 import { notify } from './Toast';
@@ -451,6 +453,32 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       },
     },
     {
+      id: 'act-launchpad',
+      category: 'Ações Rápidas',
+      title: 'Abrir Launchpad (Grade de Módulos)',
+      subtitle: 'Visualizar todos os módulos e personalizar favoritos do Dock (Ctrl+Shift+L)',
+      icon: LayoutGrid,
+      iconColor: 'var(--accent-color)',
+      badge: 'Launchpad',
+      action: () => {
+        window.dispatchEvent(new CustomEvent('jarvis:toggle-launchpad'));
+        onClose();
+      },
+    },
+    {
+      id: 'act-toggle-sidebar-hidden',
+      category: 'Ações Rápidas',
+      title: 'Alternar Modo Dock Puro (Mostrar/Ocultar Sidebar)',
+      subtitle: 'Oculta ou restaura a barra lateral esquerda flutuante',
+      icon: PanelLeft,
+      iconColor: 'var(--accent-light)',
+      badge: 'Layout',
+      action: () => {
+        window.dispatchEvent(new CustomEvent('jarvis:toggle-sidebar-hidden'));
+        onClose();
+      },
+    },
+    {
       id: 'act-settings',
       category: 'Ações Rápidas',
       title: 'Perfil e Preferências',
@@ -527,6 +555,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      e.nativeEvent?.stopPropagation?.();
       onClose();
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -546,6 +577,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Paleta de comandos"
       style={{
         position: 'fixed',
         inset: 0,

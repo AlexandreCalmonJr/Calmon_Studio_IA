@@ -425,7 +425,7 @@ export const OpenBotConversationRail: React.FC<OpenBotConversationRailProps> = (
           style={{
             flex: 1,
             overflowY: 'auto',
-            padding: '4px 8px 12px 8px',
+            padding: '4px 8px calc(12px + var(--jarvis-dock-clearance, 0px)) 8px',
             display: 'flex',
             flexDirection: 'column',
             gap: '2px',

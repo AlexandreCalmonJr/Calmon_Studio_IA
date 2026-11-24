@@ -58,7 +58,7 @@ const QUICK_GUIDES: GuideItem[] = [
     steps: [
       'Abra "Loja & Apps" ou "Habilidades" para ver todos os 40 agentes prontos divididos por categoria (Dia a Dia, Estudos, Finanças, Criativo, Dados, Tecnologia e Segurança).',
       'Clique em "Instalar" em qualquer agente para ver suas habilidades e exemplos antes de confirmar.',
-      'Para remover um agente que não usa mais, clique no botão "Desinstalar" na Loja, no Centro de Agentes ou diretamente no painel lateral direito.',
+      'Para remover um agente que não usa mais, clique no botão "Desinstalar" na Loja, no Centro de Agentes ou diretamente pela equipe no Dock inferior.',
     ],
   },
   {
@@ -360,8 +360,9 @@ export const LearningCenterView: React.FC<Props> = ({
           borderRight: '1px solid var(--border-color)',
           display: 'flex',
           flexDirection: 'column',
-          padding: '16px 12px',
+          padding: '16px 12px calc(16px + var(--jarvis-dock-clearance, 0px))',
           gap: '14px',
+          overflowY: 'auto',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0 4px' }}>
@@ -496,7 +497,7 @@ export const LearningCenterView: React.FC<Props> = ({
         style={{
           flex: 1,
           overflowY: 'auto',
-          padding: '24px 32px 44px',
+          padding: '24px 32px calc(44px + var(--jarvis-dock-clearance, 0px))',
           display: 'flex',
           flexDirection: 'column',
           gap: '20px',

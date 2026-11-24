@@ -39,7 +39,7 @@ export const GuidedTour: React.FC<Props> = ({ isOpen, permissions, onNavigate, o
     setIndex(next);
   };
   return <div role="dialog" aria-modal="true" aria-labelledby="jarvis-tour-title" style={{position:'fixed',inset:0,zIndex:1400,display:'grid',placeItems:'end center',padding:'18px',background:'rgba(0,0,0,.38)',pointerEvents:'none'}}>
-    <section className="glass-panel" style={{pointerEvents:'auto',width:'min(100%,560px)',padding:'20px',background:'var(--bg-secondary)',borderColor:'var(--border-accent)',boxShadow:'0 20px 70px rgba(0,0,0,.55)',marginBottom:12}}>
+    <section className="glass-panel" style={{pointerEvents:'auto',width:'min(100%,560px)',padding:'20px',background:'var(--bg-secondary)',borderColor:'var(--border-accent)',boxShadow:'0 20px 70px rgba(0,0,0,.55)',marginBottom:'calc(12px + var(--jarvis-dock-clearance, 0px))'}}>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
         <div style={{display:'flex',alignItems:'center',gap:8,color:'var(--accent-color)',fontSize:'.75rem',fontWeight:700}}><BookOpen size={16}/> TOUR GUIADO · {index+1}/{steps.length}</div>
         <button type="button" className="btn btn-ghost" aria-label="Fechar tour" onClick={onClose}><X size={17}/></button>

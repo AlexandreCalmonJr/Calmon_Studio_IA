@@ -60,6 +60,14 @@ import {
   type ThemeMode,
   type UiDensity,
 } from '../../services/themeEngine';
+import {
+  DOCK_MINIMIZED_UPDATED_EVENT,
+  SIDEBAR_HIDDEN_UPDATED_EVENT,
+  loadDockMinimized,
+  loadSidebarHidden,
+  saveDockMinimized,
+  saveSidebarHidden,
+} from '../../services/navigationShell';
 
 interface SettingsViewProps {
   initialSubTab?: string;
@@ -107,6 +115,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       return true;
     }
   });
+  const [sidebarHiddenPref, setSidebarHiddenPref] = useState<boolean>(() => loadSidebarHidden());
+  const [dockMinimizedPref, setDockMinimizedPref] = useState<boolean>(() => loadDockMinimized());
+
+  useEffect(() => {
+    const syncLayout = () => {
+      try {
+        const dockVal = localStorage.getItem(getAccountStorageKey('jarvis_pref_agent_dock'));
+        setAgentDockEnabled(dockVal !== null ? dockVal !== 'false' : true);
+      } catch {}
+      setSidebarHiddenPref(loadSidebarHidden());
+      setDockMinimizedPref(loadDockMinimized());
+    };
+    window.addEventListener('jarvis_ui_preferences_changed', syncLayout);
+    window.addEventListener(SIDEBAR_HIDDEN_UPDATED_EVENT, syncLayout);
+    window.addEventListener(DOCK_MINIMIZED_UPDATED_EVENT, syncLayout);
+    return () => {
+      window.removeEventListener('jarvis_ui_preferences_changed', syncLayout);
+      window.removeEventListener(SIDEBAR_HIDDEN_UPDATED_EVENT, syncLayout);
+      window.removeEventListener(DOCK_MINIMIZED_UPDATED_EVENT, syncLayout);
+    };
+  }, []);
 
   const handleToggleIsland = () => {
     const nextVal = !dynamicIslandEnabled;
@@ -125,7 +154,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       localStorage.setItem(getAccountStorageKey('jarvis_pref_agent_dock'), String(nextVal));
       window.dispatchEvent(new Event('jarvis_ui_preferences_changed'));
     } catch {}
-    notify(`Dock de Agentes ${nextVal ? 'ativado' : 'ocultado'}.`, 'info');
+    notify(`Dock macOS ${nextVal ? 'ativado' : 'ocultado'}.`, 'info');
+  };
+
+  const handleToggleSidebarHiddenPref = () => {
+    const nextVal = saveSidebarHidden(!sidebarHiddenPref);
+    setSidebarHiddenPref(nextVal);
+    notify(
+      nextVal
+        ? 'Modo Dock Puro ativado (barra lateral oculta).'
+        : 'Barra lateral flutuante restaurada.',
+      'info'
+    );
+  };
+
+  const handleToggleDockMinimizedPref = () => {
+    const nextVal = saveDockMinimized(!dockMinimizedPref);
+    setDockMinimizedPref(nextVal);
+    notify(
+      nextVal
+        ? 'Dock macOS recolhido para pílula discreta.'
+        : 'Dock macOS expandido no rodapé.',
+      'info'
+    );
   };
 
   const [launchOnStartup, setLaunchOnStartup] = useState(true);
@@ -1621,7 +1672,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <>
               <PageHeader
                 icon={activeSubTab === 'island' ? <Layers size={18} /> : <Sparkles size={18} />}
-                title={activeSubTab === 'island' ? 'Dynamic Island' : 'Dock de Agentes'}
+                title={activeSubTab === 'island' ? 'Dynamic Island' : 'Dock macOS & Navegação'}
                 subtitle="Preferência aplicada em tempo real e sincronizada com a interface do painel."
               />
 
@@ -1629,12 +1680,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <div className="jarvis-setting-row">
                   <div className="jarvis-setting-row__info">
                     <div className="jarvis-setting-row__title">
-                      {activeSubTab === 'island' ? 'Ativar Dynamic Island' : 'Ativar Dock de Agentes'}
+                      {activeSubTab === 'island' ? 'Ativar Dynamic Island' : 'Ativar Dock Flutuante macOS'}
                     </div>
                     <div className="jarvis-setting-row__desc">
                       {activeSubTab === 'island'
                         ? 'Exibe a cápsula de status e telemetria rápida na barra superior do console.'
-                        : 'Barra vertical lateral na extremidade direita com acesso rápido aos especialistas.'}
+                        : 'Dock flutuante centralizado no rodapé com Launchpad, favoritos fixados e especialistas instalados.'}
                     </div>
                   </div>
                   <div className="jarvis-setting-row__control">
@@ -1644,10 +1695,46 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         if (activeSubTab === 'island') handleToggleIsland();
                         else handleToggleDock();
                       },
-                      activeSubTab === 'island' ? 'Ativar Dynamic Island' : 'Ativar Dock de Agentes',
+                      activeSubTab === 'island' ? 'Ativar Dynamic Island' : 'Ativar Dock Flutuante macOS',
                     )}
                   </div>
                 </div>
+
+                {activeSubTab === 'dock' && (
+                  <>
+                    <div className="jarvis-setting-row">
+                      <div className="jarvis-setting-row__info">
+                        <div className="jarvis-setting-row__title">Modo Dock Puro (Ocultar Barra Lateral)</div>
+                        <div className="jarvis-setting-row__desc">
+                          Oculta a barra lateral esquerda flutuante para liberar 100% da largura, usando o Dock e o Launchpad (Ctrl+Shift+L).
+                        </div>
+                      </div>
+                      <div className="jarvis-setting-row__control">
+                        {renderToggle(
+                          sidebarHiddenPref,
+                          handleToggleSidebarHiddenPref,
+                          'Modo Dock Puro (Ocultar Barra Lateral)',
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="jarvis-setting-row">
+                      <div className="jarvis-setting-row__info">
+                        <div className="jarvis-setting-row__title">Recolher Dock para Pílula Discreta</div>
+                        <div className="jarvis-setting-row__desc">
+                          Mantém o Dock minimizado em uma pílula compacta no rodapé até você expandir novamente.
+                        </div>
+                      </div>
+                      <div className="jarvis-setting-row__control">
+                        {renderToggle(
+                          dockMinimizedPref,
+                          handleToggleDockMinimizedPref,
+                          'Recolher Dock para Pílula Discreta',
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
               </section>
             </>
           )}
@@ -1813,13 +1900,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
                   <div className="jarvis-setting-row">
                     <div className="jarvis-setting-row__info">
-                      <div className="jarvis-setting-row__title">Exibir Dock de Agentes</div>
+                      <div className="jarvis-setting-row__title">Exibir Dock Flutuante macOS</div>
                       <div className="jarvis-setting-row__desc">
-                        Rail lateral direito com atalho direto para os especialistas.
+                        Dock centralizado no rodapé com Launchpad, favoritos e atalhos para especialistas.
                       </div>
                     </div>
                     <div className="jarvis-setting-row__control">
-                      {renderToggle(agentDockEnabled, handleToggleDock, 'Exibir Dock de Agentes')}
+                      {renderToggle(agentDockEnabled, handleToggleDock, 'Exibir Dock Flutuante macOS')}
+                    </div>
+                  </div>
+
+                  <div className="jarvis-setting-row">
+                    <div className="jarvis-setting-row__info">
+                      <div className="jarvis-setting-row__title">Ocultar Barra Lateral (Modo Dock Puro)</div>
+                      <div className="jarvis-setting-row__desc">
+                        Navegue exclusivamente pelo Dock flutuante e pelo Launchpad sem barra lateral esquerda.
+                      </div>
+                    </div>
+                    <div className="jarvis-setting-row__control">
+                      {renderToggle(sidebarHiddenPref, handleToggleSidebarHiddenPref, 'Ocultar Barra Lateral (Modo Dock Puro)')}
                     </div>
                   </div>
 

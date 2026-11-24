@@ -542,8 +542,7 @@ const s: Record<string, React.CSSProperties> = {
     gridTemplateColumns: '240px minmax(0, 1fr) 280px',
     gap: '12px',
     flex: 1,
-    minHeight: '540px',
-    height: '100%',
+    minHeight: '260px',
   },
   panel: {
     display: 'flex',

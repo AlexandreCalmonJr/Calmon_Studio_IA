@@ -548,7 +548,16 @@ export const ArtifactCanvas: React.FC<ArtifactCanvasProps> = ({ artifact, onClos
       </div>
 
       {/* Active Tab Content */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <div
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: '16px 16px calc(16px + var(--jarvis-dock-clearance, 0px))',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '16px',
+        }}
+      >
         {activeTab === 'studio' && (
           <>
             {/* Fábrica Rápida de Entregáveis */}

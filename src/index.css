@@ -58,6 +58,23 @@
   --glass-bg: linear-gradient(180deg, rgba(22, 27, 38, 0.86) 0%, rgba(16, 19, 26, 0.94) 100%);
   --glass-hover-border: rgba(255, 255, 255, 0.14);
   --glass-blur: 12px;
+  --sidebar-blur: 22px;
+  --dock-blur: 22px;
+  --sidebar-glass-bg: linear-gradient(180deg, rgba(20, 24, 34, 0.82) 0%, rgba(14, 17, 24, 0.9) 100%);
+  --sidebar-glass-border: rgba(255, 255, 255, 0.11);
+  --sidebar-glass-shadow: 0 18px 42px -12px rgba(2, 6, 23, 0.56), 0 4px 12px rgba(2, 6, 23, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --dock-glass-bg: rgba(16, 20, 29, 0.88);
+  --dock-glass-border: rgba(255, 255, 255, 0.14);
+  --dock-glass-shadow: 0 20px 48px -10px rgba(0, 0, 0, 0.68), 0 4px 14px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.13);
+  --dock-tile-neutral-bg: rgba(255, 255, 255, 0.075);
+  --dock-tile-neutral-border: rgba(255, 255, 255, 0.14);
+  --dock-tooltip-bg: rgba(24, 29, 40, 0.96);
+  --dock-tooltip-border: rgba(255, 255, 255, 0.14);
+  --dock-tooltip-text: #f8fafc;
+  --launchpad-backdrop: rgba(8, 10, 16, 0.72);
+  --launchpad-panel-bg: rgba(18, 22, 31, 0.86);
+  --launchpad-panel-border: rgba(255, 255, 255, 0.13);
+  --jarvis-dock-clearance: 0px;
   --code-bg: #0c0f16;
   --code-text: #cbd5e1;
   --switch-track: rgba(255, 255, 255, 0.16);
@@ -110,6 +127,7 @@
    Dynamic Themes — Claro Amigável (Material 3 Daylight), Obsidian, Grafite, OLED
    ========================================================================== */
 :root[data-theme='friendly_light'] {
+  color-scheme: light;
   --bg-primary: #f3f6fc;
   --bg-secondary: #ffffff;
   --bg-tertiary: #ffffff;
@@ -146,6 +164,20 @@
 
   --glass-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(249, 251, 255, 0.96) 100%);
   --glass-hover-border: rgba(79, 70, 229, 0.22);
+  --sidebar-glass-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.84) 0%, rgba(247, 250, 255, 0.78) 100%);
+  --sidebar-glass-border: rgba(15, 23, 42, 0.09);
+  --sidebar-glass-shadow: 0 14px 36px -12px rgba(15, 23, 42, 0.13), 0 3px 10px -2px rgba(37, 99, 235, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  --dock-glass-bg: rgba(255, 255, 255, 0.88);
+  --dock-glass-border: rgba(15, 23, 42, 0.11);
+  --dock-glass-shadow: 0 18px 42px -10px rgba(15, 23, 42, 0.18), 0 4px 12px rgba(15, 23, 42, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --dock-tile-neutral-bg: rgba(15, 23, 42, 0.055);
+  --dock-tile-neutral-border: rgba(15, 23, 42, 0.1);
+  --dock-tooltip-bg: rgba(255, 255, 255, 0.96);
+  --dock-tooltip-border: rgba(15, 23, 42, 0.11);
+  --dock-tooltip-text: #0f172a;
+  --launchpad-backdrop: rgba(235, 241, 251, 0.72);
+  --launchpad-panel-bg: rgba(255, 255, 255, 0.88);
+  --launchpad-panel-border: rgba(15, 23, 42, 0.1);
   --code-bg: #f1f5fb;
   --code-text: #1e293b;
   --switch-track: rgba(15, 23, 42, 0.18);
@@ -165,6 +197,7 @@
 }
 
 :root[data-theme='soft_dusk'] {
+  color-scheme: dark;
   --bg-primary: #171a23;
   --bg-secondary: #1e222e;
   --bg-tertiary: #232837;
@@ -174,10 +207,14 @@
   --border-color: rgba(255, 255, 255, 0.1);
   --border-hover: rgba(255, 255, 255, 0.2);
   --glass-bg: linear-gradient(180deg, rgba(35, 40, 55, 0.88) 0%, rgba(28, 32, 44, 0.94) 100%);
+  --sidebar-glass-bg: linear-gradient(180deg, rgba(31, 36, 50, 0.84) 0%, rgba(24, 28, 39, 0.9) 100%);
+  --dock-glass-bg: rgba(30, 35, 48, 0.88);
+  --launchpad-panel-bg: rgba(31, 36, 49, 0.9);
   --code-bg: #141720;
 }
 
 :root[data-theme='oled'] {
+  color-scheme: dark;
   --bg-primary: #000000;
   --bg-secondary: #080a0f;
   --bg-tertiary: #0d1017;
@@ -186,6 +223,9 @@
   --bg-input: #06080c;
   --border-color: rgba(255, 255, 255, 0.1);
   --glass-bg: linear-gradient(180deg, rgba(13, 16, 23, 0.92) 0%, rgba(6, 8, 12, 0.97) 100%);
+  --sidebar-glass-bg: linear-gradient(180deg, rgba(11, 13, 19, 0.88) 0%, rgba(6, 8, 12, 0.94) 100%);
+  --dock-glass-bg: rgba(10, 12, 18, 0.92);
+  --launchpad-panel-bg: rgba(10, 12, 18, 0.94);
   --code-bg: #040508;
 }
 
@@ -312,6 +352,20 @@
 
 :root[data-glass='off'] {
   --glass-blur: 0px;
+  --sidebar-blur: 0px;
+  --dock-blur: 0px;
+  --sidebar-glass-bg: var(--bg-secondary);
+  --dock-glass-bg: var(--bg-elevated);
+  --launchpad-panel-bg: var(--bg-secondary);
+}
+
+:root[data-glass='off'] .jarvis-sidebar,
+:root[data-glass='off'] .jarvis-macos-dock,
+:root[data-glass='off'] .jarvis-macos-dock-mini,
+:root[data-glass='off'] .jarvis-macos-dock-stack,
+:root[data-glass='off'] .jarvis-launchpad-overlay {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 :root[data-reduced-motion='true'] *,
@@ -332,8 +386,17 @@
 }
 
 html {
-  color-scheme: light dark;
+  color-scheme: dark;
   font-size: 16px;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.28) transparent;
+}
+
+:root[data-theme='friendly_light'] * {
+  scrollbar-color: rgba(100, 116, 139, 0.3) transparent;
 }
 
 body {
@@ -1073,25 +1136,43 @@ textarea {
 }
 
 /* ==========================================================================
-   App Shell — Sidebar, Top Bar, Dock
+   App Shell — macOS Floating Sidebar, Top Bar, Floating Dock & Launchpad
    ========================================================================== */
 .jarvis-sidebar {
   width: var(--sidebar-width);
-  height: 100dvh;
-  background: var(--bg-secondary);
-  border-right: 1px solid var(--border-color);
-  box-shadow: var(--shadow-sm);
+  height: calc(100dvh - 20px);
+  margin: 10px 6px 10px 10px;
+  border-radius: 20px;
+  background: var(--sidebar-glass-bg);
+  backdrop-filter: blur(var(--sidebar-blur)) saturate(175%);
+  -webkit-backdrop-filter: blur(var(--sidebar-blur)) saturate(175%);
+  border: 1px solid var(--sidebar-glass-border);
+  box-shadow: var(--sidebar-glass-shadow);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
   z-index: 60;
   user-select: none;
   position: relative;
-  transition: width 0.22s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.2s ease;
+  overflow: hidden;
+  transition: width 0.24s cubic-bezier(0.16, 1, 0.3, 1), margin 0.24s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease, visibility 0.24s ease, background-color 0.2s ease;
 }
 
 .jarvis-sidebar.is-collapsed {
   width: var(--sidebar-collapsed);
+}
+
+@media (min-width: 769px) {
+  .jarvis-sidebar.is-hidden {
+    width: 0 !important;
+    min-width: 0 !important;
+    margin: 10px 0 !important;
+    border-width: 0 !important;
+    box-shadow: none !important;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
 }
 
 .jarvis-sidebar-item {
@@ -1099,12 +1180,12 @@ textarea {
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 10px 14px;
-  border-radius: var(--radius-pill);
+  padding: 9px 13px;
+  border-radius: 13px;
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 0.86rem;
+  font-size: 0.855rem;
   font-weight: 500;
   cursor: pointer;
   text-align: left;
@@ -1176,8 +1257,8 @@ textarea {
 
 .jarvis-topbar {
   height: var(--topbar-height);
-  padding: 0 24px;
-  border-bottom: 1px solid var(--border-color);
+  padding: 0 22px;
+  border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-secondary);
   box-shadow: var(--shadow-sm);
   display: flex;
@@ -1186,28 +1267,349 @@ textarea {
   gap: 12px;
   flex-shrink: 0;
   z-index: 40;
+  container-type: inline-size;
+  container-name: topbar-area;
 }
 
-.jarvis-dock-rail {
-  width: var(--dock-width);
-  height: 100dvh;
-  background: var(--bg-secondary);
-  border-left: 1px solid var(--border-color);
+@container topbar-area (max-width: 860px) {
+  .jarvis-topbar-hide-tablet {
+    display: none !important;
+  }
+}
+
+@container topbar-area (max-width: 680px) {
+  .jarvis-topbar-hide-narrow {
+    display: none !important;
+  }
+  .jarvis-topbar {
+    padding: 0 14px;
+    gap: 8px;
+  }
+}
+
+/* ==========================================================================
+   macOS Floating Bottom Dock (Favoritos | Agentes Instalados | Controles)
+   ========================================================================== */
+.jarvis-macos-dock-layer {
+  position: absolute;
+  bottom: 12px;
+  left: 0;
+  right: 0;
   display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  padding: 0 12px;
+  pointer-events: none;
+  z-index: 75;
+  container-type: inline-size;
+  container-name: dock-area;
+}
+
+.jarvis-macos-dock-anchor {
+  position: relative;
+  display: inline-flex;
   flex-direction: column;
   align-items: center;
-  padding: 12px 8px;
-  gap: 10px;
-  flex-shrink: 0;
-  z-index: 45;
-  position: relative;
-  transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  max-width: 100%;
+  pointer-events: none;
 }
 
-.jarvis-dock-rail.is-expanded {
-  width: 224px;
-  align-items: stretch;
+.jarvis-macos-dock {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 11px 11px;
+  border-radius: 22px;
+  background: var(--dock-glass-bg);
+  backdrop-filter: blur(var(--dock-blur)) saturate(185%);
+  -webkit-backdrop-filter: blur(var(--dock-blur)) saturate(185%);
+  border: 1px solid var(--dock-glass-border);
+  box-shadow: var(--dock-glass-shadow);
+  max-width: 100%;
+  animation: jarvisCardFadeIn 0.26s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.jarvis-macos-dock-item {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.jarvis-macos-dock-tile {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  border: 1px solid var(--dock-tile-neutral-border);
+  background: var(--dock-tile-neutral-bg);
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
+}
+
+.jarvis-macos-dock-tile--launchpad {
+  background: var(--bg-elevated);
+  border-color: var(--border-hover);
+}
+
+.jarvis-macos-dock-tile--agent {
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.jarvis-macos-dock-tile--neutral {
+  color: var(--text-secondary);
+}
+
+.jarvis-macos-dock-tile--mini {
+  width: 30px;
+  height: 36px;
+  border-radius: 10px;
+  color: var(--text-muted);
+  background: transparent;
+  border-color: transparent;
+}
+
+.jarvis-macos-dock-tile:hover {
+  border-color: var(--border-hover);
+  box-shadow: 0 8px 18px -6px rgba(2, 6, 23, 0.35);
+}
+
+.jarvis-macos-dock-tile:focus-visible {
+  outline: none;
+  border-color: var(--accent-light);
+  box-shadow: var(--focus-ring-accent);
+}
+
+.jarvis-macos-dock-tile.is-active {
+  box-shadow: 0 0 0 2px var(--accent-soft), 0 6px 14px -4px rgba(2, 6, 23, 0.28);
+}
+
+.jarvis-macos-dock-item:hover .jarvis-macos-dock-tile,
+.jarvis-macos-dock-item:focus-within .jarvis-macos-dock-tile {
+  transform: translateY(-6px) scale(1.13);
+}
+
+.jarvis-macos-dock-item:hover + .jarvis-macos-dock-item .jarvis-macos-dock-tile,
+.jarvis-macos-dock-item:has(+ .jarvis-macos-dock-item:hover) .jarvis-macos-dock-tile {
+  transform: translateY(-2px) scale(1.05);
+}
+
+.jarvis-macos-dock-dot {
+  position: absolute;
+  bottom: -7px;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  transform: translateX(-50%) scale(0.4);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.18s ease;
+}
+
+.jarvis-macos-dock-dot.is-visible {
+  opacity: 1;
+  transform: translateX(-50%) scale(1);
+}
+
+.jarvis-macos-dock-divider {
+  width: 1px;
+  height: 28px;
+  margin: 0 3px;
+  background: var(--border-hover);
+  border-radius: 999px;
+  flex-shrink: 0;
+  opacity: 0.72;
+}
+
+.jarvis-macos-dock-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background-color: var(--warning-color);
+  color: #0b0d12;
+  font-size: 0.63rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--bg-secondary);
+}
+
+.jarvis-macos-dock-badge--neutral {
+  background-color: var(--accent-color);
+  color: #ffffff;
+}
+
+.jarvis-macos-dock-tooltip {
+  position: absolute;
+  bottom: calc(100% + 14px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 11px;
+  border-radius: 10px;
+  background: var(--dock-tooltip-bg);
+  border: 1px solid var(--dock-tooltip-border);
+  color: var(--dock-tooltip-text);
+  box-shadow: var(--shadow-lg);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 120;
+  text-align: center;
+  animation: fadeIn 0.12s ease-out;
+}
+
+.jarvis-macos-dock-tooltip__title {
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.jarvis-macos-dock-tooltip__sub {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jarvis-macos-dock-mini {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--dock-glass-bg);
+  backdrop-filter: blur(var(--dock-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--dock-blur)) saturate(180%);
+  border: 1px solid var(--dock-glass-border);
+  box-shadow: var(--dock-glass-shadow);
+}
+
+.jarvis-macos-dock-mini__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.jarvis-macos-dock-mini__btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.jarvis-macos-dock-mini__dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.jarvis-macos-dock-mini__dots > span {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+}
+
+.jarvis-macos-dock-stack {
+  pointer-events: auto;
+  position: absolute;
+  bottom: calc(100% + 12px);
+  right: 0;
+  width: min(332px, calc(100vw - 32px));
+  max-height: min(440px, 60dvh);
+  background: var(--launchpad-panel-bg);
+  backdrop-filter: blur(var(--dock-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--dock-blur)) saturate(180%);
+  border: 1px solid var(--dock-glass-border);
+  border-radius: 18px;
+  box-shadow: var(--shadow-lg);
   padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 90;
+  animation: jarvisCardFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.jarvis-macos-dock-stack__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px;
+}
+
+.jarvis-macos-dock-stack__title {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.jarvis-macos-dock-stack__sub {
+  font-size: 0.71rem;
+  color: var(--text-muted);
+}
+
+.jarvis-macos-dock-stack__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.jarvis-macos-dock-stack__footer {
+  padding-top: 6px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+@container dock-area (max-width: 700px) {
+  .jarvis-macos-dock {
+    padding: 6px 8px 9px;
+    gap: 4px;
+  }
+  .jarvis-macos-dock-tile {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+  }
+}
+
+@container dock-area (max-width: 580px) {
+  .jarvis-macos-dock {
+    padding: 5px 7px 8px;
+    gap: 3px;
+  }
+  .jarvis-macos-dock-tile {
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+  }
 }
 
 .agent-dock-row {
@@ -1241,73 +1643,308 @@ textarea {
   border-color: var(--border-accent);
 }
 
-.agent-dock-bubble {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+/* ==========================================================================
+   macOS Launchpad Overlay (Grade de Módulos)
+   ========================================================================== */
+.jarvis-launchpad-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 8500;
+  background: var(--launchpad-backdrop);
+  backdrop-filter: blur(var(--dock-blur)) saturate(165%);
+  -webkit-backdrop-filter: blur(var(--dock-blur)) saturate(165%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(14px, 3vw, 32px);
+  animation: fadeIn 0.18s ease-out;
+}
+
+.jarvis-launchpad-panel {
+  width: min(1060px, 100%);
+  max-height: min(86dvh, 840px);
+  background: var(--launchpad-panel-bg);
+  border: 1px solid var(--launchpad-panel-border);
+  border-radius: 24px;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: jarvisCardFadeIn 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.jarvis-launchpad-header {
+  padding: 18px 22px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.jarvis-launchpad-brand-badge {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: var(--bg-surface);
   border: 1px solid var(--border-color);
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
+}
+
+.jarvis-launchpad-title {
+  margin: 0;
+  font-size: 1.08rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.jarvis-launchpad-subtitle {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.jarvis-launchpad-search-wrap {
+  padding: 0 22px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.jarvis-launchpad-search {
+  max-width: 460px;
+  margin: 0 auto;
+}
+
+.jarvis-launchpad-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 22px 22px;
+}
+
+.jarvis-launchpad-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   font-size: 0.72rem;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+  padding: 0 4px;
+}
+
+.jarvis-launchpad-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 10px;
+}
+
+.jarvis-launchpad-tile {
+  position: relative;
+  border-radius: 16px;
+  border: 1px solid transparent;
+  transition: background-color 0.16s ease, border-color 0.16s ease, transform 0.16s ease;
+}
+
+.jarvis-launchpad-tile:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-color);
+  transform: translateY(-2px);
+}
+
+.jarvis-launchpad-tile.is-active {
+  background: var(--accent-soft);
+  border-color: var(--border-accent);
+}
+
+.jarvis-launchpad-tile__launch {
+  width: 100%;
+  padding: 14px 8px 12px;
+  background: transparent;
+  border: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
   cursor: pointer;
-  flex-shrink: 0;
-  transition: border-color 0.15s ease, transform 0.15s ease, background-color 0.15s ease;
+  color: var(--text-primary);
+  text-align: center;
 }
 
-.agent-dock-bubble:hover {
-  border-color: var(--border-hover);
-  transform: translateY(-1px);
-}
-
-.agent-dock-bubble:focus-visible {
+.jarvis-launchpad-tile__launch:focus-visible {
   outline: none;
-  border-color: var(--accent-light);
+  border-radius: 16px;
   box-shadow: var(--focus-ring-accent);
 }
 
-.agent-dock-bubble.is-active {
-  border-color: var(--accent-light);
-  box-shadow: 0 0 0 2px var(--accent-soft);
-}
-
-.agent-dock-add-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: var(--bg-tertiary);
-  border: 1px dashed var(--border-hover);
-  color: var(--text-secondary);
+.jarvis-launchpad-tile-icon {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  border-radius: 15px;
+  border: 1px solid var(--border-color);
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  box-shadow: var(--shadow-sm);
+}
+
+.jarvis-launchpad-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--warning-color);
+  color: #0b0d12;
+  font-size: 0.66rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.jarvis-launchpad-tile__label {
+  font-size: 0.77rem;
+  font-weight: 600;
+  line-height: 1.28;
+  color: var(--text-primary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.jarvis-launchpad-active-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+}
+
+.jarvis-launchpad-pin-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
-  transition: all 0.15s ease;
+  opacity: 0;
+  transition: opacity 0.14s ease, background-color 0.14s ease, color 0.14s ease;
 }
 
-.jarvis-dock-rail.is-expanded .agent-dock-add-btn {
-  width: 100%;
-  height: 34px;
-  font-size: 0.78rem;
-  font-weight: 500;
+.jarvis-launchpad-tile:hover .jarvis-launchpad-pin-btn,
+.jarvis-launchpad-tile:focus-within .jarvis-launchpad-pin-btn,
+.jarvis-launchpad-pin-btn.is-pinned {
+  opacity: 1;
 }
 
-.agent-dock-add-btn:hover {
+.jarvis-launchpad-pin-btn:hover {
   background: var(--bg-surface);
   color: var(--text-primary);
-  border-color: var(--accent-color);
+  border-color: var(--border-color);
 }
 
-.agent-dock-add-btn:focus-visible {
-  outline: none;
+.jarvis-launchpad-pin-btn.is-pinned {
+  color: var(--accent-light);
+  background: var(--accent-soft);
+  border-color: var(--border-accent);
+}
+
+.jarvis-launchpad-agents-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px;
+}
+
+.jarvis-launchpad-agent-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 13px;
   background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+  text-align: left;
   color: var(--text-primary);
-  border-style: solid;
-  border-color: var(--accent-light);
-  box-shadow: var(--focus-ring-accent);
+  transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.14s ease;
+}
+
+.jarvis-launchpad-agent-chip:hover {
+  border-color: var(--border-hover);
+  background: var(--bg-elevated);
+  transform: translateY(-1px);
+}
+
+.jarvis-launchpad-agent-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  border: 1px solid;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.jarvis-launchpad-agent-name {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jarvis-launchpad-agent-sub {
+  display: block;
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  color: var(--accent-light);
+}
+
+.jarvis-launchpad-footer {
+  padding: 10px 22px;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.jarvis-launchpad-kbd {
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+:root[data-reduced-motion='true'] .jarvis-macos-dock-item:hover .jarvis-macos-dock-tile,
+:root[data-reduced-motion='true'] .jarvis-macos-dock-item:focus-within .jarvis-macos-dock-tile,
+:root[data-reduced-motion='true'] .jarvis-macos-dock-item:hover + .jarvis-macos-dock-item .jarvis-macos-dock-tile,
+:root[data-reduced-motion='true'] .jarvis-macos-dock-item:has(+ .jarvis-macos-dock-item:hover) .jarvis-macos-dock-tile {
+  transform: none !important;
 }
 
 /* ==========================================================================
@@ -2101,6 +2738,12 @@ textarea {
   flex-shrink: 0;
 }
 
+@media (min-width: 901px) {
+  .jarvis-settings-nav {
+    padding-bottom: var(--jarvis-dock-clearance, 0px);
+  }
+}
+
 .jarvis-settings-nav__header {
   padding: 16px 14px 10px;
   display: flex;
@@ -2149,7 +2792,7 @@ textarea {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  padding: clamp(20px, 3vw, 36px) clamp(20px, 4vw, 48px) 48px;
+  padding: clamp(20px, 3vw, 36px) clamp(20px, 4vw, 48px) calc(48px + var(--jarvis-dock-clearance, 0px));
   background: var(--bg-primary);
 }
 
@@ -2855,7 +3498,7 @@ textarea {
   }
   .jarvis-settings-content {
     overflow-y: visible;
-    padding: 20px 16px 40px;
+    padding: 20px 16px calc(40px + var(--jarvis-dock-clearance, 0px));
   }
 }
 
@@ -2864,6 +3507,9 @@ textarea {
 }
 
 @media (max-width: 768px) {
+  .jarvis-app-root {
+    --jarvis-dock-clearance: 0px !important;
+  }
   .hide-mobile {
     display: none !important;
   }
@@ -2898,9 +3544,9 @@ textarea {
     right: 0;
     bottom: 0;
     z-index: 90;
-    background-color: rgba(16, 19, 26, 0.96);
-    border-top: 1px solid var(--border-color);
-    backdrop-filter: blur(12px);
+    background: var(--dock-glass-bg);
+    border-top: 1px solid var(--dock-glass-border);
+    backdrop-filter: blur(var(--dock-blur));
     padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
     gap: 4px;
   }
@@ -2937,22 +3583,29 @@ textarea {
     padding: 0 12px;
   }
   .jarvis-sidebar,
-  .jarvis-sidebar.is-collapsed {
+  .jarvis-sidebar.is-collapsed,
+  .jarvis-sidebar.is-hidden {
     position: fixed;
     top: 0;
     left: 0;
     bottom: 0;
+    height: 100dvh;
+    margin: 0;
+    border-radius: 0 20px 20px 0;
     width: min(264px, 82vw);
     transform: translateX(-100%);
     transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
     box-shadow: var(--shadow-lg);
     z-index: 95;
+    opacity: 1;
+    pointer-events: auto;
   }
   .jarvis-sidebar.is-mobile-open {
     transform: translateX(0);
   }
   .jarvis-agent-dock,
-  .openbot-agent-dock {
+  .openbot-agent-dock,
+  .jarvis-macos-dock-layer {
     display: none !important;
   }
 }
@@ -2974,6 +3627,12 @@ textarea {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+  .jarvis-macos-dock-item:hover .jarvis-macos-dock-tile,
+  .jarvis-macos-dock-item:focus-within .jarvis-macos-dock-tile,
+  .jarvis-macos-dock-item:hover + .jarvis-macos-dock-item .jarvis-macos-dock-tile,
+  .jarvis-macos-dock-item:has(+ .jarvis-macos-dock-item:hover) .jarvis-macos-dock-tile {
+    transform: none !important;
   }
 }
 
@@ -4749,7 +5408,7 @@ textarea {
 }
 
 .jarvis-store-layout .jarvis-settings-content {
-  padding: clamp(20px, 2.5vw, 32px) clamp(20px, 3vw, 38px) 48px;
+  padding: clamp(20px, 2.5vw, 32px) clamp(20px, 3vw, 38px) calc(48px + var(--jarvis-dock-clearance, 0px));
 }
 
 .jarvis-store-nav-count {
@@ -4773,7 +5432,7 @@ textarea {
     width: 100%;
   }
   .jarvis-store-layout .jarvis-settings-content {
-    padding: 18px 16px 40px;
+    padding: 18px 16px calc(40px + var(--jarvis-dock-clearance, 0px));
   }
   .jarvis-store-apps-group {
     border-left: 1px solid var(--border-color);

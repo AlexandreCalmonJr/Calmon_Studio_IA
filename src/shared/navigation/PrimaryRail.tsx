@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   LayoutDashboard,
   MessageSquare,
@@ -36,10 +37,14 @@ import {
   AppWindow,
   GitBranch,
   Compass,
+  EyeOff,
 } from 'lucide-react';
-import { useAssistantIdentity } from '../../context/AssistantIdentityContext';
-import { getAssistantInitial } from '../../services/assistantIdentity';
+import {
+  getAssistantInitial,
+  type WorkspaceExperienceMode,
+} from '../../services/assistantIdentity';
 import { isTabUnlockedByPacks, type ModulePackDefinition } from '../../services/modulePackEngine';
+import { SIDEBAR_PINNED_STORAGE_KEY } from '../../services/navigationShell';
 
 export interface NavRailItem {
   id: string;
@@ -53,8 +58,10 @@ interface PrimaryRailProps {
   activeTab: string;
   onNavigate: (tabId: string) => void;
   collapsed?: boolean;
+  hidden?: boolean;
   mobileOpen?: boolean;
   onToggleCollapse?: () => void;
+  onToggleHidden?: () => void;
   onOpenSettings?: () => void;
   onOpenHelp?: () => void;
   onOpenProfile?: () => void;
@@ -62,6 +69,10 @@ interface PrimaryRailProps {
   installedPackIds?: string[] | null;
   customPacks?: ModulePackDefinition[];
   canManagePacks?: boolean;
+  canAccessTab?: (tabId: string) => boolean;
+  assistantName?: string;
+  experienceMode?: WorkspaceExperienceMode;
+  onToggleExperienceMode?: () => void;
 }
 
 interface NavGroup {
@@ -78,8 +89,10 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
   activeTab,
   onNavigate,
   collapsed = false,
+  hidden = false,
   mobileOpen = false,
   onToggleCollapse,
+  onToggleHidden,
   onOpenSettings,
   onOpenHelp,
   onOpenProfile,
@@ -87,14 +100,19 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
   installedPackIds = null,
   customPacks = [],
   canManagePacks = false,
+  canAccessTab,
+  assistantName = 'JARVIS',
+  experienceMode = 'engineering',
+  onToggleExperienceMode,
 }) => {
-  const { assistantName, experienceMode, setExperienceMode } = useAssistantIdentity();
   const isSimpleMode = experienceMode === 'simple';
   const assistantInitial = getAssistantInitial(assistantName);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [serverMenuOpen, setServerMenuOpen] = useState(false);
   const [activeBrainLabel, setActiveBrainLabel] = useState<string>('Esta Máquina · Local');
   const navRef = useRef<HTMLElement | null>(null);
+  const moreMenuRef = useRef<HTMLDivElement | null>(null);
+  const serverMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const onBrainSwitched = (e: Event) => {
@@ -107,7 +125,7 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
     return () => window.removeEventListener('jarvis:brain-switched', onBrainSwitched);
   }, []);
 
-  const [pinnedItems, setPinnedItems] = useState<Record<string, boolean>>({
+  const DEFAULT_PINNED: Record<string, boolean> = {
     overview: true,
     chat: true,
     tasks: true,
@@ -134,22 +152,72 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
     executive_report: false,
     advisor: false,
     server_logs: false,
+  };
+
+  const [pinnedItems, setPinnedItems] = useState<Record<string, boolean>>(() => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const saved = localStorage.getItem(SIDEBAR_PINNED_STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && typeof parsed === 'object') {
+            return { ...DEFAULT_PINNED, ...parsed };
+          }
+        }
+      }
+    } catch {}
+    return DEFAULT_PINNED;
   });
 
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {
-      if (navRef.current && !navRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const inNav = navRef.current?.contains(target) ?? false;
+      const inMore = moreMenuRef.current?.contains(target) ?? false;
+      const inServer = serverMenuRef.current?.contains(target) ?? false;
+      if (!inNav && !inMore && !inServer) {
+        setMoreMenuOpen(false);
+        setServerMenuOpen(false);
+      }
+    };
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
         setMoreMenuOpen(false);
         setServerMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleOutsideClick);
-    return () => document.removeEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('keydown', handleEsc);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('keydown', handleEsc);
+    };
   }, []);
+
+  useEffect(() => {
+    if (hidden && !mobileOpen) {
+      setMoreMenuOpen(false);
+      setServerMenuOpen(false);
+    }
+  }, [hidden, mobileOpen]);
+
+  useEffect(() => {
+    if (!collapsed) {
+      setMoreMenuOpen(false);
+    }
+  }, [collapsed]);
 
   const togglePin = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setPinnedItems((prev) => ({ ...prev, [id]: !prev[id] }));
+    setPinnedItems((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(SIDEBAR_PINNED_STORAGE_KEY, JSON.stringify(next));
+        }
+      } catch {}
+      return next;
+    });
   };
 
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
@@ -246,16 +314,18 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
   ];
 
   const rawNavGroups = isSimpleMode ? simpleNavGroups : navGroups;
-  const activeNavGroups = installedPackIds
-    ? rawNavGroups
-        .map((group) => ({
-          ...group,
-          items: group.items.filter((item) =>
-            isTabUnlockedByPacks(item.id, installedPackIds, customPacks)
-          ),
-        }))
-        .filter((group) => group.items.length > 0)
-    : rawNavGroups;
+  const activeNavGroups = rawNavGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => {
+        if (canAccessTab && !canAccessTab(item.id)) return false;
+        if (installedPackIds && !isTabUnlockedByPacks(item.id, installedPackIds, customPacks)) {
+          return false;
+        }
+        return true;
+      }),
+    }))
+    .filter((group) => group.items.length > 0);
 
   // Auto-expande o grupo caso o usuário navegue diretamente para uma tela dentro dele
   useEffect(() => {
@@ -275,19 +345,22 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
   return (
     <nav
       ref={navRef}
-      className={`jarvis-sidebar openbot-primary-rail ${collapsed ? 'is-collapsed' : ''} ${mobileOpen ? 'is-mobile-open' : ''}`}
+      className={`jarvis-sidebar openbot-primary-rail ${collapsed ? 'is-collapsed' : ''} ${hidden ? 'is-hidden' : ''} ${mobileOpen ? 'is-mobile-open' : ''}`}
       aria-label="Navegação Principal"
+      aria-hidden={hidden && !mobileOpen ? true : undefined}
+      inert={hidden && !mobileOpen ? true : undefined}
     >
       {/* Brand Header */}
       <div
+        className="jarvis-sidebar-header"
         style={{
           height: 'var(--topbar-height)',
           padding: collapsed ? '0 12px' : '0 14px',
-          borderBottom: '1px solid var(--border-color)',
+          borderBottom: '1px solid var(--border-subtle)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: collapsed ? 'center' : 'space-between',
-          gap: '10px',
+          gap: '8px',
           flexShrink: 0,
         }}
       >
@@ -347,16 +420,31 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
           )}
         </button>
 
-        {!collapsed && onToggleCollapse && (
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            className="btn btn-ghost btn-icon-sm"
-            title="Recolher barra lateral (Ctrl+B)"
-            aria-label="Recolher barra lateral"
-          >
-            <PanelLeftClose size={16} />
-          </button>
+        {!collapsed && (onToggleCollapse || onToggleHidden) && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
+            {onToggleCollapse && (
+              <button
+                type="button"
+                onClick={onToggleCollapse}
+                className="btn btn-ghost btn-icon-sm"
+                title="Recolher barra lateral (Ctrl+B)"
+                aria-label="Recolher barra lateral"
+              >
+                <PanelLeftClose size={15} />
+              </button>
+            )}
+            {onToggleHidden && (
+              <button
+                type="button"
+                onClick={onToggleHidden}
+                className="btn btn-ghost btn-icon-sm hide-mobile"
+                title="Ocultar barra lateral (Modo Dock Puro)"
+                aria-label="Ocultar barra lateral"
+              >
+                <EyeOff size={14} />
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -383,6 +471,17 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
                 aria-label="Expandir barra lateral"
               >
                 <PanelLeftOpen size={18} />
+              </button>
+            )}
+            {onToggleHidden && (
+              <button
+                type="button"
+                onClick={onToggleHidden}
+                className="jarvis-sidebar-item hide-mobile"
+                title="Ocultar barra lateral (Modo Dock Puro)"
+                aria-label="Ocultar barra lateral"
+              >
+                <EyeOff size={16} />
               </button>
             )}
             {compactPinnedItems.map((item) => {
@@ -436,78 +535,82 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
                 <MoreHorizontal size={18} />
               </button>
 
-              {moreMenuOpen && (
-                <div
-                  style={{
-                    position: 'fixed',
-                    left: '74px',
-                    top: '76px',
-                    width: '240px',
-                    maxHeight: '72vh',
-                    overflowY: 'auto',
-                    backgroundColor: 'var(--bg-elevated)',
-                    borderRadius: 'var(--radius-lg)',
-                    border: '1px solid var(--border-color)',
-                    padding: '8px',
-                    boxShadow: 'var(--shadow-lg)',
-                    zIndex: 200,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '2px',
-                  }}
-                >
+              {moreMenuOpen && typeof document !== 'undefined' &&
+                createPortal(
                   <div
+                    ref={moreMenuRef}
                     style={{
-                      fontSize: '0.72rem',
-                      fontWeight: 600,
-                      color: 'var(--text-muted)',
-                      padding: '4px 8px 6px',
+                      position: 'fixed',
+                      left: mobileOpen ? '16px' : collapsed ? '92px' : '274px',
+                      top: '80px',
+                      width: '240px',
+                      maxWidth: 'calc(100vw - 32px)',
+                      maxHeight: '72vh',
+                      overflowY: 'auto',
+                      backgroundColor: 'var(--bg-elevated)',
+                      borderRadius: 'var(--radius-lg)',
+                      border: '1px solid var(--border-color)',
+                      padding: '8px',
+                      boxShadow: 'var(--shadow-lg)',
+                      zIndex: 200,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '2px',
                     }}
                   >
-                    Módulos do Workspace
-                  </div>
-                  {allItems.map((item) => {
-                    const Icon = item.icon;
-                    const isPinned = !!pinnedItems[item.id];
-                    const isActive = activeTab === item.id;
-                    return (
-                      <div
-                        key={item.id}
-                        onClick={() => {
-                          onNavigate(item.id);
-                          setMoreMenuOpen(false);
-                        }}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: '7px 9px',
-                          borderRadius: 'var(--radius-md)',
-                          cursor: 'pointer',
-                          fontSize: '0.82rem',
-                          backgroundColor: isActive ? 'var(--accent-soft)' : 'transparent',
-                          color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                          <Icon size={15} />
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {item.label}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={(e) => togglePin(item.id, e)}
-                          className={`btn btn-ghost btn-icon-sm ${isPinned ? 'is-active' : ''}`}
-                          title={isPinned ? 'Desafixar do trilho compacto' : 'Fixar no trilho compacto'}
+                    <div
+                      style={{
+                        fontSize: '0.72rem',
+                        fontWeight: 600,
+                        color: 'var(--text-muted)',
+                        padding: '4px 8px 6px',
+                      }}
+                    >
+                      Módulos do Workspace
+                    </div>
+                    {allItems.map((item) => {
+                      const Icon = item.icon;
+                      const isPinned = !!pinnedItems[item.id];
+                      const isActive = activeTab === item.id;
+                      return (
+                        <div
+                          key={item.id}
+                          onClick={() => {
+                            onNavigate(item.id);
+                            setMoreMenuOpen(false);
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '7px 9px',
+                            borderRadius: 'var(--radius-md)',
+                            cursor: 'pointer',
+                            fontSize: '0.82rem',
+                            backgroundColor: isActive ? 'var(--accent-soft)' : 'transparent',
+                            color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                          }}
                         >
-                          <Pin size={13} style={{ transform: isPinned ? 'rotate(45deg)' : 'none' }} />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                            <Icon size={15} />
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {item.label}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => togglePin(item.id, e)}
+                            className={`btn btn-ghost btn-icon-sm ${isPinned ? 'is-active' : ''}`}
+                            title={isPinned ? 'Desafixar do trilho compacto' : 'Fixar no trilho compacto'}
+                          >
+                            <Pin size={13} style={{ transform: isPinned ? 'rotate(45deg)' : 'none' }} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>,
+                  document.body
+                )}
             </div>
           </>
         ) : (
@@ -536,7 +639,7 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
                             padding: '1px 5px',
                             borderRadius: '5px',
                             backgroundColor: 'var(--warning-soft)',
-                            color: '#fbbf24',
+                            color: 'var(--warning-text)',
                             fontSize: '0.66rem',
                             fontWeight: 700,
                           }}
@@ -592,7 +695,7 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
                               padding: '1px 6px',
                               borderRadius: '6px',
                               backgroundColor: 'var(--warning-soft)',
-                              color: '#fbbf24',
+                              color: 'var(--warning-text)',
                               border: '1px solid rgba(245, 158, 11, 0.25)',
                               fontSize: '0.72rem',
                               fontWeight: 600,
@@ -621,20 +724,22 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
           flexShrink: 0,
         }}
       >
-        <button
-          type="button"
-          onClick={() => void setExperienceMode(isSimpleMode ? 'engineering' : 'simple')}
-          className="jarvis-sidebar-item"
-          title={isSimpleMode ? 'Mudar para Modo Completo (Engenharia)' : 'Mudar para Modo Simples (Pessoal)'}
-          aria-label={isSimpleMode ? 'Alternar para Modo Completo' : 'Alternar para Modo Simples'}
-        >
-          <SlidersHorizontal size={16} color="var(--accent-light)" />
-          {!collapsed && (
-            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {isSimpleMode ? 'Ativar Modo Completo' : 'Usar Modo Simples'}
-            </span>
-          )}
-        </button>
+        {onToggleExperienceMode && (
+          <button
+            type="button"
+            onClick={onToggleExperienceMode}
+            className="jarvis-sidebar-item"
+            title={isSimpleMode ? 'Mudar para Modo Completo (Engenharia)' : 'Mudar para Modo Simples (Pessoal)'}
+            aria-label={isSimpleMode ? 'Alternar para Modo Completo' : 'Alternar para Modo Simples'}
+          >
+            <SlidersHorizontal size={16} color="var(--accent-light)" />
+            {!collapsed && (
+              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {isSimpleMode ? 'Ativar Modo Completo' : 'Usar Modo Simples'}
+              </span>
+            )}
+          </button>
+        )}
 
         <button
           type="button"
@@ -728,110 +833,114 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
             )}
           </button>
 
-          {serverMenuOpen && (
-            <div
-              style={{
-                position: 'fixed',
-                left: collapsed ? '74px' : '252px',
-                bottom: '14px',
-                width: '248px',
-                backgroundColor: 'var(--bg-elevated)',
-                borderRadius: 'var(--radius-lg)',
-                border: '1px solid var(--border-color)',
-                padding: '8px',
-                boxShadow: 'var(--shadow-lg)',
-                zIndex: 200,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '2px',
-              }}
-            >
-              <div style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)', padding: '4px 8px 6px' }}>
-                Instância ativa
-              </div>
+          {serverMenuOpen && typeof document !== 'undefined' &&
+            createPortal(
               <div
+                ref={serverMenuRef}
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
+                  position: 'fixed',
+                  left: mobileOpen ? '16px' : collapsed ? '92px' : '274px',
+                  bottom: mobileOpen ? '76px' : '18px',
+                  width: '248px',
+                  maxWidth: 'calc(100vw - 32px)',
+                  backgroundColor: 'var(--bg-elevated)',
+                  borderRadius: 'var(--radius-lg)',
+                  border: '1px solid var(--border-color)',
                   padding: '8px',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'var(--bg-tertiary)',
-                  border: '1px solid var(--border-subtle)',
-                  fontSize: '0.82rem',
-                  color: 'var(--text-primary)',
-                  marginBottom: '4px',
+                  boxShadow: 'var(--shadow-lg)',
+                  zIndex: 200,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '2px',
                 }}
               >
-                <Check size={15} color="var(--success-color)" />
-                <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {activeBrainLabel}
-                </span>
-              </div>
+                <div style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)', padding: '4px 8px 6px' }}>
+                  Instância ativa
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '8px',
+                    borderRadius: 'var(--radius-md)',
+                    backgroundColor: 'var(--bg-tertiary)',
+                    border: '1px solid var(--border-subtle)',
+                    fontSize: '0.82rem',
+                    color: 'var(--text-primary)',
+                    marginBottom: '4px',
+                  }}
+                >
+                  <Check size={15} color="var(--success-color)" />
+                  <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {activeBrainLabel}
+                  </span>
+                </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  onNavigate('brain_server');
-                  setServerMenuOpen(false);
-                }}
-                className="btn btn-ghost btn-sm btn-block btn-start"
-              >
-                <Server size={15} color="var(--accent-light)" />
-                <span>Trocar Cérebro / Docker</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onNavigate('brain_server');
+                    setServerMenuOpen(false);
+                  }}
+                  className="btn btn-ghost btn-sm btn-block btn-start"
+                >
+                  <Server size={15} color="var(--accent-light)" />
+                  <span>Trocar Cérebro / Docker</span>
+                </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  window.dispatchEvent(new CustomEvent('jarvis:open-android-pairing'));
-                  setServerMenuOpen(false);
-                }}
-                className="btn btn-ghost btn-sm btn-block btn-start"
-              >
-                <Smartphone size={15} color="var(--accent-light)" />
-                <span>Conectar app Android</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.dispatchEvent(new CustomEvent('jarvis:open-android-pairing'));
+                    setServerMenuOpen(false);
+                  }}
+                  className="btn btn-ghost btn-sm btn-block btn-start"
+                >
+                  <Smartphone size={15} color="var(--accent-light)" />
+                  <span>Conectar app Android</span>
+                </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  window.dispatchEvent(new CustomEvent('jarvis:open-access-management'));
-                  setServerMenuOpen(false);
-                }}
-                className="btn btn-ghost btn-sm btn-block btn-start"
-              >
-                <Users size={15} color="var(--text-secondary)" />
-                <span>Gerir acessos da equipe</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.dispatchEvent(new CustomEvent('jarvis:open-access-management'));
+                    setServerMenuOpen(false);
+                  }}
+                  className="btn btn-ghost btn-sm btn-block btn-start"
+                >
+                  <Users size={15} color="var(--text-secondary)" />
+                  <span>Gerir acessos da equipe</span>
+                </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  if (onOpenProfile) onOpenProfile();
-                  setServerMenuOpen(false);
-                }}
-                className="btn btn-ghost btn-sm btn-block btn-start"
-              >
-                <Settings size={15} color="var(--text-secondary)" />
-                <span>Perfil e configurações</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onOpenProfile) onOpenProfile();
+                    setServerMenuOpen(false);
+                  }}
+                  className="btn btn-ghost btn-sm btn-block btn-start"
+                >
+                  <Settings size={15} color="var(--text-secondary)" />
+                  <span>Perfil e configurações</span>
+                </button>
 
-              <div style={{ height: '1px', background: 'var(--border-color)', margin: '4px 0' }} />
+                <div style={{ height: '1px', background: 'var(--border-color)', margin: '4px 0' }} />
 
-              <button
-                type="button"
-                onClick={() => {
-                  window.dispatchEvent(new CustomEvent('jarvis:logout'));
-                  setServerMenuOpen(false);
-                }}
-                className="btn btn-danger-ghost btn-sm btn-block btn-start"
-              >
-                <LogOut size={15} />
-                <span>Sair da conta</span>
-              </button>
-            </div>
-          )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.dispatchEvent(new CustomEvent('jarvis:logout'));
+                    setServerMenuOpen(false);
+                  }}
+                  className="btn btn-danger-ghost btn-sm btn-block btn-start"
+                >
+                  <LogOut size={15} />
+                  <span>Sair da conta</span>
+                </button>
+              </div>,
+              document.body
+            )}
         </div>
       </div>
     </nav>

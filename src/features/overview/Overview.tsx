@@ -466,7 +466,7 @@ export const Overview: React.FC<OverviewProps> = ({
                     <span>3. Conheça os especialistas</span>
                   </div>
                   <p style={{ margin: '5px 0 0', fontSize: '0.77rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-                    Explore os agentes de QA, Segurança e Engenharia ou fixe seus favoritos no dock lateral.
+                    Explore os agentes de QA, Segurança e Engenharia ou abra seus favoritos pelo Dock inferior.
                   </p>
                 </button>
               </>

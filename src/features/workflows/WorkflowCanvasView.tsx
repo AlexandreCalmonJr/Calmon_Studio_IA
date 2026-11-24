@@ -943,7 +943,7 @@ export const WorkflowCanvasView: React.FC = () => {
           <div
             style={{
               position: 'absolute',
-              bottom: '20px',
+              bottom: 'calc(18px + var(--jarvis-dock-clearance, 0px))',
               left: '50%',
               transform: 'translateX(-50%)',
               zIndex: 40,
@@ -1086,7 +1086,7 @@ export const WorkflowCanvasView: React.FC = () => {
               </button>
             </div>
 
-            <div style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ padding: '14px 14px calc(14px + var(--jarvis-dock-clearance, 0px))', display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <div>
                 <label
                   htmlFor="wf-node-type"
@@ -1242,7 +1242,7 @@ export const WorkflowCanvasView: React.FC = () => {
               </button>
             </div>
 
-            <div style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ padding: '14px 14px calc(14px + var(--jarvis-dock-clearance, 0px))', display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {runningFlow && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: 'var(--accent-light)' }}>
                   <Loader2 size={15} className="animate-spin" />

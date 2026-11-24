@@ -445,13 +445,21 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
-              justifyContent: 'center',
-              gap: '22px',
-              padding: '24px 20px',
+              padding: '24px 20px calc(28px + var(--jarvis-dock-clearance, 0px))',
               overflowY: 'auto',
               animation: 'fadeIn 0.25s ease-out',
             }}
           >
+            <div
+              style={{
+                margin: 'auto 0',
+                width: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '22px',
+              }}
+            >
             <div
               onClick={() => !activeAgent && setGreetingIndex((prev) => (prev + 1) % GREETINGS.length)}
               style={{
@@ -567,6 +575,7 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
                 );
               })}
             </div>
+            </div>
           </div>
         ) : (
           <>
@@ -606,7 +615,7 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
             {/* Cápsula de Entrada Fixada na Base */}
             <div
               style={{
-                padding: '12px 20px 18px',
+                padding: '12px 20px calc(18px + var(--jarvis-dock-clearance, 0px))',
                 backgroundColor: 'var(--bg-primary)',
                 borderTop: '1px solid var(--border-subtle)',
               }}

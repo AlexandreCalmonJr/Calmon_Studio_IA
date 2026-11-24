@@ -809,7 +809,7 @@ export const GitHubImporterView: React.FC<GitHubImporterViewProps> = ({ onNaviga
                       </strong>
                     </div>
                     <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.48 }}>
-                      Cria um especialista dedicado pronto no painel lateral direito (AgentDock) e no Chat com a documentação deste projeto.
+                      Cria um especialista dedicado pronto no Dock inferior e no Chat com a documentação deste projeto.
                     </p>
                     <input
                       type="text"

@@ -43,7 +43,7 @@ export const ToastContainer: React.FC = () => {
       className="jarvis-toast-stack"
       style={{
         position: 'fixed',
-        bottom: '24px',
+        bottom: 'calc(20px + var(--jarvis-dock-clearance, 0px))',
         right: '24px',
         display: 'flex',
         flexDirection: 'column',
