@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { API_BASE } from '../../services/api/client';
+import { apiFetch } from '../../services/sessionTransport';
 import {
   Zap,
   CheckCircle2,
@@ -20,7 +21,11 @@ import { HardwareSpecsCards } from './HardwareSpecsCards';
 import { OllamaPerformancePanel } from './OllamaPerformancePanel';
 import { InstalledModelsEvaluation } from './InstalledModelsEvaluation';
 
-export const HardwareAdvisorView: React.FC = () => {
+interface HardwareAdvisorViewProps {
+  embedded?: boolean;
+}
+
+export const HardwareAdvisorView: React.FC<HardwareAdvisorViewProps> = ({ embedded = false }) => {
   const [data, setData] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [roleLoaded, setRoleLoaded] = useState(false);
@@ -83,7 +88,7 @@ export const HardwareAdvisorView: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${API_BASE}/auth/me`, { credentials: 'include' })
+    apiFetch(`${API_BASE}/auth/me`, { credentials: 'include' })
       .then(async (response) => (response.ok ? response.json() : null))
       .then((principal) => {
         if (cancelled) return;
@@ -140,11 +145,13 @@ export const HardwareAdvisorView: React.FC = () => {
 
   if (!isAdmin) {
     return (
-      <div className="jarvis-page-shell">
-        <PageHeader
-          title="Diagnóstico de Hardware & Modelos"
-          subtitle="Análise dos recursos físicos reais da máquina e calibração de modelos para máxima velocidade local."
-        />
+      <div className={embedded ? '' : 'jarvis-page-shell'}>
+        {!embedded && (
+          <PageHeader
+            title="Diagnóstico de Hardware & Modelos"
+            subtitle="Análise dos recursos físicos reais da máquina e calibração de modelos para máxima velocidade local."
+          />
+        )}
         <div className="jarvis-callout jarvis-callout--info">
           O diagnóstico da máquina anfitriã e as alterações globais de desempenho estão disponíveis apenas para administradores.
         </div>
@@ -205,27 +212,29 @@ export const HardwareAdvisorView: React.FC = () => {
   const cloudOptions = recs.cloud_acceleration_options || [];
 
   return (
-    <div className="jarvis-page-shell">
-      <PageHeader
-        title="Diagnóstico de Hardware & Modelos"
-        subtitle="Análise dos recursos físicos reais da máquina e calibração de modelos para máxima velocidade local."
-        meta={[
-          <span key="cpu" className="jarvis-tabular">{cpu.logical_cores || '—'} threads lógicas</span>,
-          <span key="ram" className="jarvis-tabular">{ram.total_gb ? `${ram.total_gb} GB RAM` : 'RAM indisponível'}</span>,
-          gpu.has_dedicated_gpu ? 'GPU Dedicada' : 'Gráficos Integrados',
-        ]}
-        actions={
-          <button
-            type="button"
-            onClick={loadProfile}
-            disabled={loading}
-            className="btn btn-secondary btn-sm"
-          >
-            <RefreshCw size={14} className={loading ? 'spin' : ''} />
-            <span>{loading ? 'Diagnosticando…' : 'Reescanear Hardware'}</span>
-          </button>
-        }
-      />
+    <div className={embedded ? '' : 'jarvis-page-shell'} style={embedded ? { display: 'flex', flexDirection: 'column', gap: '18px' } : undefined}>
+      {!embedded && (
+        <PageHeader
+          title="Diagnóstico de Hardware & Modelos"
+          subtitle="Análise dos recursos físicos reais da máquina e calibração de modelos para máxima velocidade local."
+          meta={[
+            <span key="cpu" className="jarvis-tabular">{cpu.logical_cores || '—'} threads lógicas</span>,
+            <span key="ram" className="jarvis-tabular">{ram.total_gb ? `${ram.total_gb} GB RAM` : 'RAM indisponível'}</span>,
+            gpu.has_dedicated_gpu ? 'GPU Dedicada' : 'Gráficos Integrados',
+          ]}
+          actions={
+            <button
+              type="button"
+              onClick={loadProfile}
+              disabled={loading}
+              className="btn btn-secondary btn-sm"
+            >
+              <RefreshCw size={14} className={loading ? 'spin' : ''} />
+              <span>{loading ? 'Diagnosticando…' : 'Reescanear Hardware'}</span>
+            </button>
+          }
+        />
+      )}
 
       {(performanceError || actionError) && (
         <div role="alert" className="jarvis-error-banner">

@@ -19,8 +19,9 @@ import { AgentRecommendationTable } from './AgentRecommendationTable';
 import { ModelQualityPanel } from './ModelQualityPanel';
 import { HardwareAdvisorPanel } from './HardwareAdvisorPanel';
 import { ModelArenaPanel } from './ModelArenaPanel';
+import { HardwareAdvisorView } from '../hardware/HardwareAdvisorView';
 
-type ModelsTabId = 'advisor' | 'arena' | 'hub' | 'local' | 'quality';
+type ModelsTabId = 'advisor' | 'hardware' | 'arena' | 'hub' | 'local' | 'quality';
 
 export const ModelManagerView: React.FC = () => {
   const [data, setData] = useState<any>(null);
@@ -257,13 +258,13 @@ export const ModelManagerView: React.FC = () => {
           </span>,
           <span
             key="hybrid-status"
-            style={{ color: geminiConnected ? '#60a5fa' : '#4ade80', fontWeight: 600 }}
+            style={{ color: geminiConnected ? 'var(--info-text)' : 'var(--success-text)', fontWeight: 600 }}
           >
             {geminiConnected ? 'Motor Híbrido (Local + Gemini)' : 'Modo 100% Local'}
           </span>,
           <span
             key="hf-status"
-            style={{ color: hfConnected ? '#4ade80' : '#fbbf24', fontWeight: 500 }}
+            style={{ color: hfConnected ? 'var(--success-text)' : 'var(--warning-text)', fontWeight: 500 }}
           >
             {hfConnected ? 'Hugging Face ativo' : 'Hugging Face desconectado'}
           </span>,
@@ -310,6 +311,16 @@ export const ModelManagerView: React.FC = () => {
                 className={`jarvis-segmented-btn ${activeTab === 'advisor' ? 'is-active' : ''}`}
               >
                 Consultor & Provedores
+              </button>
+
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'hardware'}
+                onClick={() => setActiveTab('hardware')}
+                className={`jarvis-segmented-btn ${activeTab === 'hardware' ? 'is-active' : ''}`}
+              >
+                Diagnóstico de Hardware
               </button>
 
               <button
@@ -362,6 +373,8 @@ export const ModelManagerView: React.FC = () => {
               onRecommendationsApplied={() => void loadData()}
             />
           )}
+
+          {activeTab === 'hardware' && <HardwareAdvisorView embedded />}
 
           {activeTab === 'arena' && <ModelArenaPanel installedLocalModels={data?.models || []} />}
 

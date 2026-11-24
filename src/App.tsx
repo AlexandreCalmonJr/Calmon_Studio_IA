@@ -176,17 +176,17 @@ const NO_HEADER_TABS = new Set(['chat', 'workflows']);
 
 const TAB_LABELS: Record<string, { section: string; title: string }> = {
   overview: { section: 'Principal', title: 'Visão Geral' },
-  chat: { section: 'Principal', title: 'Conversas' },
-  tasks: { section: 'Principal', title: 'Gestor de Tarefas' },
-  workflows: { section: 'Principal', title: 'Fluxos de Trabalho' },
+  chat: { section: 'Principal', title: 'Chat e Conversas' },
+  tasks: { section: 'Produtividade', title: 'Tarefas' },
+  workflows: { section: 'Produtividade', title: 'Monitor de Fluxo de Tarefas' },
   workspace: { section: 'Principal', title: 'Projetos & Biblioteca' },
-  coding: { section: 'Engenharia', title: 'Coding Agent' },
-  agents: { section: 'Engenharia', title: 'Centro de Agentes' },
+  coding: { section: 'Engenharia', title: 'IDE & Código' },
+  agents: { section: 'Inteligência', title: 'Central de Agentes' },
   architecture: { section: 'Engenharia', title: 'Agente de Arquitetura' },
-  models: { section: 'Engenharia', title: 'Modelos & Provedores' },
-  knowledge: { section: 'Engenharia', title: 'Base de Conhecimento' },
-  skills: { section: 'Engenharia', title: 'Habilidades dos Agentes' },
-  store: { section: 'Pacotes', title: 'Loja de Pacotes & Núcleos' },
+  models: { section: 'Inteligência', title: 'Central de Modelos & Hardware' },
+  knowledge: { section: 'Inteligência', title: 'Habilidades & Conhecimentos' },
+  skills: { section: 'Inteligência', title: 'Habilidades & Conhecimentos' },
+  store: { section: 'Loja Unificada', title: 'Loja de Pacotes, Núcleos & Habilidades' },
   pack_studio: { section: 'Admin & Dev', title: 'Estúdio de Pacotes' },
   approvals: { section: 'Governança', title: 'Central de Aprovações' },
   usage: { section: 'Governança', title: 'Uso & Custos' },
@@ -194,18 +194,18 @@ const TAB_LABELS: Record<string, { section: string; title: string }> = {
   backend_studio: { section: 'Estúdios', title: 'Backend Studio' },
   quality: { section: 'Estúdios', title: 'Qualidade & QA' },
   design: { section: 'Estúdios', title: 'Design Studio' },
-  office: { section: 'Operações', title: 'Escritório de Agentes' },
+  office: { section: 'Principal', title: 'Escritório Isométrico' },
   executive_report: { section: 'Governança', title: 'Relatório Executivo ROI' },
-  advisor: { section: 'Sistema', title: 'Hardware Advisor' },
+  advisor: { section: 'Inteligência', title: 'Diagnóstico de Hardware' },
   server_logs: { section: 'Sistema', title: 'Logs do Servidor' },
   learning: { section: 'Suporte', title: 'Central de Ajuda' },
   settings: { section: 'Sistema', title: 'Configurações' },
   companion: { section: 'Ecossistema', title: 'Voz, PWA & Companion' },
-  creative_studio: { section: 'Principal', title: 'Estúdio Criativo (Excel, Imagens & Vídeos)' },
-  app_builder: { section: 'Principal', title: 'Construtor de Apps (Android & Windows)' },
+  creative_studio: { section: 'Principal', title: 'Estúdio Criativo' },
+  app_builder: { section: 'Principal', title: 'Construtor de Apps' },
   github_import: { section: 'Engenharia', title: 'Importar do GitHub' },
-  android_app: { section: 'Ecossistema', title: 'App Mobile Android (.apk / .aab)' },
-  brain_server: { section: 'Ecossistema', title: 'Cérebros & Servidor (Local / Docker)' },
+  android_app: { section: 'Ecossistema', title: 'App Mobile Android' },
+  brain_server: { section: 'Ecossistema', title: 'Cérebros & Servidor' },
   not_found: { section: 'JARVIS', title: 'Página não encontrada' },
 };
 
@@ -999,6 +999,8 @@ const DashboardApp: React.FC = () => {
             })()
           ) : (
             <div
+              className={activeTab === 'chat' ? undefined : 'jarvis-view-enter'}
+              key={activeTab === 'chat' ? 'chat-persistent-shell' : `view-${activeTab}`}
               style={
                 isFullscreenTab
                   ? { width: '100%', height: '100%', minHeight: 0 }

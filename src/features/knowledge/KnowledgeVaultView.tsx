@@ -7,6 +7,7 @@ import {
   Brain,
   Users,
   FileText,
+  Layers,
 } from 'lucide-react';
 import {
   fetchKnowledgeDocuments,
@@ -26,11 +27,21 @@ import { DocumentListGrid } from './DocumentListGrid';
 import { FolderIndexModal, TextSnippetModal } from './DocumentModals';
 import { BrainMapPanel } from './BrainMapPanel';
 import { AssistantFederationPanel } from './AssistantFederationPanel';
+import { SkillsCatalogPanel } from '../skills/SkillsCatalogPanel';
 
-type KnowledgeTabId = 'brain' | 'assistants' | 'documents';
+type KnowledgeTabId = 'skills' | 'brain' | 'documents' | 'assistants';
 
-export const KnowledgeVaultView: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<KnowledgeTabId>('brain');
+interface KnowledgeVaultViewProps {
+  onNavigate?: (tab: string) => void;
+  initialTab?: KnowledgeTabId;
+}
+
+export const KnowledgeVaultView: React.FC<KnowledgeVaultViewProps> = ({
+  onNavigate,
+  initialTab = 'skills',
+}) => {
+  const [activeTab, setActiveTab] = useState<KnowledgeTabId>(initialTab);
+  const [skillsCount, setSkillsCount] = useState<number | null>(null);
   const [documents, setDocuments] = useState<any[]>([]);
   const [canManageKnowledge, setCanManageKnowledge] = useState(false);
   const [roleLoaded, setRoleLoaded] = useState(false);
@@ -208,9 +219,10 @@ export const KnowledgeVaultView: React.FC = () => {
   return (
     <div className="jarvis-page-shell">
       <PageHeader
-        title="Segundo Cérebro & Conhecimento"
-        subtitle="Memória viva em 3 camadas, comunicação entre assistentes da casa e cofre RAG de documentos."
+        title="Habilidades & Conhecimentos"
+        subtitle="Gerencie as habilidades (Skills) dos seus agentes, o Segundo Cérebro em 3 camadas e a base de documentos RAG em um só espaço."
         meta={[
+          skillsCount !== null ? <span key="skills" className="jarvis-tabular">{skillsCount} habilidades</span> : null,
           <span key="docs" className="jarvis-tabular">{documents.length} documento{documents.length === 1 ? '' : 's'}</span>,
           <span key="chunks" className="jarvis-tabular">{totalChunks} trechos RAG</span>,
         ]}
@@ -279,23 +291,29 @@ export const KnowledgeVaultView: React.FC = () => {
       {/* Primary Section Tabs */}
       <div
         role="tablist"
-        aria-label="Seções do Segundo Cérebro e Conhecimento"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          borderBottom: '1px solid var(--border-color)',
-          paddingBottom: '10px',
-          flexWrap: 'wrap',
-        }}
+        aria-label="Seções de Habilidades e Conhecimentos"
+        className="jarvis-segmented"
+        style={{ alignSelf: 'flex-start', flexWrap: 'wrap' }}
       >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'skills'}
+          onClick={() => setActiveTab('skills')}
+          className={`jarvis-segmented-btn ${activeTab === 'skills' ? 'is-active' : ''}`}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+        >
+          <Layers size={14} />
+          <span>Habilidades (Skills){skillsCount !== null ? ` (${skillsCount})` : ''}</span>
+        </button>
+
         <button
           type="button"
           role="tab"
           aria-selected={activeTab === 'brain'}
           onClick={() => setActiveTab('brain')}
-          className={`btn btn-sm ${activeTab === 'brain' ? 'btn-primary' : 'btn-ghost'}`}
-          style={{ whiteSpace: 'nowrap' }}
+          className={`jarvis-segmented-btn ${activeTab === 'brain' ? 'is-active' : ''}`}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
         >
           <Brain size={14} />
           <span>Mapa do Cérebro</span>
@@ -304,27 +322,35 @@ export const KnowledgeVaultView: React.FC = () => {
         <button
           type="button"
           role="tab"
-          aria-selected={activeTab === 'assistants'}
-          onClick={() => setActiveTab('assistants')}
-          className={`btn btn-sm ${activeTab === 'assistants' ? 'btn-primary' : 'btn-ghost'}`}
-          style={{ whiteSpace: 'nowrap' }}
+          aria-selected={activeTab === 'documents'}
+          onClick={() => setActiveTab('documents')}
+          className={`jarvis-segmented-btn ${activeTab === 'documents' ? 'is-active' : ''}`}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
         >
-          <Users size={14} />
-          <span>Assistentes Conectados</span>
+          <FileText size={14} />
+          <span>Documentos & RAG ({documents.length})</span>
         </button>
 
         <button
           type="button"
           role="tab"
-          aria-selected={activeTab === 'documents'}
-          onClick={() => setActiveTab('documents')}
-          className={`btn btn-sm ${activeTab === 'documents' ? 'btn-primary' : 'btn-ghost'}`}
-          style={{ whiteSpace: 'nowrap' }}
+          aria-selected={activeTab === 'assistants'}
+          onClick={() => setActiveTab('assistants')}
+          className={`jarvis-segmented-btn ${activeTab === 'assistants' ? 'is-active' : ''}`}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
         >
-          <FileText size={14} />
-          <span>Documentos & RAG ({documents.length})</span>
+          <Users size={14} />
+          <span>Assistentes Conectados</span>
         </button>
       </div>
+
+      {activeTab === 'skills' && (
+        <SkillsCatalogPanel
+          compactHeader
+          onSkillsCountChange={(total) => setSkillsCount(total)}
+          onOpenStore={onNavigate ? () => onNavigate('store') : undefined}
+        />
+      )}
 
       {activeTab === 'brain' && <BrainMapPanel />}
 

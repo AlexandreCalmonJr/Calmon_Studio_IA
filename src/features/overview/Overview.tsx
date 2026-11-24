@@ -14,6 +14,11 @@ import {
   Sparkles,
   BookOpen,
   ListTodo,
+  Wand2,
+  Building2,
+  Workflow,
+  Store,
+  Cpu,
 } from 'lucide-react';
 import { SystemHealth, ApprovalRequestItem, getStatusLabel } from '../../types';
 import { ModelUsageCharts } from './ModelUsageCharts';
@@ -85,7 +90,7 @@ const MetricCard: React.FC<{
   accentColor?: string;
 }> = ({ label, value, detail, icon, accentColor }) => (
   <section
-    className="glass-panel"
+    className="glass-card"
     style={{
       padding: '18px 20px',
       minWidth: 0,
@@ -305,6 +310,44 @@ export const Overview: React.FC<OverviewProps> = ({
           ))}
         </div>
       </section>
+
+      {/* Atalhos Rápidos das Principais Áreas */}
+      {onNavigate && (
+        <section aria-label="Atalhos rápidos do workspace">
+          <div className="jarvis-quick-launch-grid">
+            {[
+              { id: 'creative_studio', label: 'Estúdio Criativo', desc: 'Planilhas, imagens e vídeos', icon: Wand2 },
+              { id: 'office', label: 'Escritório Isométrico', desc: 'Equipe e mesa redonda', icon: Building2 },
+              { id: 'tasks', label: 'Tarefas', desc: 'Delegar e acompanhar', icon: ListTodo },
+              { id: 'workflows', label: 'Monitor de Fluxos', desc: 'Rotinas e execuções', icon: Workflow },
+              { id: 'models', label: 'Modelos & Hardware', desc: 'GPU, Ollama e Arena', icon: Cpu },
+              { id: 'store', label: 'Loja Unificada', desc: 'Pacotes, núcleos e skills', icon: Store },
+            ].map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => onNavigate(item.id)}
+                  className="jarvis-choice-card glass-card"
+                  style={{ padding: '14px 16px' }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', width: '100%' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '0.86rem', color: 'var(--text-primary)' }}>
+                      <Icon size={16} color="var(--accent-light)" />
+                      <span>{item.label}</span>
+                    </span>
+                    <ArrowRight size={14} color="var(--text-muted)" />
+                  </div>
+                  <p style={{ margin: '5px 0 0', fontSize: '0.76rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                    {item.desc}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* Guia de Primeiros Passos (dispensável) */}
       {!onboardingDismissed && (
@@ -664,7 +707,7 @@ export const Overview: React.FC<OverviewProps> = ({
                 }}
               >
                 {approvalsError ? (
-                  <p role="alert" style={{ color: '#fca5a5', fontSize: '0.84rem', margin: 0 }}>
+                  <p role="alert" style={{ color: 'var(--danger-text)', fontSize: '0.84rem', margin: 0 }}>
                     {approvalsError}
                   </p>
                 ) : approvalsLoading ? (

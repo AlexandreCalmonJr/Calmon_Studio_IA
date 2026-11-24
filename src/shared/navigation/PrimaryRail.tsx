@@ -184,43 +184,47 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
       collapsible: false,
       items: [
         { id: 'overview', label: 'Visão Geral', icon: LayoutDashboard },
-        { id: 'chat', label: 'Conversas', icon: MessageSquare },
+        { id: 'chat', label: 'Chat e Conversas', icon: MessageSquare },
         { id: 'creative_studio', label: 'Estúdio Criativo', icon: Wand2 },
-        { id: 'app_builder', label: 'Construtor de Apps', icon: AppWindow },
-        { id: 'office', label: 'Escritório Vivo', icon: Building2 },
+        { id: 'office', label: 'Escritório Isométrico', icon: Building2 },
         { id: 'tasks', label: 'Tarefas', icon: ListTodo },
-        { id: 'workflows', label: 'Fluxos', icon: Workflow },
+        { id: 'workflows', label: 'Monitor de Fluxos', icon: Workflow },
+      ],
+    },
+    {
+      title: 'Inteligência & Recursos',
+      collapsible: false,
+      items: [
+        { id: 'agents', label: 'Central de Agentes', icon: Bot },
+        { id: 'models', label: 'Modelos & Hardware', icon: Cpu },
+        { id: 'knowledge', label: 'Habilidades & Conhecimentos', icon: BookOpen },
+      ],
+    },
+    {
+      title: 'Engenharia & Ecossistema',
+      collapsible: true,
+      items: [
         { id: 'workspace', label: 'Projetos', icon: FolderKanban },
         { id: 'coding', label: 'IDE & Código', icon: Code2 },
-        { id: 'security', label: 'Sentinela & Segurança', icon: ShieldCheck },
+        { id: 'architecture', label: 'Agente de Arquitetura', icon: Compass },
+        { id: 'app_builder', label: 'Construtor de Apps', icon: AppWindow },
+        { id: 'github_import', label: 'Importar GitHub', icon: GitBranch },
         { id: 'android_app', label: 'App Mobile Android', icon: Smartphone },
         { id: 'brain_server', label: 'Cérebros & Servidor', icon: Server },
         { id: 'companion', label: 'Voz & Companion', icon: Smartphone },
       ],
     },
     {
-      title: 'Engenharia & IA',
-      collapsible: true,
-      items: [
-        { id: 'agents', label: 'Agentes', icon: Bot },
-        { id: 'architecture', label: 'Agente de Arquitetura', icon: Compass },
-        { id: 'models', label: 'Modelos & Chaves', icon: Cpu },
-        { id: 'knowledge', label: 'Conhecimento', icon: Database },
-        { id: 'skills', label: 'Habilidades', icon: Layers },
-        { id: 'github_import', label: 'Importar GitHub', icon: GitBranch },
-      ],
-    },
-    {
       title: 'Estúdios & Governança',
       collapsible: true,
       items: [
+        { id: 'security', label: 'Sentinela & Segurança', icon: ShieldCheck },
         { id: 'approvals', label: 'Aprovações', icon: CheckSquare, badge: pendingApprovalsCount },
         { id: 'usage', label: 'Uso & Custos', icon: TrendingUp },
         { id: 'backend_studio', label: 'Backend Studio', icon: Wrench },
         { id: 'quality', label: 'Qualidade QA', icon: CheckSquare },
         { id: 'design', label: 'Design Studio', icon: Palette },
         { id: 'executive_report', label: 'Relatório ROI', icon: FileBarChart2 },
-        { id: 'advisor', label: 'Hardware', icon: Sparkles },
         { id: 'server_logs', label: 'Logs do Servidor', icon: Terminal },
       ],
     },
@@ -231,19 +235,15 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
       title: 'Meu Espaço',
       collapsible: false,
       items: [
-        { id: 'overview', label: 'Início', icon: LayoutDashboard },
+        { id: 'overview', label: 'Visão Geral', icon: LayoutDashboard },
         { id: 'chat', label: `Conversar com ${assistantName}`, icon: MessageSquare },
-        { id: 'creative_studio', label: 'Planilhas, Imagens & Vídeos', icon: Wand2 },
-        { id: 'app_builder', label: 'Criar Apps (Android/PC)', icon: AppWindow },
-        { id: 'android_app', label: 'App Android (QR & APK)', icon: Smartphone },
-        { id: 'brain_server', label: 'Cérebros (Local / Docker)', icon: Server },
-        { id: 'companion', label: 'Voz & Celular (PWA)', icon: Smartphone },
-        { id: 'agents', label: 'Meus Agentes', icon: Bot },
-        { id: 'architecture', label: 'Agente de Arquitetura', icon: Compass },
-        { id: 'github_import', label: 'Importar do GitHub', icon: GitBranch },
-        { id: 'workflows', label: 'Meus Fluxos', icon: Workflow },
+        { id: 'creative_studio', label: 'Estúdio Criativo', icon: Wand2 },
+        { id: 'office', label: 'Escritório Isométrico', icon: Building2 },
         { id: 'tasks', label: 'Tarefas', icon: ListTodo },
-        { id: 'knowledge', label: 'Cadernos & Memória', icon: BookOpen },
+        { id: 'workflows', label: 'Monitor de Fluxos', icon: Workflow },
+        { id: 'agents', label: 'Central de Agentes', icon: Bot },
+        { id: 'models', label: 'Modelos & Hardware', icon: Cpu },
+        { id: 'knowledge', label: 'Habilidades & Conhecimentos', icon: BookOpen },
       ],
     },
   ];
@@ -643,11 +643,11 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
           type="button"
           onClick={() => onNavigate('store')}
           className={`jarvis-sidebar-item ${activeTab === 'store' ? 'is-active' : ''}`}
-          title="Loja de Pacotes & Núcleos"
+          title="Loja Unificada — Pacotes, Núcleos & Habilidades"
           aria-current={activeTab === 'store' ? 'page' : undefined}
         >
           <Store size={16} />
-          {!collapsed && <span>Loja de Pacotes</span>}
+          {!collapsed && <span>Loja Unificada</span>}
         </button>
 
         {canManagePacks && (

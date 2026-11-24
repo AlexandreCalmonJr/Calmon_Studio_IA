@@ -396,16 +396,37 @@ export const AgentOfficeView: React.FC<AgentOfficeViewProps> = ({ onSelectForCha
 
       {agents.length > 0 && (
         <>
+          {/* Resumo Rápido do Escritório */}
+          <div className="jarvis-quick-launch-grid" aria-label="Resumo do escritório">
+            <div className="glass-card" style={{ padding: '14px 16px' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Especialistas no escritório</div>
+              <div className="tabular-nums" style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '4px' }}>
+                {agents.length}
+              </div>
+            </div>
+            <div className="glass-card" style={{ padding: '14px 16px' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Em atividade agora</div>
+              <div className="tabular-nums" style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--success-text)', marginTop: '4px' }}>
+                {liveStatuses.filter((s) => s.state !== 'idle').length}
+              </div>
+            </div>
+            <div className="glass-card" style={{ padding: '14px 16px' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Departamentos ativos</div>
+              <div className="tabular-nums" style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--accent-light)', marginTop: '4px' }}>
+                {DEPARTMENTS.length}
+              </div>
+            </div>
+            <div className="glass-card" style={{ padding: '14px 16px' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Mesas redondas recentes</div>
+              <div className="tabular-nums" style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '4px' }}>
+                {recentRoundtables.length}
+              </div>
+            </div>
+          </div>
+
           {/* Grade principal: Canvas Isométrico + Painel Mesa Redonda ao Vivo */}
           {(officeMode === 'canvas' || officeMode === 'both') && (
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'minmax(0, 1.55fr) minmax(320px, 1fr)',
-                gap: '16px',
-                alignItems: 'start',
-              }}
-            >
+            <div className="jarvis-office-grid">
               <AgentOfficeCanvas
                 agents={agents}
                 onSelectAgent={handleOpenDrawer}
@@ -418,11 +439,9 @@ export const AgentOfficeView: React.FC<AgentOfficeViewProps> = ({ onSelectForCha
               {/* Painel Interativo: Mesa Redonda ao Vivo */}
               <section
                 aria-label="Mesa Redonda ao Vivo"
+                className="glass-panel"
                 style={{
-                  backgroundColor: 'var(--bg-secondary)',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: 'var(--radius-lg)',
-                  padding: '16px',
+                  padding: '18px',
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '14px',

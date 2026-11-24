@@ -354,32 +354,20 @@ export const CreativeMediaStudioView: React.FC = () => {
       }}
     >
       {/* Header do Estúdio */}
-      <div
-        className="jarvis-settings-card"
-        style={{
-          display: 'flex',
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '16px',
-          background:
-            'linear-gradient(135deg, rgba(249, 115, 22, 0.12) 0%, rgba(18, 22, 31, 0.96) 55%, rgba(11, 13, 18, 0.98) 100%)',
-          borderColor: 'rgba(249, 115, 22, 0.28)',
-        }}
-      >
+      <div className="jarvis-studio-hero">
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}>
           <div
             style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '12px',
-              background: 'linear-gradient(135deg, #f97316 0%, #c2410c 100%)',
+              width: '46px',
+              height: '46px',
+              borderRadius: '14px',
+              background: 'var(--btn-primary-bg)',
               color: '#ffffff',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               flexShrink: 0,
+              boxShadow: '0 6px 16px -4px var(--accent-glow)',
             }}
           >
             <Wand2 size={22} />
@@ -388,7 +376,7 @@ export const CreativeMediaStudioView: React.FC = () => {
             <h1
               style={{
                 margin: 0,
-                fontSize: '1.25rem',
+                fontSize: '1.3rem',
                 fontWeight: 700,
                 color: 'var(--text-primary)',
                 letterSpacing: '-0.02em',
@@ -412,32 +400,27 @@ export const CreativeMediaStudioView: React.FC = () => {
         <div
           role="tablist"
           aria-label="Módulos do Estúdio Criativo"
-          style={{
-            display: 'inline-flex',
-            backgroundColor: 'var(--bg-primary)',
-            border: '1px solid var(--border-color)',
-            borderRadius: '10px',
-            padding: '4px',
-            gap: '4px',
-            flexWrap: 'wrap',
-          }}
+          className="jarvis-segmented"
+          style={{ flexWrap: 'wrap' }}
         >
           <button
             type="button"
             role="tab"
             aria-selected={activeTab === 'spreadsheets'}
             onClick={() => setActiveTab('spreadsheets')}
-            className={`btn btn-sm ${activeTab === 'spreadsheets' ? 'btn-primary' : 'btn-ghost'}`}
+            className={`jarvis-segmented-btn ${activeTab === 'spreadsheets' ? 'is-active' : ''}`}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
           >
             <FileSpreadsheet size={15} />
-            <span>Planilhas Excel ({spreadsheets.length})</span>
+            <span>Planilhas ({spreadsheets.length})</span>
           </button>
           <button
             type="button"
             role="tab"
             aria-selected={activeTab === 'images'}
             onClick={() => setActiveTab('images')}
-            className={`btn btn-sm ${activeTab === 'images' ? 'btn-primary' : 'btn-ghost'}`}
+            className={`jarvis-segmented-btn ${activeTab === 'images' ? 'is-active' : ''}`}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
           >
             <ImageIcon size={15} />
             <span>Imagens ({images.length})</span>
@@ -447,7 +430,8 @@ export const CreativeMediaStudioView: React.FC = () => {
             role="tab"
             aria-selected={activeTab === 'videos'}
             onClick={() => setActiveTab('videos')}
-            className={`btn btn-sm ${activeTab === 'videos' ? 'btn-primary' : 'btn-ghost'}`}
+            className={`jarvis-segmented-btn ${activeTab === 'videos' ? 'is-active' : ''}`}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
           >
             <Film size={15} />
             <span>Vídeos ({videos.length})</span>
