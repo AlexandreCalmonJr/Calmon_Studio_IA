@@ -37,8 +37,12 @@ import { AGENT_TEMPLATE_LIBRARY } from '../../services/agentTemplates';
 import { AgentTemplateStoreGrid } from '../agents/AgentTemplateStoreGrid';
 import {
   STORE_APPS,
+  STORE_APPS_UPDATED_EVENT,
+  createCustomStoreApp,
   loadConnectedAppIds,
+  loadCustomStoreApps,
   saveConnectedAppIds,
+  saveCustomStoreApps,
   type StoreAppItem,
 } from '../../services/storeAppsCatalog';
 import { StoreAppIcon } from '../store/StoreAppIcon';
@@ -96,6 +100,7 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
   // Estado da Loja de Apps
   const [appSearchQuery, setAppSearchQuery] = useState('');
   const [connectedApps, setConnectedApps] = useState<string[]>(loadConnectedAppIds);
+  const [customApps, setCustomApps] = useState<StoreAppItem[]>(loadCustomStoreApps);
   const [selectedAppForModal, setSelectedAppForModal] = useState<StoreAppItem | null>(null);
   const [showCustomAppModal, setShowCustomAppModal] = useState(false);
   const [appTokenInput, setAppTokenInput] = useState('');
@@ -109,11 +114,8 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
   };
 
   const handleToggleConnect = (app: StoreAppItem) => {
-    const isConn = connectedApps.includes(app.id);
+    setAppTokenInput('');
     setSelectedAppForModal(app);
-    if (!isConn) {
-      setAppTokenInput('');
-    }
   };
 
   const confirmAppConnection = () => {
@@ -124,6 +126,7 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
       saveConnectedApps(next);
       notify(`App "${selectedAppForModal.name}" conectado com sucesso!`, 'success');
       setConnectingApp(false);
+      setAppTokenInput('');
       setSelectedAppForModal(null);
     }, 350);
   };
@@ -132,6 +135,7 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
     const next = connectedApps.filter((id) => id !== appId);
     saveConnectedApps(next);
     notify('App desconectado com sucesso!', 'info');
+    setAppTokenInput('');
     setSelectedAppForModal(null);
   };
 
@@ -141,7 +145,14 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
       notify('Informe o nome e o comando/endpoint do conector.', 'error');
       return;
     }
-    notify(`Conector "${customAppName.trim()}" cadastrado com sucesso!`, 'success');
+    const created = createCustomStoreApp({
+      name: customAppName,
+      connectionType: customAppType,
+      endpoint: customAppEndpoint,
+    });
+    setCustomApps(saveCustomStoreApps([...customApps, created]));
+    saveConnectedApps([...connectedApps, created.id]);
+    notify(`Conector "${created.name}" cadastrado e conectado com sucesso!`, 'success');
     setCustomAppName('');
     setCustomAppType('mcp');
     setCustomAppEndpoint('');
@@ -246,10 +257,16 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
     const onAgentsUpdated = () => {
       loadData();
     };
+    const onStoreAppsUpdated = () => {
+      setConnectedApps(loadConnectedAppIds());
+      setCustomApps(loadCustomStoreApps());
+    };
     window.addEventListener('jarvis:agents-updated', onAgentsUpdated);
+    window.addEventListener(STORE_APPS_UPDATED_EVENT, onStoreAppsUpdated);
     return () => {
       cancelled = true;
       window.removeEventListener('jarvis:agents-updated', onAgentsUpdated);
+      window.removeEventListener(STORE_APPS_UPDATED_EVENT, onStoreAppsUpdated);
     };
   }, []);
 
@@ -312,13 +329,15 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
     <StoreAppIcon iconType={iconType} size={size} />
   );
 
+  const allStoreApps = useMemo(() => [...STORE_APPS, ...customApps], [customApps]);
+
   // Filtragem de apps na aba "Apps"
   const appsFiltered = useMemo(() => {
     const q = appSearchQuery.toLowerCase().trim();
-    return STORE_APPS.filter(
+    return allStoreApps.filter(
       (a) => !q || a.name.toLowerCase().includes(q) || a.description.toLowerCase().includes(q)
     );
-  }, [appSearchQuery]);
+  }, [allStoreApps, appSearchQuery]);
 
   const appSections = useMemo(
     () =>
@@ -340,8 +359,8 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
   );
 
   const connectedStoreApps = useMemo(
-    () => STORE_APPS.filter((a) => connectedApps.includes(a.id)),
-    [connectedApps]
+    () => allStoreApps.filter((a) => connectedApps.includes(a.id)),
+    [allStoreApps, connectedApps]
   );
 
   return (
@@ -365,7 +384,7 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
                 <span>Apps</span>
               </span>
               <span className="jarvis-tabular" style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                {STORE_APPS.length}
+                {allStoreApps.length}
               </span>
             </button>
 
@@ -447,7 +466,7 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
                   {connectedStoreApps.length} conectados
                 </span>,
                 <span key="total" className="jarvis-tabular">
-                  {STORE_APPS.length} disponíveis
+                  {allStoreApps.length} disponíveis
                 </span>,
               ]}
               actions={

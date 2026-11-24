@@ -11,10 +11,13 @@ import {
 } from './unifiedStoreEngine';
 import {
   STORE_APPS,
+  STORE_APPS_UPDATED_EVENT,
   countStoreAppsByCategory,
   createCustomStoreApp,
   filterStoreApps,
   loadConnectedAppIds,
+  saveConnectedAppIds,
+  saveCustomStoreApps,
 } from './storeAppsCatalog';
 import type { SkillInfo } from '../types';
 import type { ModulePackWithState } from './modulePackEngine';
@@ -224,4 +227,27 @@ test('storeAppsCatalog filters apps, counts categories, creates custom connector
 
   const defaults = loadConnectedAppIds();
   assert.equal(defaults.length, 7);
+
+  // Verify deduplication and event broadcast when window exists
+  const events: string[] = [];
+  const prevWindow = (globalThis as any).window;
+  (globalThis as any).window = {
+    dispatchEvent: (ev: Event) => {
+      events.push(ev.type);
+      return true;
+    },
+  };
+  try {
+    const savedIds = saveConnectedAppIds(['github', 'github', 'vercel']);
+    assert.deepEqual(savedIds, ['github', 'vercel']);
+    const savedCustom = saveCustomStoreApps([customApp]);
+    assert.equal(savedCustom.length, 1);
+    assert.deepEqual(events, [STORE_APPS_UPDATED_EVENT, STORE_APPS_UPDATED_EVENT]);
+  } finally {
+    if (prevWindow === undefined) {
+      delete (globalThis as any).window;
+    } else {
+      (globalThis as any).window = prevWindow;
+    }
+  }
 });

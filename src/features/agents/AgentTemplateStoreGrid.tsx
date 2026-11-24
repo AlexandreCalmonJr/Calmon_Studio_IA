@@ -42,6 +42,17 @@ const CATEGORY_SHORT_BADGES: Record<Exclude<AgentTemplateCategory, 'all'>, strin
   seguranca: 'SEGURANÇA',
 };
 
+const STORE_TAB_SHORT_LABELS: Record<AgentTemplateCategory, string> = {
+  all: 'Todos',
+  dia_a_dia: 'Dia a Dia',
+  estudos: 'Estudos',
+  financas: 'Finanças',
+  criativo: 'Criativo',
+  dados: 'Dados & BI',
+  tecnologia: 'Engenharia',
+  seguranca: 'Segurança',
+};
+
 export const AgentTemplateStoreGrid: React.FC<AgentTemplateStoreGridProps> = ({
   installedAgents,
   onRefreshAgents,
@@ -168,7 +179,7 @@ export const AgentTemplateStoreGrid: React.FC<AgentTemplateStoreGridProps> = ({
             className={`jarvis-segmented-btn ${category === tab.id ? 'is-active' : ''}`}
           >
             <span>
-              {tab.label} ({categoryCounts[tab.id] ?? 0})
+              {(variant === 'store' ? STORE_TAB_SHORT_LABELS[tab.id] : tab.label)} ({categoryCounts[tab.id] ?? 0})
             </span>
           </button>
         ))}

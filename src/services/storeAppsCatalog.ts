@@ -168,8 +168,16 @@ export const STORE_APPS: StoreAppItem[] = [
   },
 ];
 
+export const STORE_APPS_UPDATED_EVENT = 'jarvis:store-apps-updated';
+
 function hasLocalStorage(): boolean {
   return typeof localStorage !== 'undefined';
+}
+
+function broadcastStoreAppsUpdated(): void {
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new CustomEvent(STORE_APPS_UPDATED_EVENT));
+  }
 }
 
 export function loadConnectedAppIds(): string[] {
@@ -191,6 +199,7 @@ export function saveConnectedAppIds(ids: string[]): string[] {
       localStorage.setItem(getAccountStorageKey('jarvis_connected_apps'), JSON.stringify(unique));
     } catch {}
   }
+  broadcastStoreAppsUpdated();
   return unique;
 }
 
@@ -217,6 +226,7 @@ export function saveCustomStoreApps(apps: StoreAppItem[]): StoreAppItem[] {
       localStorage.setItem(getAccountStorageKey('jarvis_custom_store_apps'), JSON.stringify(apps));
     } catch {}
   }
+  broadcastStoreAppsUpdated();
   return apps;
 }
 

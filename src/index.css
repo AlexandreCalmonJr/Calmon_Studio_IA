@@ -1888,6 +1888,7 @@ textarea {
 
 .jarvis-page-header--flat {
   padding: 0 0 18px;
+  margin-bottom: 0;
   border-radius: 0;
   background: transparent;
   border: none;
@@ -1981,6 +1982,11 @@ textarea {
 
 .jarvis-search-box__input::placeholder {
   color: var(--text-muted);
+}
+
+.jarvis-search-box__input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 .jarvis-popover {
@@ -3238,7 +3244,7 @@ textarea {
 }
 
 .jarvis-inline-link:hover {
-  color: #fdba74;
+  color: var(--accent-hover);
 }
 
 .jarvis-pack-agent-list {
@@ -3319,7 +3325,7 @@ textarea {
 }
 
 .jarvis-danger-text-btn {
-  color: #f87171 !important;
+  color: var(--danger-text) !important;
 }
 
 .jarvis-pack-loading,
@@ -4738,6 +4744,24 @@ textarea {
   background: var(--bg-primary);
 }
 
+.jarvis-store-layout .jarvis-settings-nav {
+  width: 228px;
+}
+
+.jarvis-store-layout .jarvis-settings-content {
+  padding: clamp(20px, 2.5vw, 32px) clamp(20px, 3vw, 38px) 48px;
+}
+
+.jarvis-store-nav-count {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.jarvis-subnav-btn.is-active .jarvis-store-nav-count {
+  color: var(--text-primary);
+}
+
 .jarvis-store-nav-footer {
   display: flex;
   flex-direction: column;
@@ -4745,6 +4769,17 @@ textarea {
 }
 
 @media (max-width: 900px) {
+  .jarvis-store-layout .jarvis-settings-nav {
+    width: 100%;
+  }
+  .jarvis-store-layout .jarvis-settings-content {
+    padding: 18px 16px 40px;
+  }
+  .jarvis-store-apps-group {
+    border-left: 1px solid var(--border-color);
+    padding-left: 8px;
+    margin-left: 4px;
+  }
   .jarvis-store-nav-footer {
     flex-direction: row;
     flex-wrap: wrap;
@@ -4752,6 +4787,8 @@ textarea {
   }
   .jarvis-store-nav-footer .jarvis-subnav-btn {
     width: auto;
+    padding: 6px 10px;
+    font-size: 0.76rem;
   }
 }
 
@@ -4762,6 +4799,8 @@ textarea {
   flex-direction: column;
   gap: 20px;
   min-width: 0;
+  container-type: inline-size;
+  container-name: store-pane;
 }
 
 .jarvis-store-controls {
@@ -4789,9 +4828,8 @@ textarea {
 
 .jarvis-store-segmented {
   max-width: 100%;
-  overflow-x: auto;
-  flex-wrap: nowrap;
-  -webkit-overflow-scrolling: touch;
+  flex-wrap: wrap;
+  border-radius: var(--radius-md);
   align-self: flex-start;
 }
 
@@ -4823,6 +4861,12 @@ textarea {
 
 .jarvis-store-grid > *:nth-child(n + 5) {
   animation-delay: 100ms;
+}
+
+@container store-pane (max-width: 580px) {
+  .jarvis-store-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 820px) {
@@ -4959,13 +5003,14 @@ textarea {
 .jarvis-store-card__footer {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: auto;
   padding-top: 2px;
 }
 
 .jarvis-store-card__primary-btn {
-  flex: 1;
+  flex: 1 1 140px;
   min-width: 0;
   border-radius: var(--radius-sm);
   min-height: 36px;

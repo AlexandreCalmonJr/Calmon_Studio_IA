@@ -104,7 +104,7 @@ export const SkillCard: React.FC<SkillCardProps> = ({
             <DomainIcon size={18} />
           </div>
           <div className="jarvis-store-card__titles">
-            <h4 className="jarvis-store-card__title">{skill.name}</h4>
+            <h3 className="jarvis-store-card__title">{skill.name}</h3>
             <div className="jarvis-store-card__subtitle">
               {domainLabel} · v{skill.version}
               {originLabel ? ` · ${originLabel}` : ''}
@@ -200,7 +200,7 @@ export const SkillCard: React.FC<SkillCardProps> = ({
             type="button"
             onClick={() => onToggle(skill.id)}
             aria-pressed={isApproved}
-            className={`btn btn-sm jarvis-store-card__primary-btn ${isApproved ? 'btn-secondary' : 'btn-secondary'}`}
+            className="btn btn-secondary btn-sm jarvis-store-card__primary-btn"
             title={isApproved ? 'Habilidade ativa — clique para desativar' : 'Habilidade inativa — clique para ativar'}
           >
             {isApproved ? <CheckCircle size={13} color="var(--success-color)" /> : <XCircle size={13} />}

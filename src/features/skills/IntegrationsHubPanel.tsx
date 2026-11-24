@@ -354,7 +354,7 @@ export const IntegrationsHubPanel: React.FC<IntegrationsHubPanelProps> = ({
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))',
           gap: '14px',
           alignItems: 'stretch',
         }}
@@ -652,7 +652,7 @@ export const IntegrationsHubPanel: React.FC<IntegrationsHubPanelProps> = ({
                 <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)' }}>
                   Hugging Face Hub
                 </h3>
-                <div style={{ fontSize: '0.75rem', color: hfConnector?.connected ? '#4ade80' : 'var(--text-muted)' }}>
+                <div style={{ fontSize: '0.75rem', color: hfConnector?.connected ? 'var(--success-text)' : 'var(--text-muted)' }}>
                   {hfConnector?.connected ? 'Conectado ao catálogo' : 'Desconectado'}
                 </div>
               </div>
@@ -796,7 +796,7 @@ export const IntegrationsHubPanel: React.FC<IntegrationsHubPanelProps> = ({
                     type="button"
                     onClick={() => setPendingDeleteCs(cs)}
                     className="btn btn-ghost btn-xs"
-                    style={{ color: 'var(--danger-color, #f87171)' }}
+                    style={{ color: 'var(--danger-text)' }}
                     aria-label={`Remover Context Set '${cs.name}'`}
                   >
                     <Trash2 size={13} />

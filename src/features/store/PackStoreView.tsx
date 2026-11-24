@@ -28,6 +28,7 @@ import {
   type ModulePackWithState,
 } from '../../services/modulePackEngine';
 import {
+  PACKS_UPDATED_EVENT,
   fetchModulePacks,
   installModulePack,
   uninstallModulePack,
@@ -39,6 +40,7 @@ import { AGENT_TEMPLATE_LIBRARY } from '../../services/agentTemplates';
 import {
   computeUnifiedStoreSummary,
   countPacksByFilter,
+  isSkillActive,
   type PackStoreFilter,
   type UnifiedStoreSection,
 } from '../../services/unifiedStoreEngine';
@@ -46,6 +48,7 @@ import {
   APP_CATEGORY_LABELS,
   APP_CATEGORY_SHORT_LABELS,
   STORE_APPS,
+  STORE_APPS_UPDATED_EVENT,
   countStoreAppsByCategory,
   createCustomStoreApp,
   filterStoreApps,
@@ -76,11 +79,11 @@ const FILTER_OPTIONS: Array<{ id: PackStoreFilter; label: string }> = [
   { id: 'all', label: 'Todos' },
   { id: 'installed', label: 'Instalados' },
   { id: 'custom', label: 'Personalizados' },
-  { id: 'engineering', label: MODULE_PACK_CATEGORY_LABELS.engineering },
-  { id: 'development', label: MODULE_PACK_CATEGORY_LABELS.development },
-  { id: 'security', label: MODULE_PACK_CATEGORY_LABELS.security },
-  { id: 'productivity', label: MODULE_PACK_CATEGORY_LABELS.productivity },
-  { id: 'infrastructure', label: MODULE_PACK_CATEGORY_LABELS.infrastructure },
+  { id: 'engineering', label: 'Engenharia' },
+  { id: 'development', label: 'Full-Stack' },
+  { id: 'security', label: 'Segurança' },
+  { id: 'productivity', label: 'Produtividade' },
+  { id: 'infrastructure', label: 'Infra & Voz' },
 ];
 
 const PACK_CATEGORY_SHORT: Record<ModulePackCategory, string> = {
@@ -198,8 +201,26 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
         .then((agentsData) => setInstalledAgents(Array.isArray(agentsData) ? agentsData : []))
         .catch(() => {});
     };
+    const onPacksUpdated = (e: Event) => {
+      const detail = (e as CustomEvent<ModulePacksPayload>).detail;
+      if (detail?.packs) {
+        setPayload(detail);
+      } else {
+        void fetchModulePacks().then(setPayload).catch(() => {});
+      }
+    };
+    const onStoreAppsUpdated = () => {
+      setConnectedAppIds(loadConnectedAppIds());
+      setCustomApps(loadCustomStoreApps());
+    };
     window.addEventListener('jarvis:agents-updated', onAgentsUpdated);
-    return () => window.removeEventListener('jarvis:agents-updated', onAgentsUpdated);
+    window.addEventListener(PACKS_UPDATED_EVENT, onPacksUpdated);
+    window.addEventListener(STORE_APPS_UPDATED_EVENT, onStoreAppsUpdated);
+    return () => {
+      window.removeEventListener('jarvis:agents-updated', onAgentsUpdated);
+      window.removeEventListener(PACKS_UPDATED_EVENT, onPacksUpdated);
+      window.removeEventListener(STORE_APPS_UPDATED_EVENT, onStoreAppsUpdated);
+    };
   }, [loadStoreData]);
 
   const handleInstall = async (pack: ModulePackWithState) => {
@@ -260,10 +281,8 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
   };
 
   const handleOpenAppModal = (app: StoreAppItem) => {
+    setAppTokenInput('');
     setSelectedAppForModal(app);
-    if (!connectedAppIds.includes(app.id)) {
-      setAppTokenInput('');
-    }
   };
 
   const confirmAppConnection = () => {
@@ -273,6 +292,7 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
       updateConnectedApps([...connectedAppIds, selectedAppForModal.id]);
       notify(`App "${selectedAppForModal.name}" conectado com sucesso!`, 'success');
       setConnectingApp(false);
+      setAppTokenInput('');
       setSelectedAppForModal(null);
     }, 250);
   };
@@ -280,6 +300,7 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
   const disconnectApp = (appId: string) => {
     updateConnectedApps(connectedAppIds.filter((id) => id !== appId));
     notify('App desconectado com sucesso!', 'info');
+    setAppTokenInput('');
     setSelectedAppForModal(null);
   };
 
@@ -287,6 +308,9 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
     const nextCustom = saveCustomStoreApps(customApps.filter((c) => c.id !== app.id));
     setCustomApps(nextCustom);
     updateConnectedApps(connectedAppIds.filter((id) => id !== app.id));
+    if (selectedAppForModal?.id === app.id) {
+      setSelectedAppForModal(null);
+    }
     notify(`Conector "${app.name}" removido.`, 'info');
   };
 
@@ -304,6 +328,10 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
     const nextCustom = saveCustomStoreApps([...customApps, newApp]);
     setCustomApps(nextCustom);
     updateConnectedApps([...connectedAppIds, newApp.id]);
+    setAppSearch('');
+    if (appCategory !== 'all' && appCategory !== newApp.category) {
+      setAppCategory('all');
+    }
     notify(`Conector "${newApp.name}" cadastrado e conectado com sucesso!`, 'success');
     setCustomAppName('');
     setCustomAppType('mcp');
@@ -376,91 +404,81 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
           <h2 className="jarvis-settings-nav__title">Loja Unificada</h2>
         </div>
 
-        <div className="jarvis-settings-nav__list">
+        <nav className="jarvis-settings-nav__list" aria-label="Departamentos da Loja Unificada">
           <div className="jarvis-settings-nav__group">
             <div className="jarvis-settings-nav__group-title">Explorar</div>
 
-            <div
-              className="jarvis-settings-nav__group"
-              role="tablist"
-              aria-label="Departamentos da Loja Unificada"
+            <button
+              type="button"
+              aria-current={activeSection === 'packs' ? 'page' : undefined}
+              onClick={() => setActiveSection('packs')}
+              className={`jarvis-subnav-btn ${activeSection === 'packs' ? 'is-active' : ''}`}
             >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeSection === 'packs'}
-                onClick={() => setActiveSection('packs')}
-                className={`jarvis-subnav-btn ${activeSection === 'packs' ? 'is-active' : ''}`}
-              >
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-                  <Package size={15} />
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    Pacotes & Núcleos
-                  </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                <Package size={15} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  Pacotes & Núcleos
                 </span>
-                <span className="jarvis-tabular" style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                  {unifiedSummary.totalPacks}
-                </span>
-              </button>
+              </span>
+              <span className="jarvis-tabular jarvis-store-nav-count">
+                {unifiedSummary.totalPacks}
+              </span>
+            </button>
 
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeSection === 'apps'}
-                onClick={() => setActiveSection('apps')}
-                className={`jarvis-subnav-btn ${activeSection === 'apps' ? 'is-active' : ''}`}
-              >
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-                  <LayoutGrid size={15} />
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    Apps & Conectores
-                  </span>
+            <button
+              type="button"
+              aria-current={activeSection === 'apps' ? 'page' : undefined}
+              onClick={() => setActiveSection('apps')}
+              className={`jarvis-subnav-btn ${activeSection === 'apps' ? 'is-active' : ''}`}
+            >
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                <LayoutGrid size={15} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  Apps & Conectores
                 </span>
-                <span className="jarvis-tabular" style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                  {allStoreApps.length}
-                </span>
-              </button>
+              </span>
+              <span className="jarvis-tabular jarvis-store-nav-count">
+                {allStoreApps.length}
+              </span>
+            </button>
 
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeSection === 'templates'}
-                onClick={() => setActiveSection('templates')}
-                className={`jarvis-subnav-btn ${activeSection === 'templates' ? 'is-active' : ''}`}
-              >
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-                  <Bot size={15} />
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    Agentes
-                  </span>
+            <button
+              type="button"
+              aria-current={activeSection === 'templates' ? 'page' : undefined}
+              onClick={() => setActiveSection('templates')}
+              className={`jarvis-subnav-btn ${activeSection === 'templates' ? 'is-active' : ''}`}
+            >
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                <Bot size={15} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  Agentes
                 </span>
-                <span className="jarvis-tabular" style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                  {unifiedSummary.totalTemplates}
-                </span>
-              </button>
+              </span>
+              <span className="jarvis-tabular jarvis-store-nav-count">
+                {unifiedSummary.totalTemplates}
+              </span>
+            </button>
 
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeSection === 'skills'}
-                onClick={() => setActiveSection('skills')}
-                className={`jarvis-subnav-btn ${activeSection === 'skills' ? 'is-active' : ''}`}
-              >
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-                  <BookOpen size={15} />
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    Habilidades
-                  </span>
+            <button
+              type="button"
+              aria-current={activeSection === 'skills' ? 'page' : undefined}
+              onClick={() => setActiveSection('skills')}
+              className={`jarvis-subnav-btn ${activeSection === 'skills' ? 'is-active' : ''}`}
+            >
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                <BookOpen size={15} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  Habilidades
                 </span>
-                <span className="jarvis-tabular" style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                  {unifiedSummary.totalSkills}
-                </span>
-              </button>
-            </div>
+              </span>
+              <span className="jarvis-tabular jarvis-store-nav-count">
+                {unifiedSummary.totalSkills}
+              </span>
+            </button>
           </div>
 
           {connectedStoreApps.length > 0 && (
-            <div className="jarvis-settings-nav__group">
+            <div className="jarvis-settings-nav__group jarvis-store-apps-group">
               <div className="jarvis-settings-nav__group-title">
                 Seus apps ({connectedStoreApps.length})
               </div>
@@ -484,7 +502,7 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
               ))}
             </div>
           )}
-        </div>
+        </nav>
 
         {/* Rodapé da Sub-Navegação: Atalhos Rápidos */}
         <div className="jarvis-settings-nav__footer jarvis-store-nav-footer">
@@ -564,7 +582,7 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
                   <div className="jarvis-search-box jarvis-store-search-input">
                     <Search size={15} />
                     <input
-                      type="search"
+                      type="text"
                       className="jarvis-search-box__input"
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
@@ -888,7 +906,7 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
                   <div className="jarvis-search-box jarvis-store-search-input">
                     <Search size={15} />
                     <input
-                      type="search"
+                      type="text"
                       value={appSearch}
                       onChange={(e) => setAppSearch(e.target.value)}
                       placeholder="Buscar apps, integrações e servidores MCP..."
@@ -921,7 +939,7 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
                       { id: 'documents', label: `Documentos (${appCategoryCounts.documents})` },
                       { id: 'development', label: `Desenvolvimento (${appCategoryCounts.development})` },
                       { id: 'ai', label: `IA & MCP (${appCategoryCounts.ai})` },
-                      { id: 'live', label: 'Integrações ao Vivo & Context Sets' },
+                      { id: 'live', label: 'Integrações ao Vivo' },
                     ] as const
                   ).map((tab) => (
                     <button
@@ -1005,7 +1023,7 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
                                 {isConnected ? (
                                   <>
                                     <Check size={13} color="var(--success-color)" strokeWidth={2.5} />
-                                    <span>Conectado · Gerenciar</span>
+                                    <span>Configurar</span>
                                   </>
                                 ) : (
                                   <>
@@ -1028,10 +1046,10 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
                               ) : isConnected ? (
                                 <button
                                   type="button"
-                                  onClick={() => handleOpenAppModal(app)}
+                                  onClick={() => disconnectApp(app.id)}
                                   className="btn btn-ghost btn-sm jarvis-store-card__secondary-btn"
                                 >
-                                  <span>Configurar</span>
+                                  <span>Desconectar</span>
                                 </button>
                               ) : null}
                             </div>
@@ -1049,7 +1067,14 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
                     embedded
                     onSkillImported={() => {
                       void fetchSkills()
-                        .then((s) => setSkillsSnapshot(Array.isArray(s) ? s : []))
+                        .then((s) => {
+                          const list = Array.isArray(s) ? s : [];
+                          setSkillsSnapshot(list);
+                          setSkillsCountOverride({
+                            total: list.length,
+                            active: list.filter(isSkillActive).length,
+                          });
+                        })
                         .catch(() => {});
                     }}
                   />

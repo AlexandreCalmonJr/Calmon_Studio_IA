@@ -276,7 +276,7 @@ export const SkillsCatalogPanel: React.FC<SkillsCatalogPanelProps> = ({
         <div className="jarvis-search-box jarvis-store-search-input">
           <Search size={15} />
           <input
-            type="search"
+            type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar habilidade por nome, domínio ou especialista..."
