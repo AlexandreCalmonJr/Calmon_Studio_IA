@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -152,17 +153,21 @@ import {
 } from './server/androidAppServer.ts';
 import { createLocalSqliteBrainStore } from './server/brain/sqliteBrainStore.ts';
 import { createBrainRouter } from './server/brain/brainRouter.ts';
+import { verifyFirebaseIdToken } from './server/firebaseTokenVerifier.ts';
 
-const realtimeClients = new Set<WebSocket>();
-function broadcastRealtimeEvent(type: string, payload: unknown) {
+const requestContext = new AsyncLocalStorage<{ ownerUserId: string }>();
+const realtimeClients = new Map<WebSocket, { username: string; sessionId: string }>();
+function broadcastRealtimeEvent(type: string, payload: unknown, ownerUserId?: string) {
+  // Resolve the owner from the authenticated request context; fail closed outside it.
+  const eventOwner = ownerUserId || requestContext.getStore()?.ownerUserId;
+  if (!eventOwner) return;
   const frame = JSON.stringify({ type, payload, timestamp: new Date().toISOString() });
-  realtimeClients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      try {
-        client.send(frame);
-      } catch {
-        // ignore dropped socket
-      }
+  realtimeClients.forEach((clientIdentity, client) => {
+    const activeSession = sessions.get(clientIdentity.sessionId);
+    const activeUser = users.get(clientIdentity.username);
+    const sessionIsValid = activeSession && Date.now() - activeSession.created_at <= SESSION_TTL_MS;
+    if (clientIdentity.username === eventOwner && sessionIsValid && activeUser?.is_active && client.readyState === WebSocket.OPEN) {
+      try { client.send(frame); } catch { /* ignore dropped socket */ }
     }
   });
 }
@@ -267,50 +272,28 @@ function permissionsForRole(role: 'admin' | 'developer' | 'auditor'): string[] {
 }
 
 // Seeded local accounts
-const users = new Map<string, UserAccount>([
-  ['admin', makeAccount('admin', 'Administrador', 'Jarvis@2026!Admin', 'admin', false)],
-  ['dev', makeAccount('dev', 'Desenvolvedor', 'Jarvis@2026!Dev', 'developer', false)],
-]);
+const users = new Map<string, UserAccount>();
+const configuredAdminPassword = String(process.env.JARVIS_ADMIN_PASSWORD || '');
+if (configuredAdminPassword) {
+  if (configuredAdminPassword.length < 12) {
+    throw new Error('JARVIS_ADMIN_PASSWORD deve ter pelo menos 12 caracteres.');
+  }
+  users.set('admin', makeAccount('admin', 'Administrador', configuredAdminPassword, 'admin', false));
+}
+const configuredDeveloperPassword = String(process.env.JARVIS_DEV_PASSWORD || '');
+if (configuredDeveloperPassword) {
+  if (configuredDeveloperPassword.length < 12) {
+    throw new Error('JARVIS_DEV_PASSWORD deve ter pelo menos 12 caracteres.');
+  }
+  users.set('dev', makeAccount('dev', 'Desenvolvedor', configuredDeveloperPassword, 'developer', false));
+}
 
-const VALID_ADMIN_TOKENS = new Set([
-  process.env.JARVIS_ADMIN_TOKEN || 'jarvis-admin-2026',
-]);
-const VALID_BOOTSTRAP_TOKENS = new Set([
-  process.env.JARVIS_BOOTSTRAP_TOKEN || 'jarvis-bootstrap-2026',
-]);
+const VALID_ADMIN_TOKENS = new Set<string>(process.env.JARVIS_ADMIN_TOKEN ? [process.env.JARVIS_ADMIN_TOKEN] : []);
+const VALID_BOOTSTRAP_TOKENS = new Set<string>(process.env.JARVIS_BOOTSTRAP_TOKEN ? [process.env.JARVIS_BOOTSTRAP_TOKEN] : []);
 
 const sessions = new Map<string, SessionRecord>();
 
-const userProfiles = new Map<string, Record<string, string>>([
-  [
-    'admin',
-    {
-      displayName: 'Administrador',
-      avatarIcon: 'J',
-      developerRole: 'Arquiteto de Sistemas & IA',
-      seniorityLevel: 'architect',
-      responseStyle: 'detailed',
-      customInstructions: 'Priorize respostas técnicas claras, objetivas e em português.',
-      assistantName: 'JARVIS',
-      assistantGreeting: '',
-      experienceMode: 'engineering',
-    },
-  ],
-  [
-    'dev',
-    {
-      displayName: 'Desenvolvedor',
-      avatarIcon: 'D',
-      developerRole: 'Engenheiro de Software',
-      seniorityLevel: 'senior',
-      responseStyle: 'detailed',
-      customInstructions: '',
-      assistantName: 'JARVIS',
-      assistantGreeting: '',
-      experienceMode: 'engineering',
-    },
-  ],
-]);
+const userProfiles = new Map<string, Record<string, string>>();
 
 const learningProgress = new Map<string, { completed_modules: string[]; updated_at: string }>();
 
@@ -1083,6 +1066,7 @@ let knowledgeDocs = [
 ];
 
 interface StoredChatSession {
+  owner_user_id: string;
   session_id: string;
   title: string;
   first_prompt: string;
@@ -1103,6 +1087,7 @@ const chatSessions = new Map<string, StoredChatSession>([
   [
     'sess_welcome_01',
     {
+      owner_user_id: 'admin',
       session_id: 'sess_welcome_01',
       title: 'Boas-vindas ao JARVIS AI Hub',
       first_prompt: 'Apresente o estado atual da plataforma e os próximos passos recomendados.',
@@ -1183,16 +1168,23 @@ function parseCookies(header?: string): Record<string, string> {
   return out;
 }
 
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+
 function getSessionFromReq(req: Request): SessionRecord | null {
   const cookies = parseCookies(req.headers.cookie);
   const headerToken = String(req.headers['x-jarvis-session'] || '').trim();
   const authHeader = String(req.headers.authorization || '').trim();
   const bearerToken = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7).trim() : '';
-  const queryToken = typeof req.query.session_token === 'string' ? req.query.session_token.trim() : '';
-
-  const sid = cookies[SESSION_COOKIE] || headerToken || bearerToken || queryToken;
+  // Session IDs are deliberately not accepted in query strings (URLs are commonly logged).
+  const sid = cookies[SESSION_COOKIE] || headerToken || bearerToken;
   if (!sid) return null;
-  return sessions.get(sid) || null;
+  const session = sessions.get(sid);
+  if (!session) return null;
+  if (Date.now() - session.created_at > SESSION_TTL_MS) {
+    sessions.delete(sid);
+    return null;
+  }
+  return session;
 }
 
 function setSessionCookie(req: Request, res: Response, sessionId: string) {
@@ -1249,7 +1241,11 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
   }
   (req as Request & { jarvisSession?: SessionRecord; jarvisUser?: UserAccount }).jarvisSession = session;
   (req as Request & { jarvisSession?: SessionRecord; jarvisUser?: UserAccount }).jarvisUser = user;
-  next();
+  if (user.must_change_password && req.path !== '/auth/change-password') {
+    res.status(403).json({ detail: 'Altere a palavra-passe inicial antes de continuar.', code: 'PASSWORD_CHANGE_REQUIRED' });
+    return;
+  }
+  requestContext.run({ ownerUserId: user.username }, next);
 }
 
 function buildAssistantReply(prompt: string, model?: string): string {
@@ -1267,6 +1263,38 @@ function buildAssistantReply(prompt: string, model?: string): string {
     '',
     '> Dica: você pode explorar a **Visão Geral**, o **Centro de Agentes**, a **Central de Aprovações** e os **Estúdios** pelo menu lateral.',
   ].join('\n');
+}
+
+const authRateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
+let authRateLimitOperations = 0;
+
+function createAuthRateLimit(scope: string, limit: number, windowMs = 15 * 60 * 1000) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const identity = String(req.body?.username || '').trim().toLowerCase();
+    const clientAddress = req.ip || req.socket.remoteAddress || 'unknown';
+    const key = `${scope}:${clientAddress}:${identity}`;
+    const now = Date.now();
+    let bucket = authRateLimitBuckets.get(key);
+    if (!bucket || now >= bucket.resetAt) {
+      bucket = { count: 0, resetAt: now + windowMs };
+      authRateLimitBuckets.set(key, bucket);
+    }
+    bucket.count += 1;
+
+    authRateLimitOperations += 1;
+    if (authRateLimitOperations % 128 === 0) {
+      for (const [bucketKey, entry] of authRateLimitBuckets) {
+        if (now >= entry.resetAt) authRateLimitBuckets.delete(bucketKey);
+      }
+    }
+
+    if (bucket.count > limit) {
+      res.setHeader('Retry-After', String(Math.max(1, Math.ceil((bucket.resetAt - now) / 1000))));
+      res.status(429).json({ detail: 'Muitas tentativas. Aguarde antes de tentar novamente.' });
+      return;
+    }
+    next();
+  };
 }
 
 function buildApiRouter() {
@@ -1298,7 +1326,7 @@ function buildApiRouter() {
     });
   });
 
-  api.post('/auth/password-login', (req, res) => {
+  api.post('/auth/password-login', createAuthRateLimit('password-login', 10), (req, res) => {
     const username = String(req.body?.username || '').trim().toLowerCase();
     const password = String(req.body?.password || '');
     const user = users.get(username);
@@ -1316,34 +1344,35 @@ function buildApiRouter() {
     });
   });
 
-  api.post('/auth/login', (req, res) => {
+  api.post('/auth/login', createAuthRateLimit('admin-login', 5), (req, res) => {
     const token = String(req.body?.token || '').trim();
     if (!VALID_ADMIN_TOKENS.has(token)) {
       res.status(401).json({ detail: 'Token de administrador inválido.' });
       return;
     }
-    const admin = users.get('admin')!;
+    const admin = users.get('admin');
+    if (!admin || admin.role !== 'admin') {
+      res.status(503).json({ detail: 'A conta administrativa ainda não foi inicializada.' });
+      return;
+    }
     const record = createSessionForUser(req, res, admin);
-    res.json({
-      status: 'authenticated',
-      user_id: admin.username,
-      role: admin.role,
-      session_token: record.session_id,
-    });
+    res.json({ status: 'authenticated', user_id: admin.username, role: admin.role, session_token: record.session_id });
   });
 
-  api.post('/auth/bootstrap/exchange', (req, res) => {
+  api.post('/auth/bootstrap/exchange', createAuthRateLimit('bootstrap', 5), (req, res) => {
     const token = String(req.body?.token || '').trim();
-    if (!VALID_BOOTSTRAP_TOKENS.has(token)) {
+    if (!token || !VALID_BOOTSTRAP_TOKENS.has(token)) {
       res.status(401).json({ detail: 'Token inicial inválido ou expirado.' });
       return;
     }
-    const admin = users.get('admin')!;
+    const admin = users.get('admin');
+    if (!admin || admin.role !== 'admin') {
+      res.status(503).json({ detail: 'Configure JARVIS_ADMIN_PASSWORD (mínimo 12 caracteres) antes do primeiro acesso.' });
+      return;
+    }
     const record = createSessionForUser(req, res, admin);
     res.json({
-      status: 'authenticated',
-      user_id: admin.username,
-      role: admin.role,
+      status: 'authenticated', user_id: admin.username, role: admin.role,
       session_token: record.session_id,
     });
   });
@@ -1367,7 +1396,7 @@ function buildApiRouter() {
   });
 
   // Simplified household / personal account registration (starts in Simple Mode with custom assistant name)
-  api.post('/auth/register-personal', (req, res) => {
+  api.post('/auth/register-personal', createAuthRateLimit('register', 5), (req, res) => {
     const rawUsername = String(req.body?.username || '').trim().toLowerCase();
     const display_name = String(req.body?.display_name || '').trim();
     const password = String(req.body?.password || '');
@@ -1384,6 +1413,10 @@ function buildApiRouter() {
     }
     if (password.length < 8) {
       res.status(400).json({ detail: 'Escolha uma senha com pelo menos 8 caracteres.' });
+      return;
+    }
+    if (rawUsername === 'admin' || rawUsername === 'dev' || rawUsername.startsWith('fb_')) {
+      res.status(400).json({ detail: 'Este nome de utilizador está reservado.' });
       return;
     }
     if (users.has(rawUsername)) {
@@ -1419,21 +1452,48 @@ function buildApiRouter() {
     });
   });
 
-  // Bridge verified Google / Firebase Auth client sign-in to local API session
-  api.post('/auth/firebase-session', (req, res) => {
-    const uid = String(req.body?.uid || '').trim();
-    const email = String(req.body?.email || '').trim().toLowerCase();
-    const display_name = String(req.body?.display_name || 'Usuário').trim().slice(0, 80) || 'Usuário';
-    const email_verified = req.body?.email_verified === true;
+  // Firebase identity is trusted only after server-side ID token signature and claims verification.
+  api.post('/auth/firebase-session', createAuthRateLimit('firebase-login', 10), async (req, res) => {
+    const authHeader = String(req.headers.authorization || '');
+    const bearerToken = authHeader.toLowerCase().startsWith('bearer ')
+      ? authHeader.slice(7).trim()
+      : '';
+    const idToken = String(req.body?.id_token || bearerToken).trim();
+    const projectId = String(process.env.FIREBASE_PROJECT_ID || '').trim();
 
-    if (!uid || !/^[a-zA-Z0-9_-]{6,128}$/.test(uid)) {
-      res.status(400).json({ detail: 'Identificador Firebase inválido.' });
+    if (!idToken || !projectId) {
+      res.status(401).json({ detail: 'Autenticação Firebase não configurada ou token ausente.' });
       return;
     }
 
-    const username = `fb_${uid.slice(0, 20).toLowerCase()}`;
-    const isBootstrappedAdmin = email_verified && email === 'alexandrecalmonjunior@gmail.com';
+    let claims;
+    try {
+      claims = await verifyFirebaseIdToken(idToken, projectId);
+    } catch (error) {
+      res.status(401).json({
+        detail: error instanceof Error ? error.message : 'Token Firebase inválido.',
+      });
+      return;
+    }
+
+    const uid = claims.sub;
+    const email = String(claims.email || '').trim().toLowerCase();
+    const display_name = String(claims.name || email || 'Usuário').trim().slice(0, 80) || 'Usuário';
+    const email_verified = claims.email_verified === true;
+    if (!/^[a-zA-Z0-9_-]{6,128}$/.test(uid)) {
+      res.status(401).json({ detail: 'Identidade Firebase inválida.' });
+      return;
+    }
+
+    const adminEmails = new Set(
+      String(process.env.JARVIS_FIREBASE_ADMIN_EMAILS || '')
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean),
+    );
+    const isBootstrappedAdmin = email_verified && Boolean(email) && adminEmails.has(email);
     const role: 'admin' | 'developer' = isBootstrappedAdmin ? 'admin' : 'developer';
+    const username = `fb_${uid.slice(0, 20).toLowerCase()}`;
 
     let user = users.get(username);
     if (!user) {
@@ -1453,6 +1513,10 @@ function buildApiRouter() {
     } else if (!user.is_active) {
       res.status(403).json({ detail: 'Conta desativada pelo administrador.' });
       return;
+    } else if (isBootstrappedAdmin && user.role !== 'admin') {
+      user.role = 'admin';
+    } else if (!isBootstrappedAdmin && user.role === 'admin') {
+      user.role = 'developer';
     }
 
     const record = createSessionForUser(req, res, user);
@@ -1903,8 +1967,9 @@ function buildApiRouter() {
   });
 
   // --- CHAT & TASKS ---
-  api.get('/chat/sessions', requireAuth, (_req, res) => {
-    const list = Array.from(chatSessions.values()).map((s) => ({
+  api.get('/chat/sessions', requireAuth, (req, res) => {
+    const ownerUserId = getOwnerUserId(req);
+    const list = Array.from(chatSessions.values()).filter((s) => s.owner_user_id === ownerUserId).map((s) => ({
       session_id: s.session_id,
       title: s.title,
       first_prompt: s.first_prompt,
@@ -1917,31 +1982,39 @@ function buildApiRouter() {
 
   api.get('/chat/sessions/:id', requireAuth, (req, res) => {
     const s = chatSessions.get(req.params.id);
-    if (!s) {
-      res.json({ session_id: req.params.id, tasks: [], messages: [] });
+    if (!s || s.owner_user_id !== getOwnerUserId(req)) {
+      res.status(404).json({ detail: 'Conversa não encontrada.' });
       return;
     }
     res.json({ session_id: s.session_id, tasks: s.tasks, messages: s.messages });
   });
 
   api.delete('/chat/sessions/:id', requireAuth, (req, res) => {
+    const s = chatSessions.get(req.params.id);
+    if (!s || s.owner_user_id !== getOwnerUserId(req)) {
+      res.status(404).json({ detail: 'Conversa não encontrada.' });
+      return;
+    }
     chatSessions.delete(req.params.id);
     res.json({ deleted: true });
   });
 
   api.get('/chat/search', requireAuth, (req, res) => {
     const q = String(req.query.query || '').toLowerCase();
+    const ownerUserId = getOwnerUserId(req);
     const hits = Array.from(chatSessions.values())
-      .filter((s) => s.title.toLowerCase().includes(q) || s.messages.some((m) => m.content.toLowerCase().includes(q)))
+      .filter((s) => s.owner_user_id === ownerUserId && (s.title.toLowerCase().includes(q) || s.messages.some((m) => m.content.toLowerCase().includes(q))))
       .map((s) => ({ session_id: s.session_id, title: s.title, last_activity: s.last_activity }));
     res.json(hits);
   });
 
   api.get('/chat/sessions/:id/export', requireAuth, (req, res) => {
     const s = chatSessions.get(req.params.id);
-    const md = s
-      ? s.messages.map((m) => `### ${m.role === 'user' ? 'Você' : 'JARVIS'}\n\n${m.content}`).join('\n\n---\n\n')
-      : '# Conversa vazia';
+    if (!s || s.owner_user_id !== getOwnerUserId(req)) {
+      res.status(404).json({ detail: 'Conversa não encontrada.' });
+      return;
+    }
+    const md = s.messages.map((m) => `### ${m.role === 'user' ? 'Você' : 'JARVIS'}\n\n${m.content}`).join('\n\n---\n\n');
     res.type('text/markdown').send(md);
   });
 
@@ -1959,6 +2032,11 @@ function buildApiRouter() {
     const taskId = `tsk_${Date.now()}`;
 
     const ownerUserId = user?.username || 'admin';
+    const existingSession = chatSessions.get(sessionId);
+    if (existingSession && existingSession.owner_user_id !== ownerUserId) {
+      res.status(404).json({ detail: 'Conversa não encontrada.' });
+      return;
+    }
     const targetModelName = requestedModel || activeAgent.preferred_model;
     const resolvedExternalCred = resolveExternalCredentialForRequest(req, ownerUserId, targetModelName);
 
@@ -1998,6 +2076,7 @@ function buildApiRouter() {
       let session = chatSessions.get(sessionId);
       if (!session) {
         session = {
+          owner_user_id: ownerUserId,
           session_id: sessionId,
           title: prompt.slice(0, 48) || 'Nova conversa',
           first_prompt: prompt,
@@ -2078,6 +2157,12 @@ function buildApiRouter() {
     const requestedModel = req.body?.model ? String(req.body.model) : undefined;
     const enableWebSearch = typeof req.body?.enable_web_search === 'boolean' ? req.body.enable_web_search : undefined;
     const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
+    const ownerUserId = user?.username || 'admin';
+    const existingSession = chatSessions.get(sessionId);
+    if (existingSession && existingSession.owner_user_id !== ownerUserId) {
+      res.status(404).json({ detail: 'Conversa não encontrada.' });
+      return;
+    }
     const profile = user ? userProfiles.get(user.username) : undefined;
     const assistantName = String(req.body?.assistant_name || profile?.assistantName || 'JARVIS');
     const activeAgent = detectInvokedAgent(prompt, sessionId);
@@ -2246,6 +2331,7 @@ function buildApiRouter() {
       let session = chatSessions.get(sessionId);
       if (!session) {
         session = {
+          owner_user_id: ownerUserId,
           session_id: sessionId,
           title: prompt.slice(0, 48) || 'Nova conversa',
           first_prompt: prompt,
@@ -7888,7 +7974,7 @@ ${original}
 
 async function startServer() {
   const app = express();
-  app.set('trust proxy', 1);
+  app.set('trust proxy', process.env.TRUST_PROXY === '1' ? 1 : false);
 
   app.use('/api/v1', buildApiRouter());
 
@@ -7918,8 +8004,15 @@ async function startServer() {
   const server = http.createServer(app);
   const wss = new WebSocketServer({ noServer: true });
 
-  wss.on('connection', (ws) => {
-    realtimeClients.add(ws);
+  wss.on('connection', (ws, request) => {
+    const sessionId = parseCookies(request.headers.cookie)[SESSION_COOKIE];
+    const session = sessionId ? sessions.get(sessionId) : undefined;
+    const account = session ? users.get(session.username) : undefined;
+    if (!session || !account?.is_active || Date.now() - session.created_at > SESSION_TTL_MS) {
+      ws.close(1008, 'Authentication required');
+      return;
+    }
+    realtimeClients.set(ws, { username: session.username, sessionId: session.session_id });
     try {
       ws.send(JSON.stringify({ type: 'connected', payload: { status: 'ready' } }));
     } catch {
@@ -7933,6 +8026,14 @@ async function startServer() {
   server.on('upgrade', (request, socket, head) => {
     const urlPath = (request.url || '').split('?')[0];
     if (urlPath === '/ws') {
+      const sessionId = parseCookies(request.headers.cookie)[SESSION_COOKIE];
+      const session = sessionId ? sessions.get(sessionId) : undefined;
+      const account = session ? users.get(session.username) : undefined;
+      if (!session || !account?.is_active || Date.now() - session.created_at > SESSION_TTL_MS) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+        socket.destroy();
+        return;
+      }
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit('connection', ws, request);
       });

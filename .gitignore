@@ -8,3 +8,10 @@ dev-dist
 .jarvis-brain/workspaces/*/*.db-shm
 test-results/
 
+
+# Runtime databases, backups and per-user/agent memory (never commit local state)
+.jarvis-brain/brain.db*
+.jarvis-brain/backups/
+.jarvis-brain/workspaces/*/state.db*
+.jarvis-brain/workspaces/*/MEMORY.md
+.jarvis-brain/workspaces/*/USER.md
