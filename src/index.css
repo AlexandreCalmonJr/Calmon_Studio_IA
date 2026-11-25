@@ -3,6 +3,8 @@
    Typography: Plus Jakarta Sans + JetBrains Mono (loaded via index.html)
    ========================================================================== */
 
+@custom-variant dark (&:where(.dark, .dark *, [data-theme='obsidian'], [data-theme='obsidian'] *));
+
 :root {
   /* Core Surfaces — Obsidian Studio (Dark Fallback) */
   --bg-primary: #0b0d12;
@@ -10,6 +12,10 @@
   --bg-tertiary: #141821;
   --bg-surface: #181d27;
   --bg-elevated: #1f2533;
+  --workspace-panel-bg: #10141d;
+  --workspace-panel-border: rgba(255, 255, 255, 0.1);
+  --workspace-step-bg: rgba(255, 255, 255, 0.03);
+  --workspace-step-active-bg: rgba(249, 115, 22, 0.11);
   --bg-input: #0e1118;
   --bg-hover: rgba(255, 255, 255, 0.05);
   --bg-active: rgba(255, 255, 255, 0.09);
@@ -137,6 +143,10 @@
   --bg-tertiary: #ffffff;
   --bg-surface: #eef3fb;
   --bg-elevated: #e4ecfa;
+  --workspace-panel-bg: #ffffff;
+  --workspace-panel-border: rgba(15, 23, 42, 0.1);
+  --workspace-step-bg: #f8fafc;
+  --workspace-step-active-bg: rgba(79, 70, 229, 0.08);
   --bg-input: #f8fafd;
   --bg-hover: rgba(79, 70, 229, 0.055);
   --bg-active: rgba(79, 70, 229, 0.11);

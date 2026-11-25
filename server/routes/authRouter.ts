@@ -104,7 +104,7 @@ export function createAuthRouter(deps?: AuthRouterDeps): Router {
       return;
     }
     const admin = users.get('admin')!;
-    const record = createSessionForUser(req, res, admin);
+    const record = createSessionForUser(req, res, admin, store);
     res.json({
       status: 'authenticated',
       user_id: admin.username,
@@ -232,7 +232,7 @@ export function createAuthRouter(deps?: AuthRouterDeps): Router {
       }
     }
 
-    const record = createSessionForUser(req, res, user);
+    const record = createSessionForUser(req, res, user, store);
     persistAllUsersAndProfiles(store);
     res.json({
       status: 'authenticated',
@@ -331,6 +331,7 @@ export function createAuthRouter(deps?: AuthRouterDeps): Router {
         sessions.delete(sid);
       }
     }
+    try { store?.deleteAuthSessionsByUser(target.username, session.session_id); } catch { /* não bloqueia */ }
     persistAllUsersAndProfiles(store);
     res.json({ status: 'password_updated' });
   });

@@ -54,6 +54,12 @@ export interface BrainInfoResponse {
     sessions: number;
     paired_devices: number;
   };
+  infrastructure?: {
+    database: InfrastructureDiagnosticsResponse['database'];
+    queue: InfrastructureDiagnosticsResponse['queue'];
+    storage: InfrastructureDiagnosticsResponse['storage'];
+    sandbox: InfrastructureDiagnosticsResponse['sandbox'];
+  };
 }
 
 export interface BrainSchemaResponse {
@@ -609,3 +615,240 @@ export async function deleteMcpServerApi(id: string): Promise<{
   if (!res.ok) throw new Error(data.error || 'Falha ao remover servidor MCP.');
   return data;
 }
+
+// ==================== INFRAESTRUTURA PLUGÁVEL, SANDBOX, MCP RUNTIME, AGENDADOR & CANAIS 24/7 ====================
+
+export interface McpRuntimeEntry {
+  server_id: string;
+  name: string;
+  transport: 'stdio' | 'http';
+  endpoint: string;
+  is_approved: boolean;
+  runtime_state: 'online' | 'standby' | 'backoff' | 'blocked';
+  restart_count: number;
+  backoff_ms: number;
+  tools_count: number;
+  last_heartbeat_at: string | null;
+  last_error: string | null;
+}
+
+export interface InfrastructureDiagnosticsResponse {
+  database: {
+    active_engine: 'sqlite_wal' | 'postgres_pgvector';
+    engine_label: string;
+    postgres_configured: boolean;
+    postgres_host_masked: string | null;
+    postgres_reachable: boolean | null;
+    pgvector_ready: boolean;
+    sqlite_journal_mode: string;
+    sqlite_busy_timeout_ms: number;
+    composite_indexes_count: number;
+    recoverable_runs_count: number;
+  };
+  queue: {
+    driver: 'sqlite_durable' | 'redis_distributed';
+    driver_label: string;
+    redis_configured: boolean;
+    active_lanes: number;
+    pending_jobs: number;
+    total_executed: number;
+  };
+  storage: {
+    driver: 'local_confined' | 's3' | 'gcs' | 'minio';
+    mode_label: string;
+    configured_provider: string;
+    bucket: string | null;
+    endpoint: string | null;
+    base_dir: string | null;
+    multi_replica_ready: boolean;
+    status: 'ready' | 'configured_standby';
+  };
+  sandbox: {
+    driver: 'local_confined' | 'docker_ephemeral';
+    driver_label: string;
+    allowlisted_binaries: string[];
+    max_timeout_ms: number;
+    container_mode_enabled: boolean;
+    workspace_root: string;
+  };
+  mcp_runtime: McpRuntimeEntry[];
+  pgvector_schema_ddl: string;
+}
+
+export interface SandboxSessionItem {
+  id: string;
+  run_id: string | null;
+  user_id: string;
+  driver: string;
+  command: string;
+  cwd: string;
+  status: 'completed' | 'failed' | 'timeout' | 'blocked';
+  exit_code: number | null;
+  stdout_excerpt: string;
+  stderr_excerpt: string;
+  duration_ms: number;
+  created_at: string;
+}
+
+export interface ScheduledJobItem {
+  id: string;
+  user_id: string;
+  name: string;
+  cron_expr: string;
+  target_type: 'agent_prompt' | 'workflow' | 'mcp_tool';
+  target_ref: string;
+  payload_json: string;
+  enabled: number;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  last_status: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChannelBindingItem {
+  id: string;
+  user_id: string;
+  provider: 'telegram' | 'discord' | 'slack' | 'whatsapp';
+  label: string;
+  external_chat_id: string;
+  agent_role: string;
+  workspace_slug: string;
+  webhook_secret_hint: string;
+  enabled: number;
+  last_activity_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function fetchInfraDiagnosticsApi(probe = false): Promise<InfrastructureDiagnosticsResponse> {
+  const qs = probe ? '?probe=true' : '';
+  const res = await apiFetch(`${API_BASE}/brain/infra/diagnostics${qs}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Falha ao consultar diagnósticos de infraestrutura.');
+  return data;
+}
+
+export async function fetchSandboxSessionsApi(): Promise<{
+  diagnostics: InfrastructureDiagnosticsResponse['sandbox'];
+  sessions: SandboxSessionItem[];
+}> {
+  const res = await apiFetch(`${API_BASE}/brain/sandbox/sessions`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Falha ao consultar sessões do Sandbox.');
+  return data;
+}
+
+export async function execSandboxCommandApi(
+  command: string,
+  args: string[] = [],
+  options?: { run_id?: string | null; timeout_ms?: number }
+): Promise<{
+  session: SandboxSessionItem;
+  allowed: boolean;
+  reason?: string;
+}> {
+  const res = await apiFetch(`${API_BASE}/brain/sandbox/exec`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      command,
+      args,
+      run_id: options?.run_id ?? null,
+      timeout_ms: options?.timeout_ms,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok && res.status !== 403) {
+    throw new Error(data.error || 'Falha ao executar comando no Sandbox.');
+  }
+  return data;
+}
+
+export async function fetchMcpRuntimeApi(probe = false): Promise<{ runtime: McpRuntimeEntry[] }> {
+  const qs = probe ? '?probe=true' : '';
+  const res = await apiFetch(`${API_BASE}/brain/mcp/runtime${qs}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Falha ao consultar runtime MCP.');
+  return data;
+}
+
+export async function fetchScheduledJobsApi(): Promise<{ jobs: ScheduledJobItem[] }> {
+  const res = await apiFetch(`${API_BASE}/brain/scheduler/jobs`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Falha ao listar rotinas agendadas.');
+  return data;
+}
+
+export async function saveScheduledJobApi(input: {
+  id?: string;
+  name: string;
+  cron_expr: string;
+  target_type?: 'agent_prompt' | 'workflow' | 'mcp_tool';
+  target_ref: string;
+  payload?: Record<string, unknown>;
+  enabled?: boolean;
+}): Promise<{ job: ScheduledJobItem }> {
+  const res = await apiFetch(`${API_BASE}/brain/scheduler/jobs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Não foi possível salvar o agendamento.');
+  return data;
+}
+
+export async function runScheduledJobNowApi(id: string): Promise<{ job: ScheduledJobItem; runId: string }> {
+  const res = await apiFetch(`${API_BASE}/brain/scheduler/jobs/${encodeURIComponent(id)}/run`, {
+    method: 'POST',
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Falha ao disparar rotina agendada.');
+  return data;
+}
+
+export async function deleteScheduledJobApi(id: string): Promise<{ deleted: boolean }> {
+  const res = await apiFetch(`${API_BASE}/brain/scheduler/jobs/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Falha ao remover rotina agendada.');
+  return data;
+}
+
+export async function fetchChannelBindingsApi(): Promise<{ bindings: ChannelBindingItem[] }> {
+  const res = await apiFetch(`${API_BASE}/brain/channels/bindings`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Falha ao listar canais conectados.');
+  return data;
+}
+
+export async function saveChannelBindingApi(input: {
+  id?: string;
+  provider: 'telegram' | 'discord' | 'slack' | 'whatsapp';
+  label: string;
+  external_chat_id: string;
+  agent_role?: string;
+  workspace_slug?: string;
+  enabled?: boolean;
+}): Promise<{ binding: ChannelBindingItem }> {
+  const res = await apiFetch(`${API_BASE}/brain/channels/bindings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Não foi possível conectar o canal.');
+  return data;
+}
+
+export async function deleteChannelBindingApi(id: string): Promise<{ deleted: boolean }> {
+  const res = await apiFetch(`${API_BASE}/brain/channels/bindings/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Falha ao desconectar canal.');
+  return data;
+}
+

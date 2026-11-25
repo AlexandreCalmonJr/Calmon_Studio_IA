@@ -1788,6 +1788,12 @@ export function detectInvokedAgent(prompt: string, sessionId?: string): AgentSer
 
 // ==================== AUTH & COOKIE HELPERS ====================
 
+let activeAuthStore: LocalSqliteBrainStore | null = null;
+
+export function bindActiveAuthStore(store: LocalSqliteBrainStore | null): void {
+  activeAuthStore = store;
+}
+
 export function getSessionFromReq(req: Request): SessionRecord | null {
   const cookies = parseCookies(req.headers.cookie);
   const headerToken = String(req.headers['x-jarvis-session'] || '').trim();
@@ -1797,7 +1803,61 @@ export function getSessionFromReq(req: Request): SessionRecord | null {
 
   const sid = cookies[SESSION_COOKIE] || headerToken || bearerToken || queryToken;
   if (!sid) return null;
-  return sessions.get(sid) || null;
+  const cached = sessions.get(sid);
+  if (cached) return cached;
+
+  // Fallback resiliente: recupera sessão válida diretamente do SQLite (sobrevive a restarts e F5)
+  if (activeAuthStore) {
+    try {
+      const persisted = activeAuthStore.getAuthSession(sid);
+      if (persisted) {
+        const hydrated: SessionRecord = {
+          session_id: persisted.session_id,
+          username: persisted.username,
+          role: persisted.role,
+          kind: persisted.kind,
+          created_at: persisted.created_at,
+        };
+        sessions.set(sid, hydrated);
+        return hydrated;
+      }
+    } catch {
+      // Banco indisponível ou fechado em teardown de teste
+    }
+  }
+  return null;
+}
+
+const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+function isCookieOnlyAuthenticatedRequest(req: Request): boolean {
+  const cookies = parseCookies(req.headers.cookie);
+  const hasCookie = Boolean(cookies[SESSION_COOKIE]);
+  const hasExplicitToken = Boolean(
+    String(req.headers['x-jarvis-session'] || '').trim() ||
+      String(req.headers.authorization || '').trim()
+  );
+  return hasCookie && !hasExplicitToken;
+}
+
+function passesCsrfOriginGuard(req: Request): boolean {
+  if (!WRITE_METHODS.has(req.method.toUpperCase())) return true;
+  if (!isCookieOnlyAuthenticatedRequest(req)) return true;
+
+  // Cabeçalho customizado não-simples bloqueia submissões cross-site sem preflight CORS
+  const requestedWith = String(req.headers['x-requested-with'] || '').trim();
+  if (requestedWith) return true;
+
+  // Fallback para requisições same-origin legítimas do navegador (Origin ou Referer)
+  const host = String(req.headers.host || '').trim().toLowerCase();
+  const originHeader = String(req.headers.origin || req.headers.referer || '').trim();
+  if (!originHeader || !host) return true;
+  try {
+    const parsed = new URL(originHeader);
+    return parsed.host.toLowerCase() === host;
+  } catch {
+    return false;
+  }
 }
 
 export function setSessionCookie(req: Request, res: Response, sessionId: string) {
@@ -1836,8 +1896,12 @@ export function createSessionForUser(req: Request, res: Response, user: UserAcco
     created_at: Date.now(),
   };
   sessions.set(session_id, record);
-  // Persiste no SQLite para sobreviver a reinicializações do servidor
-  try { store?.upsertAuthSession(record); } catch { /* não bloqueia */ }
+  const targetStore = store || activeAuthStore;
+  // Garante usuário na tabela auth_users antes de gravar auth_sessions (evita erro silencioso de FK)
+  try {
+    targetStore?.upsertAuthUser(user);
+    targetStore?.upsertAuthSession(record);
+  } catch { /* não bloqueia */ }
   setSessionCookie(req, res, session_id);
   return record;
 }
@@ -1848,9 +1912,14 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
     res.status(401).json({ detail: 'Sessão não autenticada. Faça login para continuar.' });
     return;
   }
+  if (!passesCsrfOriginGuard(req)) {
+    res.status(403).json({ detail: 'Requisição bloqueada pela verificação de origem da sessão.' });
+    return;
+  }
   const user = users.get(session.username);
   if (!user || !user.is_active) {
     sessions.delete(session.session_id);
+    try { activeAuthStore?.deleteAuthSession(session.session_id); } catch { /* não bloqueia */ }
     res.status(401).json({ detail: 'Conta inativa ou sessão revogada.' });
     return;
   }
@@ -2208,6 +2277,8 @@ export function persistAllUsersAndProfiles(store: LocalSqliteBrainStore | undefi
 }
 
 export function hydrateServerStateFromSqlite(store: LocalSqliteBrainStore): void {
+  bindActiveAuthStore(store);
+
   // Prioridade 1: carregar usuários da tabela auth_users (relacional)
   const sqliteUsers = store.listAuthUsers();
   if (sqliteUsers.length > 0) {
@@ -2225,8 +2296,27 @@ export function hydrateServerStateFromSqlite(store: LocalSqliteBrainStore): void
     }
   }
 
-  // Limpeza de sessões expiradas do SQLite
-  try { store.purgeExpiredAuthSessions(); } catch { /* não bloqueia */ }
+  // Garante que as contas padrão (ex.: admin) existam em auth_users para integridade de auth_sessions
+  for (const [, u] of users.entries()) {
+    try { store.upsertAuthUser(u); } catch { /* não bloqueia */ }
+  }
+
+  // Limpeza de sessões expiradas e hidratação das sessões válidas do SQLite (sobrevive a F5 e restarts)
+  try {
+    store.purgeExpiredAuthSessions();
+    const activeSessions = store.listActiveAuthSessions();
+    for (const s of activeSessions) {
+      sessions.set(s.session_id, s);
+    }
+  } catch { /* não bloqueia */ }
+
+  // Recuperação automática no boot de execuções de agente interrompidas (Fase 2)
+  try {
+    const recovered = store.recoverInterruptedAgentRuns();
+    if (recovered > 0) {
+      appendServerLog('WARNING', 'durable_runs', `${recovered} execução(ões) de agente interrompida(s) marcada(s) como recuperável(is) no boot.`);
+    }
+  } catch { /* não bloqueia */ }
 
   const savedProfiles = store.loadStateNamespace<Array<[string, Record<string, any>]>>('user_profiles');
   if (Array.isArray(savedProfiles)) {

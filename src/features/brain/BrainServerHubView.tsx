@@ -80,9 +80,12 @@ import { BrainMemoryPanel } from './BrainMemoryPanel';
 import { BrainPythonLanesPanel } from './BrainPythonLanesPanel';
 import { BrainMcpPanel } from './BrainMcpPanel';
 import { BrainUpdatesPanel } from './BrainUpdatesPanel';
+import { BrainInfraRuntimePanel } from './BrainInfraRuntimePanel';
+import { hubStore } from '../../services/hubStore';
 
 type BrainHubTab =
   | 'multi_brain'
+  | 'infra_runtime'
   | 'updates'
   | 'memory_hybrid'
   | 'python_lanes'
@@ -236,8 +239,8 @@ export const BrainServerHubView: React.FC<BrainServerHubViewProps> = ({
     setLoadingBrains(true);
     try {
       const [info, profs, schema, localPayload, serverReport] = await Promise.all([
-        fetchBrainInfoApi(),
-        fetchBrainProfilesApi(),
+        hubStore.fetch('brain_info', () => fetchBrainInfoApi(), { ttlMs: 12_000 }),
+        hubStore.fetch('brain_profiles', () => fetchBrainProfilesApi(), { ttlMs: 12_000 }),
         fetchBrainSchemaApi().catch(() => null),
         fetchModulePacks().catch(() => null),
         fetchPackageUpdatesStatus().catch(() => null),
@@ -358,7 +361,9 @@ export const BrainServerHubView: React.FC<BrainServerHubViewProps> = ({
           detail: { id: res.active.id, name: res.active.name, mode: res.active.mode },
         })
       );
-      const info = await fetchBrainInfoApi();
+      hubStore.invalidate('brain_info');
+      hubStore.invalidate('brain_profiles');
+      const info = await hubStore.fetch('brain_info', () => fetchBrainInfoApi(), { force: true });
       setBrainInfo(info);
       void loadUpdatesStatus(true);
       notify(`Conectado ao Cérebro "${res.active.name}" com sucesso!`, 'success');
@@ -695,6 +700,7 @@ export const BrainServerHubView: React.FC<BrainServerHubViewProps> = ({
       <div role="tablist" aria-label="Seções de Cérebros e Servidor" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
         {[
           { id: 'multi_brain' as const, label: `Meus Cérebros (${profiles.length})`, icon: ArrowRightLeft, badgeCount: 0 },
+          { id: 'infra_runtime' as const, label: 'Infra, Sandbox & Canais 24/7', icon: ShieldCheck, badgeCount: 0 },
           {
             id: 'updates' as const,
             label: 'Versões & Updates',
@@ -741,6 +747,9 @@ export const BrainServerHubView: React.FC<BrainServerHubViewProps> = ({
           );
         })}
       </div>
+
+      {/* ABA INFRAESTRUTURA PLUGÁVEL, SANDBOX, MCP RUNTIME & CANAIS 24/7 */}
+      {activeTab === 'infra_runtime' && <BrainInfraRuntimePanel />}
 
       {/* ABA DE VERIFICAÇÃO DE VERSÕES E UPDATES */}
       {activeTab === 'updates' && (

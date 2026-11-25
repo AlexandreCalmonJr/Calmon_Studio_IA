@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   PanelLeft,
+  PanelRight,
   Plus,
   X,
   Cpu,
@@ -38,6 +39,12 @@ interface OpenBotChatHeaderProps {
   webSearchEnabled?: boolean;
   onToggleWebSearch?: () => void;
   onOpenArtifactStudio?: () => void;
+  workspaceOpen?: boolean;
+  onToggleWorkspace?: () => void;
+  workspaceStepCount?: number;
+  workspaceRunning?: boolean;
+  recoverableRunsCount?: number;
+  compactHeader?: boolean;
 }
 
 const AVAILABLE_MODELS = [
@@ -67,6 +74,12 @@ export const OpenBotChatHeader: React.FC<OpenBotChatHeaderProps> = ({
   webSearchEnabled = false,
   onToggleWebSearch,
   onOpenArtifactStudio,
+  workspaceOpen = false,
+  onToggleWorkspace,
+  workspaceStepCount = 0,
+  workspaceRunning = false,
+  recoverableRunsCount = 0,
+  compactHeader = false,
 }) => {
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
@@ -196,8 +209,8 @@ export const OpenBotChatHeader: React.FC<OpenBotChatHeaderProps> = ({
         </div>
       </div>
 
-      {/* Centro: Orb de IA animado com a letra C */}
-      <AiOrbButton centered />
+      {/* Centro: Orb de IA animado com a letra C (oculto em modo split/compacto para evitar colisão com botões) */}
+      {!compactHeader && <AiOrbButton centered />}
 
       {/* Direita: Projeto, Seletor de Modelo e Exportação */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
@@ -263,6 +276,35 @@ export const OpenBotChatHeader: React.FC<OpenBotChatHeaderProps> = ({
           >
             <Sparkles size={13} color="var(--accent-light)" />
             <span className="hide-mobile">Artefatos</span>
+          </button>
+        )}
+
+        {onToggleWorkspace && (
+          <button
+            type="button"
+            data-testid="chat-toggle-workspace-btn"
+            onClick={onToggleWorkspace}
+            aria-pressed={workspaceOpen}
+            className={`btn btn-sm ${workspaceOpen ? 'btn-primary' : 'btn-secondary'}`}
+            title="Abrir painel ao vivo de execução, arquivos, sandbox e checkpoints"
+          >
+            <PanelRight size={13} />
+            <span className="hide-mobile">Workspace</span>
+            {(workspaceRunning || workspaceStepCount > 0 || recoverableRunsCount > 0) && (
+              <span
+                className="tabular-nums"
+                style={{
+                  fontSize: '0.68rem',
+                  fontWeight: 700,
+                  padding: '0 5px',
+                  borderRadius: '6px',
+                  backgroundColor: workspaceOpen ? 'rgba(255,255,255,0.22)' : 'var(--accent-soft)',
+                  color: workspaceOpen ? '#ffffff' : 'var(--accent-light)',
+                }}
+              >
+                {workspaceRunning ? 'Ao vivo' : recoverableRunsCount > 0 ? `${recoverableRunsCount}!` : workspaceStepCount}
+              </span>
+            )}
           </button>
         )}
 

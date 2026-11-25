@@ -23,6 +23,17 @@ import {
   type MemoryScope,
 } from './models.ts';
 import type { JarvisBrainPack } from '../../src/services/brainArchitectureEngine.ts';
+import { createHubRepositoryAdapter } from '../infra/databaseAdapter.ts';
+import { createArtifactStorageAdapter } from '../infra/storageAdapter.ts';
+import { createDurableQueueAdapter } from '../infra/queueAdapter.ts';
+import { createPluggableSandboxRunner } from '../infra/sandboxRunner.ts';
+import { createMcpRuntimeSupervisor } from '../infra/mcpSupervisor.ts';
+import {
+  ChannelGatewayService,
+  isValidChannelProvider,
+  PersistentSchedulerService,
+  verifyChannelWebhookToken,
+} from '../infra/channelsAndScheduler.ts';
 
 export interface BrainRouterDeps {
   store: LocalSqliteBrainStore;
@@ -50,6 +61,20 @@ export function createBrainRouter(deps: BrainRouterDeps): Router {
   laneQueue.setPersistCallback((job) => store.recordLaneJob(job));
   const pythonWorker = deps.pythonWorker || createPythonWorkerBridge();
 
+  // Adaptadores Plugáveis das Fases 3 & 4 (Zero-Setup Local → Escala Produção por Ambiente)
+  const dbAdapter = createHubRepositoryAdapter(store);
+  const storageAdapter = createArtifactStorageAdapter(store.dataDir);
+  const durableQueue = createDurableQueueAdapter(store);
+  const sandboxRunner = createPluggableSandboxRunner(store, store.dataDir);
+  const mcpSupervisor = createMcpRuntimeSupervisor(store);
+  const schedulerService = new PersistentSchedulerService(store);
+  const channelGateway = new ChannelGatewayService(store);
+
+  const getUserIdFromReq = (req: express.Request): string => {
+    const user = (req as express.Request & { jarvisUser?: { username?: string } }).jarvisUser;
+    return user?.username || 'admin';
+  };
+
   // ==================== HEALTH & INFO ====================
   router.get('/health', (_req, res) => {
     const active = store.getActiveBrainProfile();
@@ -70,7 +95,7 @@ export function createBrainRouter(deps: BrainRouterDeps): Router {
     });
   });
 
-  router.get('/info', requireAuth, (_req, res) => {
+  router.get('/info', requireAuth, async (_req, res) => {
     const identity = store.getIdentity();
     const active = store.getActiveBrainProfile();
     const dbHealth = store.getDatabaseHealth();
@@ -78,6 +103,10 @@ export function createBrainRouter(deps: BrainRouterDeps): Router {
     const activeWs = store.getActiveWorkspace();
     const wsStats = store.getActiveWorkspaceStore().getIndexStats();
     const isDocker = active?.mode === 'docker_postgres';
+    const dbDiag = await dbAdapter.getDiagnostics(false);
+    const storageDiag = storageAdapter.getDiagnostics();
+    const queueDiag = durableQueue.getDiagnostics();
+    const sandboxDiag = sandboxRunner.getDiagnostics();
 
     res.json({
       brain_id: active?.id || identity.id,
@@ -104,7 +133,15 @@ export function createBrainRouter(deps: BrainRouterDeps): Router {
         database: dbHealth.ok ? 'online' : 'offline',
         gemini_cloud: deps.isGeminiConfigured() ? 'configured' : 'standby',
         ollama_local: process.env.OLLAMA_HOST ? 'detected' : 'optional',
-        redis_queue: isDocker ? 'online' : 'local_scheduler',
+        redis_queue: queueDiag.redis_configured || isDocker ? 'online' : 'local_scheduler',
+      },
+      infrastructure: {
+        database: dbDiag,
+        queue: queueDiag,
+        storage: storageDiag,
+        sandbox: sandboxDiag,
+        scheduled_jobs_count: store.listScheduledJobs().length,
+        channel_bindings_count: store.listChannelBindings().length,
       },
       counts: deps.getLiveCounts(),
     });
@@ -922,6 +959,147 @@ export function createBrainRouter(deps: BrainRouterDeps): Router {
       res.send(zipBuffer);
     } catch (err: any) {
       res.status(400).json({ error: err?.message || 'Falha ao compactar o servidor Poliglota.' });
+    }
+  });
+
+  // ==================== INFRAESTRUTURA PLUGÁVEL, SANDBOX, MCP RUNTIME, AGENDADOR & CANAIS 24/7 ====================
+
+  router.get('/infra/diagnostics', requireAuth, async (req, res) => {
+    const probe = req.query.probe === 'true';
+    const [database, mcpRuntime] = await Promise.all([
+      dbAdapter.getDiagnostics(probe),
+      mcpSupervisor.listSupervisedStatus(probe),
+    ]);
+    res.json({
+      database,
+      queue: durableQueue.getDiagnostics(),
+      storage: storageAdapter.getDiagnostics(),
+      sandbox: sandboxRunner.getDiagnostics(),
+      mcp_runtime: mcpRuntime,
+      pgvector_schema_ddl: dbAdapter.getPgVectorSchemaDdl(),
+    });
+  });
+
+  router.get('/sandbox/sessions', requireAuth, (req, res) => {
+    const userId = getUserIdFromReq(req);
+    res.json({
+      diagnostics: sandboxRunner.getDiagnostics(),
+      sessions: store.listSandboxSessions(userId, 30),
+    });
+  });
+
+  router.post('/sandbox/exec', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserIdFromReq(req);
+      const command = String(req.body?.command || '').trim();
+      const args = Array.isArray(req.body?.args) ? req.body.args.map(String) : [];
+      const timeoutMs = req.body?.timeout_ms ? Number(req.body.timeout_ms) : undefined;
+      const runId = req.body?.run_id ? String(req.body.run_id) : null;
+      const result = await sandboxRunner.execute({ userId, runId, command, args, timeoutMs });
+      res.status(result.allowed ? 200 : 403).json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err?.message || 'Falha ao executar comando no Sandbox.' });
+    }
+  });
+
+  router.get('/mcp/runtime', requireAuth, async (req, res) => {
+    const probe = req.query.probe === 'true';
+    const runtime = await mcpSupervisor.listSupervisedStatus(probe);
+    res.json({ runtime });
+  });
+
+  router.get('/scheduler/jobs', requireAuth, (req, res) => {
+    const userId = getUserIdFromReq(req);
+    res.json({ jobs: schedulerService.listJobs(userId) });
+  });
+
+  router.post('/scheduler/jobs', requireAuth, (req, res) => {
+    try {
+      const userId = getUserIdFromReq(req);
+      const job = schedulerService.createOrUpdateJob({
+        id: req.body?.id ? String(req.body.id) : undefined,
+        user_id: userId,
+        name: String(req.body?.name || ''),
+        cron_expr: String(req.body?.cron_expr || ''),
+        target_type: (req.body?.target_type || 'agent_prompt') as 'agent_prompt' | 'workflow' | 'mcp_tool',
+        target_ref: String(req.body?.target_ref || ''),
+        payload: req.body?.payload && typeof req.body.payload === 'object' ? req.body.payload : {},
+        enabled: req.body?.enabled !== false,
+      });
+      res.status(201).json({ job });
+    } catch (err: any) {
+      res.status(400).json({ error: err?.message || 'Não foi possível salvar o agendamento.' });
+    }
+  });
+
+  router.post('/scheduler/jobs/:id/run', requireAuth, (req, res) => {
+    try {
+      const userId = getUserIdFromReq(req);
+      const result = schedulerService.triggerJobNow(String(req.params.id), userId);
+      res.json(result);
+    } catch (err: any) {
+      res.status(404).json({ error: err?.message || 'Agendamento não encontrado.' });
+    }
+  });
+
+  router.delete('/scheduler/jobs/:id', requireAuth, (req, res) => {
+    const userId = getUserIdFromReq(req);
+    const deleted = schedulerService.deleteJob(String(req.params.id), userId);
+    res.json({ deleted });
+  });
+
+  router.get('/channels/bindings', requireAuth, (req, res) => {
+    const userId = getUserIdFromReq(req);
+    res.json({ bindings: channelGateway.listBindings(userId) });
+  });
+
+  router.post('/channels/bindings', requireAuth, (req, res) => {
+    try {
+      const userId = getUserIdFromReq(req);
+      const binding = channelGateway.upsertBinding({
+        id: req.body?.id ? String(req.body.id) : undefined,
+        user_id: userId,
+        provider: String(req.body?.provider || ''),
+        label: String(req.body?.label || ''),
+        external_chat_id: String(req.body?.external_chat_id || ''),
+        agent_role: req.body?.agent_role ? String(req.body.agent_role) : 'jarvis_master',
+        workspace_slug: req.body?.workspace_slug ? String(req.body.workspace_slug) : 'default',
+        enabled: req.body?.enabled !== false,
+      });
+      res.status(201).json({ binding });
+    } catch (err: any) {
+      res.status(400).json({ error: err?.message || 'Não foi possível salvar o vínculo do canal.' });
+    }
+  });
+
+  router.delete('/channels/bindings/:id', requireAuth, (req, res) => {
+    const userId = getUserIdFromReq(req);
+    const deleted = channelGateway.deleteBinding(String(req.params.id), userId);
+    res.json({ deleted });
+  });
+
+  router.post('/channels/webhook/:provider', (req, res) => {
+    const providerRaw = String(req.params.provider || '').trim().toLowerCase();
+    if (!isValidChannelProvider(providerRaw)) {
+      res.status(400).json({ error: 'Canal inválido.' });
+      return;
+    }
+    const secretEnvKey = `CHANNEL_${providerRaw.toUpperCase()}_WEBHOOK_SECRET`;
+    const providedToken = String(req.headers['x-jarvis-channel-secret'] || '');
+    if (!verifyChannelWebhookToken(providedToken, process.env[secretEnvKey])) {
+      res.status(401).json({ error: `Assinatura de webhook ausente ou inválida (${secretEnvKey}).` });
+      return;
+    }
+    try {
+      const routed = channelGateway.routeInboundMessage({
+        provider: providerRaw,
+        externalChatId: String(req.body?.external_chat_id || req.body?.chat_id || ''),
+        senderName: String(req.body?.sender_name || 'Externo').slice(0, 80),
+        text: String(req.body?.text || '').slice(0, 4000),
+      });
+      res.json({ status: 'routed', run_id: routed.runId, user_id: routed.binding.user_id });
+    } catch (err: any) {
+      res.status(404).json({ error: err?.message || 'Vínculo não encontrado.' });
     }
   });
 

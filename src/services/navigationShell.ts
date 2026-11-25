@@ -694,6 +694,31 @@ export function filterLaunchpadModules(
   );
 }
 
+/**
+ * Telas administrativas densas (tabelas, formulários extensos, editores e logs)
+ * nas quais o Dock flutuante recolhe automaticamente para a pílula discreta
+ * para evitar sobreposição sobre o rodapé de cards e tabelas.
+ */
+export const DENSE_DOCK_AUTO_MINIMIZE_TABS: ReadonlySet<string> = new Set([
+  'brain_server',
+  'pack_studio',
+  'agents',
+  'models',
+  'knowledge',
+  'security',
+  'approvals',
+  'usage',
+  'server_logs',
+  'settings',
+  'store',
+  'workflows',
+  'coding',
+]);
+
+export function shouldAutoMinimizeDockForTab(tabId: string): boolean {
+  return DENSE_DOCK_AUTO_MINIMIZE_TABS.has(tabId);
+}
+
 export function computeDockClearancePx(opts: {
   showDock: boolean;
   isMinimized: boolean;
@@ -701,6 +726,6 @@ export function computeDockClearancePx(opts: {
   showEscapePill?: boolean;
 }): string {
   if (opts.isMobile) return '0px';
-  if (opts.showDock) return opts.isMinimized ? '40px' : '90px';
-  return opts.showEscapePill ? '44px' : '0px';
+  if (opts.showDock) return opts.isMinimized ? '52px' : '112px';
+  return opts.showEscapePill ? '52px' : '0px';
 }

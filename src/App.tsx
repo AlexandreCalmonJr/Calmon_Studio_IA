@@ -52,6 +52,7 @@ import {
   saveDockFavorites,
   saveDockMinimized,
   saveSidebarHidden,
+  shouldAutoMinimizeDockForTab,
   SIDEBAR_HIDDEN_UPDATED_EVENT,
   toggleDockFavorite,
 } from './services/navigationShell';
@@ -628,12 +629,20 @@ const DashboardApp: React.FC = () => {
     });
   };
 
+  const [dockTabOverride, setDockTabOverride] = useState<{ tab: string; minimized: boolean } | null>(null);
+
+  const effectiveDockMinimized =
+    dockTabOverride && dockTabOverride.tab === activeTab
+      ? dockTabOverride.minimized
+      : isDockMinimized || shouldAutoMinimizeDockForTab(activeTab);
+
   const handleToggleDockMinimized = () => {
-    setIsDockMinimized((prev) => {
-      const next = !prev;
+    const next = !effectiveDockMinimized;
+    setDockTabOverride({ tab: activeTab, minimized: next });
+    if (!shouldAutoMinimizeDockForTab(activeTab)) {
+      setIsDockMinimized(next);
       saveDockMinimized(next);
-      return next;
-    });
+    }
   };
 
   const handleToggleDockFavorite = (tabId: string) => {
@@ -819,7 +828,7 @@ const DashboardApp: React.FC = () => {
   const showEscapePill = isSidebarHidden && !showAgentDock && NO_HEADER_TABS.has(activeTab);
   const dockClearance = computeDockClearancePx({
     showDock: showAgentDock,
-    isMinimized: isDockMinimized,
+    isMinimized: effectiveDockMinimized,
     showEscapePill,
   });
 
@@ -932,16 +941,18 @@ const DashboardApp: React.FC = () => {
                 <PanelLeft size={16} />
               </button>
 
-              <button
-                type="button"
-                onClick={() => setLaunchpadOpen((prev) => !prev)}
-                className={`btn btn-ghost btn-icon ${launchpadOpen ? 'is-active' : ''}`}
-                title="Abrir Launchpad de Módulos (Ctrl+Shift+L)"
-                aria-label="Abrir Launchpad de Módulos"
-                aria-pressed={launchpadOpen}
-              >
-                <LaunchpadGlyph size={16} />
-              </button>
+              {(!isSimpleMode || isSidebarHidden) && (
+                <button
+                  type="button"
+                  onClick={() => setLaunchpadOpen((prev) => !prev)}
+                  className={`btn btn-ghost btn-icon ${launchpadOpen ? 'is-active' : ''}`}
+                  title="Abrir Launchpad de Módulos (Ctrl+Shift+L)"
+                  aria-label="Abrir Launchpad de Módulos"
+                  aria-pressed={launchpadOpen}
+                >
+                  <LaunchpadGlyph size={16} />
+                </button>
+              )}
 
               <div
                 style={{
@@ -1050,16 +1061,18 @@ const DashboardApp: React.FC = () => {
                 <span className="jarvis-topbar-hide-narrow">Novo chat</span>
               </button>
 
-              <button
-                type="button"
-                className={`btn btn-ghost btn-icon hide-mobile ${showAgentDock ? 'is-active' : ''}`}
-                onClick={handleToggleAgentDock}
-                title={showAgentDock ? 'Ocultar Dock macOS' : 'Mostrar Dock macOS'}
-                aria-label={showAgentDock ? 'Ocultar Dock macOS' : 'Mostrar Dock macOS'}
-                aria-pressed={showAgentDock}
-              >
-                <PanelBottom size={16} />
-              </button>
+              {!isSimpleMode && (
+                <button
+                  type="button"
+                  className={`btn btn-ghost btn-icon hide-mobile ${showAgentDock ? 'is-active' : ''}`}
+                  onClick={handleToggleAgentDock}
+                  title={showAgentDock ? 'Ocultar Dock macOS' : 'Mostrar Dock macOS'}
+                  aria-label={showAgentDock ? 'Ocultar Dock macOS' : 'Mostrar Dock macOS'}
+                  aria-pressed={showAgentDock}
+                >
+                  <PanelBottom size={16} />
+                </button>
+              )}
 
               <button
                 type="button"
@@ -1392,7 +1405,7 @@ const DashboardApp: React.FC = () => {
             onToggleLaunchpad={() => setLaunchpadOpen((prev) => !prev)}
             isSidebarHidden={isSidebarHidden}
             onToggleSidebarHidden={handleToggleSidebarHidden}
-            isMinimized={isDockMinimized}
+            isMinimized={effectiveDockMinimized}
             onToggleMinimized={handleToggleDockMinimized}
           />
         )}

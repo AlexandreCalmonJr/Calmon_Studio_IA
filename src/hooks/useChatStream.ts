@@ -10,6 +10,7 @@ import { ChatMessage } from '../types';
 import { getAccountStorageKey } from '../services/accountScope';
 import { notify } from '../shared/common/Toast';
 import { CanvasArtifact } from '../features/chat/ArtifactCanvas';
+import type { StreamRunEventPayload } from '../services/api/chat';
 import {
   saveSessionMessagesLocally,
   getLocalSessionsCatalog,
@@ -432,7 +433,11 @@ export function useChatStream(
   const handleSubmit = async (
     promptToSend: string,
     modelOverride?: string,
-    options?: { enableWebSearch?: boolean; assistantName?: string }
+    options?: {
+      enableWebSearch?: boolean;
+      assistantName?: string;
+      onRunEvent?: (ev: StreamRunEventPayload) => void;
+    }
   ) => {
     const trimmed = promptToSend.trim();
     if (!trimmed || loading) return;

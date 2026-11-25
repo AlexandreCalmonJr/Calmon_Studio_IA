@@ -14,6 +14,16 @@ import { getAccountStorageKey } from '../../services/accountScope';
 import { getAgentDisplayColor, getAgentProperName } from '../../services/agentSync';
 import { AgentInfo, ChatMessage } from '../../types';
 import { useAssistantIdentity } from '../../context/AssistantIdentityContext';
+import { AgentRunWorkspacePanel } from './AgentRunWorkspacePanel';
+import {
+  fetchAgentRunDetail,
+  fetchAgentRuns,
+  resumeAgentRun,
+  type AgentRunDetailResponse,
+  type AgentRunRecord,
+  type StreamRunEventPayload,
+} from '../../services/api/chat';
+import { notify } from '../../shared/common/Toast';
 
 interface ChatMasterProps {
   attachedProjectId?: string | null;
@@ -70,8 +80,31 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
   const [activeProjectId, setActiveProjectId] = useState<string | null>(propProjectId || null);
   const [availableProjects, setAvailableProjects] = useState<any[]>([]);
   const [greetingIndex, setGreetingIndex] = useState(0);
-  const [isRailOpen, setIsRailOpen] = useState(true);
+  const [isRailOpen, setIsRailOpen] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth >= 960 : true
+  );
+  const [isNarrowViewport, setIsNarrowViewport] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth < 960 : false
+  );
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+
+  useEffect(() => {
+    const onResize = () => {
+      const narrow = window.innerWidth < 960;
+      setIsNarrowViewport(narrow);
+      if (narrow) {
+        setIsRailOpen(false);
+      }
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [sessionRuns, setSessionRuns] = useState<AgentRunRecord[]>([]);
+  const [recoverableRunsCount, setRecoverableRunsCount] = useState(0);
+  const [activeRunDetail, setActiveRunDetail] = useState<AgentRunDetailResponse | null>(null);
+  const [loadingRuns, setLoadingRuns] = useState(false);
+  const [resumingRun, setResumingRun] = useState(false);
   const [availableModels, setAvailableModels] = useState<FormattedChatModel[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     try {
@@ -152,10 +185,127 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
   } = useChatStream(
     activeProjectId,
     activeProject?.name || null,
-    (art) => setActiveArtifact(art),
+    (art) => {
+      setWorkspaceOpen(false);
+      setActiveArtifact(art);
+    },
     () => loadProjects(),
     handleSelectModel
   );
+
+  // Carrega execuções duráveis (runs + checkpoints) persistidas para a sessão ativa
+  const loadSessionRuns = useCallback(async (sid: string, preferredRunId?: string) => {
+    if (!sid || sid.startsWith('new_')) return;
+    setLoadingRuns(true);
+    try {
+      const data = await fetchAgentRuns(sid, 20);
+      setSessionRuns(data.runs || []);
+      setRecoverableRunsCount(data.recoverable_count || 0);
+      const targetId = preferredRunId || data.runs?.[0]?.id;
+      if (targetId) {
+        const detail = await fetchAgentRunDetail(targetId);
+        setActiveRunDetail(detail);
+      } else {
+        setActiveRunDetail(null);
+      }
+    } catch {
+      // Sessão ainda sem runs ou ambiente offline
+    } finally {
+      setLoadingRuns(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (sessionId && sessionId !== 'default') {
+      void loadSessionRuns(sessionId);
+    }
+  }, [sessionId, loadSessionRuns]);
+
+  const handleSelectRun = useCallback(async (runId: string) => {
+    setLoadingRuns(true);
+    try {
+      const detail = await fetchAgentRunDetail(runId);
+      setActiveRunDetail(detail);
+    } catch (err: any) {
+      notify(err?.message || 'Falha ao carregar detalhes da execução.', 'error');
+    } finally {
+      setLoadingRuns(false);
+    }
+  }, []);
+
+  const handleResumeCheckpoint = useCallback(
+    async (runId: string, fromStepIndex?: number) => {
+      setResumingRun(true);
+      try {
+        const resumed = await resumeAgentRun(runId, fromStepIndex);
+        setActiveRunDetail(resumed);
+        setSessionRuns((prev) => {
+          const exists = prev.some((r) => r.id === resumed.run.id);
+          return exists
+            ? prev.map((r) => (r.id === resumed.run.id ? resumed.run : r))
+            : [resumed.run, ...prev];
+        });
+        notify('Execução retomada a partir do checkpoint salvo.', 'success');
+      } catch (err: any) {
+        notify(err?.message || 'Não foi possível retomar do checkpoint.', 'error');
+      } finally {
+        setResumingRun(false);
+      }
+    },
+    []
+  );
+
+  const handleRunStreamEvent = useCallback((ev: StreamRunEventPayload) => {
+    if (ev.type === 'run_started' && ev.run) {
+      const startedRun = ev.run;
+      setActiveArtifact(null);
+      setWorkspaceOpen(true);
+      setSessionRuns((prev) => [startedRun, ...prev.filter((r) => r.id !== startedRun.id)]);
+      setActiveRunDetail({ run: startedRun, steps: [], artifacts: [] });
+      return;
+    }
+    if (ev.type === 'run_step' && ev.step) {
+      const incomingStep = ev.step;
+      setActiveRunDetail((prev) => {
+        if (!prev || prev.run.id !== incomingStep.run_id) return prev;
+        const exists = prev.steps.some((s) => s.id === incomingStep.id);
+        const nextSteps = exists
+          ? prev.steps.map((s) => (s.id === incomingStep.id ? incomingStep : s))
+          : [...prev.steps, incomingStep];
+        return {
+          ...prev,
+          run: {
+            ...prev.run,
+            current_step_index: Math.max(prev.run.current_step_index, incomingStep.step_index),
+            total_steps: Math.max(prev.run.total_steps, nextSteps.length),
+          },
+          steps: nextSteps,
+        };
+      });
+      return;
+    }
+    if (ev.type === 'run_artifact' && ev.artifact) {
+      const incomingArt = ev.artifact;
+      setActiveRunDetail((prev) => {
+        if (!prev || prev.run.id !== incomingArt.run_id) return prev;
+        const exists = prev.artifacts.some((a) => a.id === incomingArt.id);
+        return {
+          ...prev,
+          artifacts: exists ? prev.artifacts : [...prev.artifacts, incomingArt],
+        };
+      });
+      return;
+    }
+    if (ev.type === 'run_completed' && ev.run) {
+      const finishedRun = ev.run;
+      setSessionRuns((prev) =>
+        prev.map((r) => (r.id === finishedRun.id ? finishedRun : r))
+      );
+      setActiveRunDetail((prev) =>
+        prev && prev.run.id === finishedRun.id ? { ...prev, run: finishedRun } : prev
+      );
+    }
+  }, []);
 
   const [tabs, setTabs] = useState<ChatTabItem[]>(() => {
     const firstUser = messages.find((m) => m.sender === 'user')?.text?.trim();
@@ -407,8 +557,9 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
     submitStream(textToSend, effectiveModelOverride, {
       enableWebSearch: webSearchEnabled,
       assistantName,
+      onRunEvent: handleRunStreamEvent,
     });
-  }, [input, loading, activeTabId, submitStream, selectedModel, webSearchEnabled, assistantName]);
+  }, [input, loading, activeTabId, submitStream, selectedModel, webSearchEnabled, assistantName, handleRunStreamEvent]);
 
   // Consome prompt inicial enviado a partir da Visão Geral
   useEffect(() => {
@@ -430,25 +581,25 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
         backgroundColor: 'var(--bg-primary)',
       }}
     >
-      {/* Sub-rail Esquerdo de Conversas (auto-oculta quando o Painel de Artefatos está aberto) */}
+      {/* Sub-rail Esquerdo de Conversas (auto-oculta quando Artefatos ou Workspace está aberto, ou em telas estreitas) */}
       <OpenBotConversationRail
         activeSessionId={sessionId}
         onSelectSession={handleSelectSession}
         onNewChat={handleOpenNewChatTab}
-        isCollapsed={!isRailOpen || Boolean(activeArtifact)}
+        isCollapsed={!isRailOpen || Boolean(activeArtifact) || Boolean(workspaceOpen)}
       />
 
       {/* Coluna Principal do Chat */}
       <div
         style={{
-          flex: activeArtifact ? '1 1 50%' : '1 1 auto',
+          flex: activeArtifact || workspaceOpen ? '1 1 55%' : '1 1 auto',
           minWidth: 0,
           display: 'flex',
           flexDirection: 'column',
           height: '100%',
           overflow: 'hidden',
           transition: 'flex 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
-          borderRight: activeArtifact ? '1px solid var(--border-color)' : 'none',
+          borderRight: activeArtifact || workspaceOpen ? '1px solid var(--border-color)' : 'none',
         }}
       >
         {/* Header do Chat no Padrão OpenBot com Abas e Seletor de Modelo */}
@@ -482,7 +633,8 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
           onExportChat={handleExportChat}
           webSearchEnabled={webSearchEnabled}
           onToggleWebSearch={() => setWebSearchEnabled((prev) => !prev)}
-          onOpenArtifactStudio={() =>
+          onOpenArtifactStudio={() => {
+            setWorkspaceOpen(false);
             setActiveArtifact((prev) =>
               prev?.studioMode
                 ? prev
@@ -491,8 +643,23 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
                     studioMode: true,
                     structuredArtifact: prev?.structuredArtifact || null,
                   }
-            )
-          }
+            );
+          }}
+          workspaceOpen={workspaceOpen && !activeArtifact}
+          onToggleWorkspace={() => {
+            setActiveArtifact(null);
+            setWorkspaceOpen((prev) => {
+              const next = !prev;
+              if (next && sessionId) {
+                void loadSessionRuns(sessionId, activeRunDetail?.run?.id);
+              }
+              return next;
+            });
+          }}
+          workspaceStepCount={activeRunDetail?.steps?.length || 0}
+          workspaceRunning={activeRunDetail?.run?.status === 'running' || loading}
+          recoverableRunsCount={recoverableRunsCount}
+          compactHeader={Boolean(activeArtifact || workspaceOpen || isNarrowViewport)}
         />
 
         {/* Tela inicial do Chat */}
@@ -708,13 +875,24 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
         )}
       </div>
 
-      {/* Coluna Direita: Live Artifact Canvas (Claude Design / Codex Dual-Panel) */}
-      {activeArtifact && (
+      {/* Coluna Direita: Live Artifact Canvas ou Workspace Vivo do Agente */}
+      {activeArtifact ? (
         <ArtifactCanvas
           artifact={activeArtifact}
           onClose={() => setActiveArtifact(null)}
         />
-      )}
+      ) : workspaceOpen ? (
+        <AgentRunWorkspacePanel
+          runs={sessionRuns}
+          activeDetail={activeRunDetail}
+          loading={loadingRuns}
+          resuming={resumingRun}
+          onSelectRun={(runId) => void handleSelectRun(runId)}
+          onResumeCheckpoint={(runId, stepIdx) => void handleResumeCheckpoint(runId, stepIdx)}
+          onRefresh={() => void loadSessionRuns(sessionId, activeRunDetail?.run?.id)}
+          onClose={() => setWorkspaceOpen(false)}
+        />
+      ) : null}
 
       {/* Modal para Anexar / Selecionar Projeto no Chat */}
       <ChatProjectModal

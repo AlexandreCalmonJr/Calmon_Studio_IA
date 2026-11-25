@@ -186,10 +186,10 @@ test('filterLaunchpadModules matches by label, description, section, and id', ()
 });
 
 test('computeDockClearancePx adjusts clearance for visible, minimized, hidden, escape pill, and mobile states', () => {
-  assert.equal(computeDockClearancePx({ showDock: true, isMinimized: false }), '90px');
-  assert.equal(computeDockClearancePx({ showDock: true, isMinimized: true }), '40px');
+  assert.equal(computeDockClearancePx({ showDock: true, isMinimized: false }), '112px');
+  assert.equal(computeDockClearancePx({ showDock: true, isMinimized: true }), '52px');
   assert.equal(computeDockClearancePx({ showDock: false, isMinimized: false }), '0px');
-  assert.equal(computeDockClearancePx({ showDock: false, isMinimized: false, showEscapePill: true }), '44px');
+  assert.equal(computeDockClearancePx({ showDock: false, isMinimized: false, showEscapePill: true }), '52px');
   assert.equal(computeDockClearancePx({ showDock: true, isMinimized: false, isMobile: true }), '0px');
   assert.equal(computeDockClearancePx({ showDock: false, isMinimized: false, showEscapePill: true, isMobile: true }), '0px');
 });

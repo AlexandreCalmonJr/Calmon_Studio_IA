@@ -30,6 +30,8 @@ import {
 } from '../artifactEngine.ts';
 import type { LocalSqliteBrainStore } from '../brain/sqliteBrainStore.ts';
 import { serverRateLimit, RATE_LIMITS, getClientIp } from '../rateLimiter.ts';
+import { DurableRunEngine } from '../durableRunEngine.ts';
+import { createArtifactStorageAdapter } from '../infra/storageAdapter.ts';
 
 export interface ChatRouterDeps {
   store: LocalSqliteBrainStore;
@@ -38,6 +40,14 @@ export interface ChatRouterDeps {
 export function createChatRouter(deps: ChatRouterDeps): Router {
   const router = express.Router();
   const { store } = deps;
+  const storageAdapter = createArtifactStorageAdapter(store.dataDir);
+  const durableRuns = new DurableRunEngine({
+    store,
+    storage: storageAdapter,
+    emitter: {
+      emit: (eventType, payload) => broadcastRealtimeEvent(eventType, payload),
+    },
+  });
 
   const findAgentRoute = (role: string): AgentRouteEntry | null =>
     (serverState.agentRoutes.find((r) => String(r.agent_role || '') === role) as AgentRouteEntry | undefined) || null;
@@ -396,10 +406,63 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
       });
     });
 
+    const runStartedAt = Date.now();
+    const durableRun = durableRuns.startRun({
+      sessionId,
+      userId: ownerUserId,
+      agentRole: primaryAgent.role,
+      agentName: primaryAgent.proper_name || primaryAgent.name,
+      prompt,
+      modelUsed: primaryCtxPreview.resolvedModel.requestedModel,
+      executionMode: orchestrationPlan.mode,
+      checkpoint: {
+        stage: 'plan',
+        selected_agents: selectedRoles,
+        project_id: projectId || null,
+      },
+    });
+    sendEvent({ type: 'run_started', run: durableRun });
+
+    let stepCursor = 0;
+    const planStep = durableRuns.recordStep({
+      runId: durableRun.id,
+      stepIndex: stepCursor++,
+      kind: 'plan',
+      title: `Planejamento · ${primaryAgent.proper_name || primaryAgent.name}`,
+      status: 'completed',
+      durationMs: Math.max(1, Date.now() - runStartedAt),
+      inputSummary: prompt.slice(0, 220),
+      outputSummary: `${orchestrationPlan.summary} · Agentes: ${selectedRoles.join(', ')}`,
+      checkpointPayload: {
+        mode: orchestrationPlan.mode,
+        steps: orchestrationPlan.steps,
+        selected_agents: selectedRoles,
+      },
+    });
+    sendEvent({ type: 'run_step', run_id: durableRun.id, step: planStep });
+
+    const memStep = durableRuns.recordStep({
+      runId: durableRun.id,
+      stepIndex: stepCursor++,
+      kind: 'memory',
+      title: 'Contexto, Memória & Habilidades',
+      status: 'completed',
+      durationMs: 2,
+      inputSummary: workspaceProject ? `Projeto: ${workspaceProject.name}` : 'Sessão direta',
+      outputSummary: `${relevantBrain.length} memória(s) · ${primaryCtxPreview.skillsUsed.length} skill(s) · modelo alvo ${primaryCtxPreview.resolvedModel.requestedModel}`,
+      checkpointPayload: {
+        brain_memories_count: relevantBrain.length,
+        skills: primaryCtxPreview.skillsUsed.map((s) => s.name),
+        model_source: primaryCtxPreview.resolvedModel.source,
+      },
+    });
+    sendEvent({ type: 'run_step', run_id: durableRun.id, step: memStep });
+
     sendEvent({
       type: 'meta',
       session_id: sessionId,
       task_id: taskId,
+      run_id: durableRun.id,
       model: primaryCtxPreview.resolvedModel.requestedModel,
       requested_model: primaryCtxPreview.resolvedModel.requestedModel,
       model_source: primaryCtxPreview.resolvedModel.source,
@@ -610,6 +673,25 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
       });
       if (serverState.telemetryRecords.length > 500) serverState.telemetryRecords.length = 500;
 
+      const modelStep = durableRuns.recordStep({
+        runId: durableRun.id,
+        stepIndex: stepCursor++,
+        kind: 'model',
+        title: `Inferência · ${result.modelUsed}`,
+        status: 'completed',
+        durationMs: result.latencyMs,
+        inputSummary: `Modo ${result.executionMode} (${result.provider})`,
+        outputSummary: result.text.slice(0, 320),
+        checkpointPayload: {
+          model_used: result.modelUsed,
+          requested_model: result.requestedModel,
+          fallback_occurred: result.fallbackOccurred,
+          provider: result.provider,
+          sources_count: result.sources.length,
+        },
+      });
+      sendEvent({ type: 'run_step', run_id: durableRun.id, step: modelStep });
+
       let generatedArtifact: StructuredArtifactPayload | null = null;
       if (orchestrationPlan.deliverable) {
         try {
@@ -621,6 +703,58 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
           });
         } catch {
           generatedArtifact = null;
+        }
+      }
+
+      // Persiste artefato produzido no Object Storage plugável (Disco Local Confinado ou S3/GCS/MinIO)
+      if (generatedArtifact) {
+        try {
+          const persistedArt = await durableRuns.saveArtifact({
+            runId: durableRun.id,
+            sessionId,
+            userId: ownerUserId,
+            title: generatedArtifact.title || 'Artefato Gerado',
+            kind: generatedArtifact.kind || 'document',
+            filename: `${generatedArtifact.kind || 'artifact'}.json`,
+            content: JSON.stringify(generatedArtifact, null, 2),
+            mimeType: 'application/json',
+          });
+          sendEvent({ type: 'run_artifact', run_id: durableRun.id, artifact: persistedArt });
+          const artStep = durableRuns.recordStep({
+            runId: durableRun.id,
+            stepIndex: stepCursor++,
+            kind: 'artifact',
+            title: `Artefato salvo · ${persistedArt.title}`,
+            status: 'completed',
+            durationMs: 4,
+            outputSummary: `${persistedArt.storage_driver} · ${persistedArt.size_bytes} bytes · sha256:${persistedArt.sha256.slice(0, 12)}`,
+            checkpointPayload: { artifact_id: persistedArt.id, storage_key: persistedArt.storage_key },
+          });
+          sendEvent({ type: 'run_step', run_id: durableRun.id, step: artStep });
+        } catch {
+          // Não interrompe entrega da resposta caso a gravação do artefato falhe
+        }
+      } else {
+        // Extrai bloco de código ou resposta longa como artefato Markdown consultável no Painel Lateral
+        const codeMatch = result.text.match(/```([a-zA-Z0-9_-]*)\n([\s\S]{40,}?)\n```/);
+        if (codeMatch) {
+          const lang = codeMatch[1] || 'txt';
+          const codeBody = codeMatch[2];
+          try {
+            const codeArt = await durableRuns.saveArtifact({
+              runId: durableRun.id,
+              sessionId,
+              userId: ownerUserId,
+              title: `Código gerado (.${lang})`,
+              kind: 'code',
+              filename: `snippet.${lang}`,
+              content: codeBody,
+              mimeType: 'text/plain; charset=utf-8',
+            });
+            sendEvent({ type: 'run_artifact', run_id: durableRun.id, artifact: codeArt });
+          } catch {
+            // Não bloqueia
+          }
         }
       }
 
@@ -721,8 +855,25 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
         });
       });
 
+      const completedRun = durableRuns.completeRun({
+        runId: durableRun.id,
+        modelUsed: result.modelUsed,
+        executionMode: result.executionMode,
+        finalSummary: result.text,
+        checkpoint: {
+          stage: 'completed',
+          task_id: taskId,
+          model_used: result.modelUsed,
+          total_steps: stepCursor,
+        },
+      });
+      if (completedRun) {
+        sendEvent({ type: 'run_completed', run: completedRun });
+      }
+
       sendEvent({
         type: 'done',
+        run_id: durableRun.id,
         task_data: taskData,
         final_summary: result.text,
         sources: result.sources,
@@ -749,12 +900,96 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
       });
       res.end();
     } catch (err: any) {
+      const errMessage = err instanceof Error ? err.message : 'Falha na comunicação com o provedor de IA.';
+      const errStep = durableRuns.recordStep({
+        runId: durableRun.id,
+        stepIndex: 3,
+        kind: 'model',
+        title: 'Inferência interrompida',
+        status: 'failed',
+        durationMs: Math.max(1, Date.now() - runStartedAt),
+        inputSummary: 'Chamada ao provedor de modelo',
+        outputSummary: errMessage.slice(0, 220),
+      });
+      sendEvent({ type: 'run_step', run_id: durableRun.id, step: errStep });
+      const failedRun = durableRuns.failRun(durableRun.id, errMessage);
+      if (failedRun) {
+        sendEvent({ type: 'run_completed', run: failedRun });
+      }
       sendEvent({
         type: 'error',
+        run_id: durableRun.id,
         code: 'provider_unavailable',
-        error: err instanceof Error ? err.message : 'Falha na comunicação com o provedor de IA.',
+        error: errMessage,
       });
       res.end();
+    }
+  });
+
+  // --- EXECUÇÕES DURÁVEIS, CHECKPOINTS, REPLAY & ARTEFATOS (FASE 2) ---
+  router.get('/chat/runs', requireAuth, (req: Request, res: Response) => {
+    const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
+    const ownerUserId = user?.username || 'admin';
+    const sessionId = typeof req.query.session_id === 'string' && req.query.session_id.trim()
+      ? req.query.session_id.trim()
+      : undefined;
+    const limit = Number(req.query.limit || 25);
+    const runs = durableRuns.listRuns(ownerUserId, sessionId, limit);
+    res.json({
+      runs,
+      recoverable_count: store.countRecoverableAgentRuns(ownerUserId),
+    });
+  });
+
+  router.get('/chat/runs/:runId', requireAuth, (req: Request, res: Response) => {
+    const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
+    const ownerUserId = user?.username || 'admin';
+    const detail = durableRuns.getRunDetail(req.params.runId, ownerUserId);
+    if (!detail) {
+      res.status(404).json({ detail: 'Execução não encontrada ou sem permissão de acesso.' });
+      return;
+    }
+    res.json(detail);
+  });
+
+  router.post('/chat/runs/:runId/resume', requireAuth, (req: Request, res: Response) => {
+    const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
+    const ownerUserId = user?.username || 'admin';
+    const fromStepIndex =
+      typeof req.body?.from_step_index === 'number' ? req.body.from_step_index : undefined;
+    const detail = durableRuns.resumeRunFromCheckpoint(req.params.runId, ownerUserId, fromStepIndex);
+    if (!detail) {
+      res.status(404).json({ detail: 'Execução não encontrada para retomada.' });
+      return;
+    }
+    res.json(detail);
+  });
+
+  router.get('/chat/runs/:runId/artifacts/:artifactId/download', requireAuth, async (req: Request, res: Response) => {
+    const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
+    const ownerUserId = user?.username || 'admin';
+    const detail = durableRuns.getRunDetail(req.params.runId, ownerUserId);
+    if (!detail) {
+      res.status(404).json({ detail: 'Execução não encontrada.' });
+      return;
+    }
+    const artifact = detail.artifacts.find((a) => a.id === req.params.artifactId);
+    if (!artifact) {
+      res.status(404).json({ detail: 'Artefato não encontrado nesta execução.' });
+      return;
+    }
+    try {
+      const content = await storageAdapter.getObject(artifact.storage_key);
+      if (!content) {
+        res.status(404).json({ detail: 'Objeto não encontrado no storage.' });
+        return;
+      }
+      const safeFilename = artifact.title.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80) || 'artifact.txt';
+      res.setHeader('Content-Type', artifact.mime_type || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}"`);
+      res.send(content);
+    } catch {
+      res.status(500).json({ detail: 'Falha ao ler artefato do storage.' });
     }
   });
 

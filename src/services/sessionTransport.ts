@@ -67,6 +67,9 @@ function withSessionHeaders(
   if (token && !headers.has('X-Jarvis-Session')) {
     headers.set('X-Jarvis-Session', token);
   }
+  if (!headers.has('X-Requested-With')) {
+    headers.set('X-Requested-With', 'XMLHttpRequest');
+  }
 
   const nextInit: RequestInit = {
     ...init,

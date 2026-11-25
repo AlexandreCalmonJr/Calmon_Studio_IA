@@ -221,13 +221,117 @@ export interface McpToolLogModel {
   created_at: string;
 }
 
-export const BRAIN_SCHEMA_VERSION = '2.0.0';
+// ==================== EXECUÇÃO DURÁVEL, SANDBOX, AGENDADOR & CANAIS 24/7 (FASE 2–4) ====================
+
+export type AgentRunStatus = 'queued' | 'running' | 'paused' | 'completed' | 'failed' | 'interrupted';
+export type AgentStepKind = 'plan' | 'memory' | 'skill' | 'mcp' | 'sandbox' | 'model' | 'artifact' | 'response';
+export type AgentStepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+export type ChannelProvider = 'telegram' | 'discord' | 'slack' | 'whatsapp';
+
+export interface AgentRunModel {
+  id: string;
+  session_id: string;
+  user_id: string;
+  agent_role: string;
+  agent_name: string;
+  prompt: string;
+  status: AgentRunStatus;
+  model_used: string;
+  execution_mode: string;
+  current_step_index: number;
+  total_steps: number;
+  final_summary: string;
+  checkpoint_json: string;
+  error_message: string | null;
+  started_at: string;
+  updated_at: string;
+  finished_at: string | null;
+}
+
+export interface AgentRunStepModel {
+  id: string;
+  run_id: string;
+  step_index: number;
+  kind: AgentStepKind;
+  title: string;
+  status: AgentStepStatus;
+  duration_ms: number;
+  input_summary: string;
+  output_summary: string;
+  checkpoint_payload_json: string;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface RunArtifactModel {
+  id: string;
+  run_id: string;
+  session_id: string;
+  user_id: string;
+  title: string;
+  kind: string;
+  mime_type: string;
+  storage_driver: string;
+  storage_key: string;
+  size_bytes: number;
+  sha256: string;
+  preview_text: string;
+  created_at: string;
+}
+
+export interface SandboxSessionModel {
+  id: string;
+  user_id: string;
+  run_id: string | null;
+  driver: string;
+  command: string;
+  cwd: string;
+  status: 'completed' | 'failed' | 'timeout' | 'blocked';
+  exit_code: number | null;
+  stdout_excerpt: string;
+  stderr_excerpt: string;
+  duration_ms: number;
+  created_at: string;
+}
+
+export interface ScheduledJobModel {
+  id: string;
+  user_id: string;
+  name: string;
+  cron_expr: string;
+  target_type: 'agent_prompt' | 'workflow' | 'mcp_tool';
+  target_ref: string;
+  payload_json: string;
+  enabled: boolean;
+  last_run_at: string | null;
+  last_status: string | null;
+  next_run_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChannelBindingModel {
+  id: string;
+  user_id: string;
+  provider: ChannelProvider;
+  label: string;
+  external_chat_id: string;
+  agent_role: string;
+  workspace_slug: string;
+  webhook_secret_hint: string;
+  enabled: boolean;
+  last_message_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export const BRAIN_SCHEMA_VERSION = '2.1.0';
 
 /**
  * Versão numérica do schema para controle via PRAGMA user_version.
  * Incrementar sempre que uma nova migration for adicionada à lista SCHEMA_MIGRATIONS.
  */
-export const SCHEMA_USER_VERSION = 2;
+export const SCHEMA_USER_VERSION = 3;
 
 /**
  * Lista ordenada de migrations (v0→v1, v1→v2, etc.).
@@ -267,6 +371,117 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_username ON auth_sessions(username);
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires ON auth_sessions(expires_at);
+`,
+  },
+  {
+    version: 3,
+    description: 'Adiciona execução durável (agent_runs, agent_run_steps, run_artifacts), sandbox_sessions, scheduled_jobs, channel_bindings e índices compostos',
+    sql: `
+CREATE TABLE IF NOT EXISTS agent_runs (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  user_id TEXT NOT NULL DEFAULT 'admin',
+  agent_role TEXT NOT NULL DEFAULT 'jarvis_master',
+  agent_name TEXT NOT NULL DEFAULT 'JARVIS',
+  prompt TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued',
+  model_used TEXT NOT NULL DEFAULT '',
+  execution_mode TEXT NOT NULL DEFAULT 'hybrid',
+  current_step_index INTEGER NOT NULL DEFAULT 0,
+  total_steps INTEGER NOT NULL DEFAULT 0,
+  final_summary TEXT NOT NULL DEFAULT '',
+  checkpoint_json TEXT NOT NULL DEFAULT '{}',
+  error_message TEXT,
+  started_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  finished_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS agent_run_steps (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+  step_index INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  input_summary TEXT NOT NULL DEFAULT '',
+  output_summary TEXT NOT NULL DEFAULT '',
+  checkpoint_payload_json TEXT NOT NULL DEFAULT '{}',
+  started_at TEXT NOT NULL,
+  finished_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS run_artifacts (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL,
+  user_id TEXT NOT NULL DEFAULT 'admin',
+  title TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'markdown',
+  mime_type TEXT NOT NULL DEFAULT 'text/plain',
+  storage_driver TEXT NOT NULL DEFAULT 'local',
+  storage_key TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  sha256 TEXT NOT NULL DEFAULT '',
+  preview_text TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sandbox_sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL DEFAULT 'admin',
+  run_id TEXT,
+  driver TEXT NOT NULL DEFAULT 'local_confined',
+  command TEXT NOT NULL,
+  cwd TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'completed',
+  exit_code INTEGER,
+  stdout_excerpt TEXT NOT NULL DEFAULT '',
+  stderr_excerpt TEXT NOT NULL DEFAULT '',
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS scheduled_jobs (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL DEFAULT 'admin',
+  name TEXT NOT NULL,
+  cron_expr TEXT NOT NULL,
+  target_type TEXT NOT NULL DEFAULT 'agent_prompt',
+  target_ref TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  last_run_at TEXT,
+  last_status TEXT,
+  next_run_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS channel_bindings (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL DEFAULT 'admin',
+  provider TEXT NOT NULL,
+  label TEXT NOT NULL,
+  external_chat_id TEXT NOT NULL,
+  agent_role TEXT NOT NULL DEFAULT 'jarvis_master',
+  workspace_slug TEXT NOT NULL DEFAULT 'default',
+  webhook_secret_hint TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  last_message_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_updated ON chat_sessions(user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_session_created ON agent_runs(session_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_user_updated ON agent_runs(user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_run_steps_run_idx ON agent_run_steps(run_id, step_index ASC);
+CREATE INDEX IF NOT EXISTS idx_run_artifacts_run ON run_artifacts(run_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sandbox_sessions_user ON sandbox_sessions(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_enabled ON scheduled_jobs(enabled, next_run_at);
+CREATE INDEX IF NOT EXISTS idx_channel_bindings_provider ON channel_bindings(provider, external_chat_id);
 `,
   },
 ];
@@ -645,6 +860,7 @@ CREATE INDEX IF NOT EXISTS idx_custom_packs_updated ON custom_packs(updated_at D
 CREATE INDEX IF NOT EXISTS idx_app_tasks_created ON app_tasks(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_coding_messages_session ON coding_session_messages(session_id, id ASC);
 CREATE INDEX IF NOT EXISTS idx_agent_history_role_session ON agent_conversation_history(agent_role, session_id, id ASC);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_updated ON chat_sessions(user_id, updated_at DESC);
 `;
 
 export const CORE_SQLITE_TABLES = [
@@ -674,6 +890,12 @@ export const CORE_SQLITE_TABLES = [
   'agent_conversation_history',
   'auth_users',
   'auth_sessions',
+  'agent_runs',
+  'agent_run_steps',
+  'run_artifacts',
+  'sandbox_sessions',
+  'scheduled_jobs',
+  'channel_bindings',
 ] as const;
 
 export const WORKSPACE_SQLITE_TABLES = [

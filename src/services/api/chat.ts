@@ -20,6 +20,102 @@ export async function sendChatMessage(
   return res.json();
 }
 
+export interface AgentRunRecord {
+  id: string;
+  session_id: string;
+  user_id: string;
+  agent_role: string;
+  agent_name: string;
+  prompt: string;
+  status: 'queued' | 'running' | 'paused' | 'completed' | 'failed' | 'interrupted';
+  model_used: string;
+  execution_mode: string;
+  current_step_index: number;
+  total_steps: number;
+  final_summary: string;
+  checkpoint_json: string;
+  error_message: string | null;
+  started_at: string;
+  updated_at: string;
+  finished_at: string | null;
+}
+
+export interface AgentRunStepRecord {
+  id: string;
+  run_id: string;
+  step_index: number;
+  kind: 'plan' | 'memory' | 'skill' | 'mcp' | 'sandbox' | 'model' | 'artifact' | 'response';
+  title: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+  duration_ms: number;
+  input_summary: string;
+  output_summary: string;
+  checkpoint_payload_json: string;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface RunArtifactRecord {
+  id: string;
+  run_id: string;
+  session_id: string;
+  user_id: string;
+  title: string;
+  kind: string;
+  mime_type: string;
+  storage_driver: string;
+  storage_key: string;
+  size_bytes: number;
+  sha256: string;
+  preview_text: string;
+  created_at: string;
+}
+
+export interface AgentRunDetailResponse {
+  run: AgentRunRecord;
+  steps: AgentRunStepRecord[];
+  artifacts: RunArtifactRecord[];
+}
+
+export interface StreamRunEventPayload {
+  type: 'run_started' | 'run_step' | 'run_artifact' | 'run_completed';
+  run_id?: string;
+  run?: AgentRunRecord;
+  step?: AgentRunStepRecord;
+  artifact?: RunArtifactRecord;
+}
+
+export async function fetchAgentRuns(sessionId?: string, limit = 20): Promise<{
+  runs: AgentRunRecord[];
+  recoverable_count: number;
+}> {
+  const qs = new URLSearchParams();
+  if (sessionId) qs.set('session_id', sessionId);
+  qs.set('limit', String(limit));
+  const res = await apiFetch(`${API_BASE}/chat/runs?${qs.toString()}`);
+  return handleApiResponse(res, 'Falha ao listar execuções do agente.');
+}
+
+export async function fetchAgentRunDetail(runId: string): Promise<AgentRunDetailResponse> {
+  const res = await apiFetch(`${API_BASE}/chat/runs/${encodeURIComponent(runId)}`);
+  return handleApiResponse(res, 'Falha ao carregar detalhes da execução.');
+}
+
+export async function resumeAgentRun(runId: string, fromStepIndex?: number): Promise<AgentRunDetailResponse> {
+  const res = await apiFetch(`${API_BASE}/chat/runs/${encodeURIComponent(runId)}/resume`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(
+      typeof fromStepIndex === 'number' ? { from_step_index: fromStepIndex } : {}
+    ),
+  });
+  return handleApiResponse(res, 'Falha ao retomar execução do checkpoint.');
+}
+
+export function getRunArtifactDownloadUrl(runId: string, artifactId: string): string {
+  return `${API_BASE}/chat/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}/download`;
+}
+
 export async function streamChatMessage(
   prompt: string,
   projectId?: string,
@@ -31,7 +127,7 @@ export async function streamChatMessage(
   onStatus?: (status: any) => void,
   signal?: AbortSignal,
   model?: string,
-  options?: { enableWebSearch?: boolean; assistantName?: string }
+  options?: { enableWebSearch?: boolean; assistantName?: string; onRunEvent?: (ev: StreamRunEventPayload) => void }
 ): Promise<void> {
   const res = await apiFetch(`${API_BASE}/chat/stream`, {
     method: 'POST',
@@ -75,6 +171,15 @@ export async function streamChatMessage(
         else if (payload.type === 'done' && onDone) onDone(payload);
         else if (payload.type === 'status' && onStatus) onStatus(payload);
         else if (payload.type === 'error' && onError) onError(payload.error, payload.code);
+        else if (
+          (payload.type === 'run_started' ||
+            payload.type === 'run_step' ||
+            payload.type === 'run_artifact' ||
+            payload.type === 'run_completed') &&
+          options?.onRunEvent
+        ) {
+          options.onRunEvent(payload as StreamRunEventPayload);
+        }
       } catch (e) {
         console.warn('Erro ao processar chunk SSE:', e);
       }

@@ -25,7 +25,7 @@ test('LocalSqliteBrainStore bootstraps WAL SQLite database on disk with all 12 c
     assert.equal(fs.existsSync(store1.dbPath), true);
 
     const tables = store1.getTableStats();
-    assert.equal(tables.length, 30); // 28 originais + auth_users + auth_sessions (Fase 2)
+    assert.equal(tables.length, 36); // 30 anteriores + 6 tabelas v3 (agent_runs, agent_run_steps, run_artifacts, sandbox_sessions, scheduled_jobs, channel_bindings)
     assert.ok(tables.some((t) => t.table === 'brain_identity' && t.rows === 1));
     assert.ok(tables.some((t) => t.table === 'brain_profiles' && t.rows === 3));
     assert.ok(tables.some((t) => t.table === 'agent_workspaces' && t.rows === 1));
@@ -363,4 +363,120 @@ test('LocalSqliteBrainStore persiste auth_users e auth_sessions no SQLite (Fase 
   }
 });
 
+test('LocalSqliteBrainStore auto-recovers when SQLite database file is corrupted by quarantining into backups/', () => {
+  const tempDir = makeTempDir('jarvis-corrupt-recovery-');
+  try {
+    const dbPath = path.join(tempDir, 'brain.db');
+    fs.writeFileSync(dbPath, Buffer.from('NOT_A_VALID_SQLITE_DATABASE_HEADER_00000000'));
+    fs.writeFileSync(`${dbPath}-wal`, Buffer.from('CORRUPTED_WAL_BYTES'));
+
+    const recovered = createLocalSqliteBrainStore({ dataDir: tempDir, brainName: 'Cérebro Recuperado' });
+    const health = recovered.getDatabaseHealth();
+    assert.equal(health.ok, true);
+    assert.equal(recovered.getIdentity().name, 'Cérebro Recuperado');
+
+    const backupEntries = fs.readdirSync(recovered.backupsDir);
+    assert.ok(backupEntries.some((name) => name.startsWith('corrupted-db-') && name.endsWith('brain.db')));
+    recovered.close();
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('LocalSqliteBrainStore persists active auth_sessions, durable agent_runs/steps/artifacts, crash recovery, scheduled_jobs, and channel_bindings across reopen', () => {
+  const tempDir = makeTempDir('jarvis-v3-durable-');
+  try {
+    const store1 = createLocalSqliteBrainStore({ dataDir: tempDir });
+    store1.upsertAuthUser({
+      username: 'admin',
+      display_name: 'Admin Local',
+      role: 'admin',
+      is_active: true,
+      must_change_password: false,
+      salt: 'salt123',
+      password_hash: 'hash123',
+      created_at: new Date().toISOString(),
+    });
+    store1.upsertAuthSession({
+      session_id: 'sess_persist_restart',
+      username: 'admin',
+      role: 'admin',
+      kind: 'human',
+      created_at: Date.now(),
+    });
+
+    const run = store1.createAgentRun({
+      session_id: 'chat_sess_01',
+      user_id: 'admin',
+      agent_role: 'architect',
+      agent_name: 'Atlas',
+      prompt: 'Analisar arquitetura',
+      status: 'running',
+      model_used: 'gemini-2.5-flash',
+    });
+    store1.appendAgentRunStep({
+      run_id: run.id,
+      step_index: 1,
+      kind: 'plan',
+      title: 'Planejamento inicial',
+      status: 'completed',
+      duration_ms: 42,
+      input_summary: 'Prompt recebido',
+      output_summary: 'Plano em 3 etapas',
+    });
+    store1.recordRunArtifact({
+      run_id: run.id,
+      session_id: 'chat_sess_01',
+      user_id: 'admin',
+      title: 'arquitetura.md',
+      kind: 'markdown',
+      mime_type: 'text/markdown',
+      storage_driver: 'local_confined',
+      storage_key: 'admin/run/arquitetura.md',
+      size_bytes: 128,
+      sha256: 'abc123',
+      preview_text: '# Arquitetura',
+    });
+
+    store1.upsertScheduledJob({
+      user_id: 'admin',
+      name: 'Digest Matinal',
+      cron_expr: '0 9 * * *',
+      target_type: 'agent_prompt',
+      target_ref: 'Resumir tarefas pendentes',
+      next_run_at: new Date(Date.now() + 3600_000).toISOString(),
+    });
+    store1.upsertChannelBinding({
+      user_id: 'admin',
+      provider: 'telegram',
+      label: 'Grupo Ops',
+      external_chat_id: 'tg_991122',
+      agent_role: 'jarvis_master',
+      workspace_slug: 'default',
+    });
+    store1.close();
+
+    // Reabre simulando reinício do servidor
+    const store2 = createLocalSqliteBrainStore({ dataDir: tempDir });
+    const activeSessions = store2.listActiveAuthSessions();
+    assert.equal(activeSessions.length, 1);
+    assert.equal(activeSessions[0].session_id, 'sess_persist_restart');
+
+    const recoveredCount = store2.recoverInterruptedAgentRuns();
+    assert.equal(recoveredCount, 1);
+    const reloadedRun = store2.getAgentRun(run.id, 'admin');
+    assert.ok(reloadedRun);
+    assert.equal(reloadedRun.status, 'interrupted');
+    assert.equal(store2.getAgentRun(run.id, 'other_user'), null);
+    assert.equal(store2.listAgentRunSteps(run.id).length, 1);
+    assert.equal(store2.listRunArtifacts(run.id, 'admin').length, 1);
+    assert.equal(store2.listScheduledJobs('admin').length, 1);
+    assert.equal(store2.listScheduledJobs('other_user').length, 0);
+    assert.equal(store2.listChannelBindings('admin').length, 1);
+    assert.equal(store2.findChannelBinding('telegram', 'tg_991122')?.user_id, 'admin');
+    store2.close();
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
 
