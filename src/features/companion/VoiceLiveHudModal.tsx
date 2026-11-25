@@ -11,7 +11,7 @@ import {
   WifiOff,
   X,
 } from 'lucide-react';
-import { sendVoiceTurn, transcribeVoiceAudio } from '../../services/api';
+import { sendVoiceTurn, synthesizeVoiceAudio, transcribeVoiceAudio } from '../../services/api';
 import { useAssistantIdentity } from '../../context/AssistantIdentityContext';
 import { useOfflineQueue } from '../../shared/pwa/usePWAInstall';
 import { notify } from '../../shared/common/Toast';
@@ -29,6 +29,7 @@ interface VoiceLiveHudModalProps {
   wakeWordEnabled?: boolean;
   onToggleWakeWord?: () => void;
   onOpenChat?: (prompt?: string) => void;
+  onNavigate?: (tab: string) => void;
 }
 
 interface VoiceTurnItem {
@@ -64,13 +65,44 @@ function playJarvisChime() {
   }
 }
 
-function speakText(text: string, lang: 'pt-BR' | 'en-US') {
+function pickNaturalBrowserVoice(lang: 'pt-BR' | 'en-US'): SpeechSynthesisVoice | null {
+  try {
+    const voices = window.speechSynthesis.getVoices();
+    if (!voices.length) return null;
+    const prefix = lang.toLowerCase().split('-')[0];
+    const matching = voices.filter((v) => v.lang.toLowerCase().startsWith(prefix));
+    const pool = matching.length > 0 ? matching : voices;
+    const preferred = pool.find((v) =>
+      /google|microsoft|natural|neural|luciana|francisca|maria|fernanda/i.test(v.name)
+    );
+    const nonRobotic = pool.find((v) => !/espeak|mbrola/i.test(v.name));
+    return preferred || nonRobotic || pool[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+async function speakText(text: string, lang: 'pt-BR' | 'en-US') {
+  try {
+    const neural = await synthesizeVoiceAudio(text).catch(() => null);
+    if (neural && !neural.fallback && neural.audio_base64) {
+      const audio = new Audio(`data:${neural.mime_type || 'audio/mpeg'};base64,${neural.audio_base64}`);
+      await audio.play();
+      return;
+    }
+  } catch {
+    // segue para Web Speech fallback
+  }
+
   try {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
     window.speechSynthesis.cancel();
     const utter = new SpeechSynthesisUtterance(text);
     utter.lang = lang;
-    utter.rate = 1.03;
+    utter.rate = 1.0;
+    utter.pitch = 1.0;
+    const voice = pickNaturalBrowserVoice(lang);
+    if (voice) utter.voice = voice;
     window.speechSynthesis.speak(utter);
   } catch {
     // ignore speech synthesis fallback
@@ -86,6 +118,7 @@ export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({
   wakeWordEnabled = false,
   onToggleWakeWord,
   onOpenChat,
+  onNavigate,
 }) => {
   const { assistantName } = useAssistantIdentity();
   const { isOnline, addCommand } = useOfflineQueue();
@@ -185,7 +218,14 @@ export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({
         },
       ]);
       if (speechOutEnabled) {
-        speakText(res.reply, 'pt-BR');
+        void speakText(res.reply, 'pt-BR');
+      }
+      if (res.action?.type === 'navigate' && res.action.tab) {
+        if (res.action.tab === 'chat' && onOpenChat) {
+          onOpenChat();
+        } else if (onNavigate) {
+          onNavigate(res.action.tab);
+        }
       }
     } catch (err: any) {
       notify(err?.message || 'Erro no processamento de voz.', 'error');

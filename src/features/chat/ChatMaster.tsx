@@ -80,16 +80,6 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
       return 'auto';
     }
   });
-  const [tabs, setTabs] = useState<ChatTabItem[]>([{ id: 'default', title: assistantName }]);
-  const [activeTabId, setActiveTabId] = useState('default');
-
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setTabs((prev) =>
-      prev.map((t) => (t.id === 'default' && (t.title === 'JARVIS Master' || t.title === 'JARVIS') ? { ...t, title: assistantName } : t))
-    );
-  }, [assistantName]);
 
   // Sincroniza modelos disponíveis do backend preservando modo Automático (Agente) ou escolha explícita
   useEffect(() => {
@@ -166,6 +156,27 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
     () => loadProjects(),
     handleSelectModel
   );
+
+  const [tabs, setTabs] = useState<ChatTabItem[]>(() => {
+    const firstUser = messages.find((m) => m.sender === 'user')?.text?.trim();
+    const initialTitle = firstUser
+      ? firstUser.slice(0, 24) + (firstUser.length > 24 ? '...' : '')
+      : assistantName;
+    return [{ id: sessionId || 'default', title: initialTitle }];
+  });
+  const [activeTabId, setActiveTabId] = useState(() => sessionId || 'default');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setTabs((prev) =>
+      prev.map((t) =>
+        (t.id === 'default' || t.id === sessionId) &&
+        (t.title === 'JARVIS Master' || t.title === 'JARVIS' || t.title === 'Calmon')
+          ? { ...t, title: assistantName }
+          : t
+      )
+    );
+  }, [assistantName, sessionId]);
 
   const [myAgents, setMyAgents] = useState<AgentInfo[]>([]);
 

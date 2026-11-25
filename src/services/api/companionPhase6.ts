@@ -18,6 +18,7 @@ export interface VoiceConverseResponse {
   detected_wake_word: boolean;
   trigger_phrase: string | null;
   command_extracted: string;
+  action?: { type: 'navigate'; tab: string } | null;
   model_used: string;
   execution_mode: 'LOCAL' | 'ONLINE';
   practice_mode: 'general' | 'english';
@@ -118,6 +119,19 @@ export async function transcribeVoiceAudio(payload: {
     body: JSON.stringify(payload),
   });
   return handleApiResponse(res, 'Falha ao transcrever áudio.');
+}
+
+export async function synthesizeVoiceAudio(text: string): Promise<{
+  audio_base64: string | null;
+  mime_type?: string;
+  fallback?: boolean;
+}> {
+  const res = await apiFetch(`${API_BASE}/voice/tts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  return handleApiResponse(res, 'Falha na síntese de voz.');
 }
 
 export async function fetchPushConfig(): Promise<PushBridgeConfig> {

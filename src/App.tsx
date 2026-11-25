@@ -1535,6 +1535,7 @@ const DashboardApp: React.FC = () => {
           if (prompt) setPendingChatPrompt(prompt);
           navigate('chat');
         }}
+        onNavigate={(tab) => navigate(tab)}
       />
 
       {/* Navegação Inferior Mobile PWA (visível apenas abaixo de 768px) */}

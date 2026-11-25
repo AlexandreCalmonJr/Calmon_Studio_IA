@@ -21,7 +21,7 @@ test('normalizeAssistantName defaults to JARVIS and trims/caps at 40 chars', () 
 test('getAssistantInitial extracts uppercase first grapheme', () => {
   assert.equal(getAssistantInitial('Maria'), 'M');
   assert.equal(getAssistantInitial('joão'), 'J');
-  assert.equal(getAssistantInitial(''), 'J');
+  assert.equal(getAssistantInitial(''), 'C');
 });
 
 test('getTimeBasedGreeting adapts to hour of day and assistant name', () => {

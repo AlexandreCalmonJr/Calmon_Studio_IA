@@ -135,9 +135,96 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [micLevel, setMicLevel] = useState(0);
   const [micDeviceLabel, setMicDeviceLabel] = useState<string | null>(null);
   const [speechTestStatus, setSpeechTestStatus] = useState<string | null>(null);
+  const [voiceCalibrationStep, setVoiceCalibrationStep] = useState<0 | 1 | 2 | 3>(0);
+  const [voiceCalibrationSamples, setVoiceCalibrationSamples] = useState<number[]>([]);
+  const [savedVoiceThreshold, setSavedVoiceThreshold] = useState<number | null>(() => {
+    try {
+      const raw = localStorage.getItem(getAccountStorageKey('calmon_voice_calibration_v1'));
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return typeof parsed?.threshold === 'number' ? parsed.threshold : null;
+    } catch {
+      return null;
+    }
+  });
   const micStreamRef = useRef<MediaStream | null>(null);
   const micAudioCtxRef = useRef<AudioContext | null>(null);
   const micRafRef = useRef<number | null>(null);
+
+  const VOICE_CALIBRATION_PHRASES = [
+    'Passo 1/3: Diga "Olá Calmon, estou calibrando minha voz"',
+    'Passo 2/3: Diga "Abrir minhas tarefas de hoje"',
+    'Passo 3/3: Diga "Qual o resumo do sistema?"',
+  ];
+
+  const runThreeStepVoiceCalibration = async () => {
+    if (voiceCalibrationStep !== 0) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micStreamRef.current = stream;
+      const track = stream.getAudioTracks()[0];
+      setMicDeviceLabel(track?.label || 'Microfone padrão do sistema');
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) {
+        stream.getTracks().forEach((t) => t.stop());
+        notify('AudioContext indisponível neste navegador.', 'warning');
+        return;
+      }
+      const ctx = new AudioCtx();
+      micAudioCtxRef.current = ctx;
+      const src = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      src.connect(analyser);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+
+      const collected: number[] = [];
+      for (let step = 1 as 1 | 2 | 3; step <= 3; step = (step + 1) as 1 | 2 | 3) {
+        setVoiceCalibrationStep(step);
+        setSpeechTestStatus(VOICE_CALIBRATION_PHRASES[step - 1]);
+        const peaks: number[] = [];
+        await new Promise<void>((resolve) => {
+          const started = performance.now();
+          const sampleTick = () => {
+            analyser.getByteFrequencyData(data);
+            const avg = data.reduce((sum, v) => sum + v, 0) / (data.length || 1);
+            const lvl = Math.min(100, Math.round((avg / 128) * 100));
+            setMicLevel(lvl);
+            peaks.push(lvl);
+            if (performance.now() - started >= 2200) {
+              resolve();
+              return;
+            }
+            micRafRef.current = requestAnimationFrame(sampleTick);
+          };
+          sampleTick();
+        });
+        const stepAvg = Math.round(peaks.reduce((a, b) => a + b, 0) / Math.max(1, peaks.length));
+        collected.push(stepAvg);
+        setVoiceCalibrationSamples([...collected]);
+      }
+
+      const overallAvg = Math.round(collected.reduce((a, b) => a + b, 0) / collected.length);
+      const threshold = Math.max(8, Math.min(45, Math.round(overallAvg * 0.45)));
+      setSavedVoiceThreshold(threshold);
+      try {
+        localStorage.setItem(
+          getAccountStorageKey('calmon_voice_calibration_v1'),
+          JSON.stringify({ threshold, samples: collected, updatedAt: new Date().toISOString() })
+        );
+      } catch {}
+      setSpeechTestStatus(
+        `Voz calibrada com 3 amostras (${collected.join('%, ')}%). Sensibilidade ajustada para ${threshold}%.`
+      );
+      notify('Calibração de voz concluída com 3 amostras!', 'success');
+    } catch (err: any) {
+      notify(`Erro ao calibrar voz: ${err?.name || ''} ${err?.message || ''}`.trim(), 'error');
+      setSpeechTestStatus(`Erro getUserMedia: ${err?.name || 'Error'} — ${err?.message || 'Permissão negada'}`);
+    } finally {
+      setVoiceCalibrationStep(0);
+      stopMicCalibration();
+    }
+  };
 
   const stopMicCalibration = () => {
     if (micRafRef.current !== null) {
@@ -1774,11 +1861,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <div className="jarvis-setting-row__control" style={{ gap: '8px', flexWrap: 'wrap' }}>
                     <button
                       type="button"
-                      onClick={() => void startMicCalibration()}
-                      className={`btn btn-sm ${micCalibrating ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => void runThreeStepVoiceCalibration()}
+                      disabled={voiceCalibrationStep !== 0}
+                      className={`btn btn-sm ${voiceCalibrationStep !== 0 ? 'btn-primary' : 'btn-secondary'}`}
                     >
                       <Mic size={14} />
-                      <span>{micCalibrating ? 'Parar Teste de Mic' : 'Calibrar Microfone'}</span>
+                      <span>
+                        {voiceCalibrationStep !== 0
+                          ? `Gravando ${voiceCalibrationStep}/3...`
+                          : savedVoiceThreshold !== null
+                            ? `Recalibrar Voz (3x · ${savedVoiceThreshold}%)`
+                            : 'Calibrar Voz (3x)'}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void startMicCalibration()}
+                      className={`btn btn-sm ${micCalibrating ? 'btn-primary' : 'btn-ghost'}`}
+                    >
+                      <span>{micCalibrating ? 'Parar Medidor' : 'Testar Nível'}</span>
                     </button>
                     <button
                       type="button"
@@ -1789,6 +1890,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </button>
                   </div>
                 </div>
+
+                {voiceCalibrationSamples.length > 0 && (
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                    {voiceCalibrationSamples.map((val, idx) => (
+                      <span
+                        key={idx}
+                        className="jarvis-tabular"
+                        style={{
+                          padding: '3px 8px',
+                          borderRadius: '8px',
+                          backgroundColor: 'var(--bg-primary)',
+                          border: '1px solid var(--border-color)',
+                        }}
+                      >
+                        Amostra {idx + 1}/3: {val}%
+                      </span>
+                    ))}
+                  </div>
+                )}
 
                 {(micCalibrating || micDeviceLabel) && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>

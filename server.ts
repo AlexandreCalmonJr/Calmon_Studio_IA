@@ -18,6 +18,7 @@ import {
 import { createBrainRouter } from './server/brain/brainRouter.ts';
 import {
   PORT,
+  appendServerLog,
   serverState,
   sessions,
   users,
@@ -52,11 +53,28 @@ export function buildApiRouter(options?: { store?: LocalSqliteBrainStore }) {
   api.use(express.json({ limit: '15mb' }));
   api.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
+  // Telemetria real de requisições da API para Logs do Servidor & Métricas
+  api.use((req: Request, res: Response, next: NextFunction) => {
+    const reqPath = req.path || '';
+    if (reqPath === '/health' || reqPath.startsWith('/logs') || reqPath.startsWith('/system/resources')) {
+      next();
+      return;
+    }
+    const startedAt = Date.now();
+    res.on('finish', () => {
+      const elapsed = Date.now() - startedAt;
+      const status = res.statusCode;
+      const level = status >= 500 ? 'ERROR' : status >= 400 ? 'WARNING' : 'INFO';
+      appendServerLog(level, 'api_gateway', `${req.method} ${reqPath} → ${status} (${elapsed} ms)`);
+    });
+    next();
+  });
+
   // ==================== SERVIDOR CÉREBRO REAL (LOCAL_SQLITE WAL + STORE) ====================
   const localBrainStore = options?.store || createLocalSqliteBrainStore({
     defaultOrigin: `http://localhost:${process.env.PORT || 3000}`,
     brainName: process.env.BRAIN_NAME || 'Esta Máquina · Local (Sem Docker)',
-    assistantName: process.env.ASSISTANT_NAME || 'JARVIS',
+    assistantName: process.env.ASSISTANT_NAME || 'Calmon',
   });
 
   const syncRuntimeToSqlite = () => {

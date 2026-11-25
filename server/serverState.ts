@@ -527,7 +527,7 @@ export const serverState = {
       timestamp: nowIso(),
       level: 'INFO',
       source: 'brain_runtime',
-      message: 'Servidor JARVIS AI Hub iniciado com autenticação HttpOnly, SQLite WAL e cofre AES-256-GCM.',
+      message: 'Servidor Calmon Studio iniciado com autenticação HttpOnly, SQLite WAL e cofre AES-256-GCM.',
     },
   ] as Array<{ id: string; timestamp: string; level: string; source: string; message: string }>,
   auditLogs: [] as Array<{
@@ -900,7 +900,7 @@ export const serverState = {
   workspaceProjects: [
     {
       id: 'jarvis-ai-hub',
-      name: 'JARVIS AI Hub',
+      name: 'Calmon Studio',
       type: 'web',
       path: '/workspace/jarvis-ai-hub',
       mode: 'managed',
@@ -1107,7 +1107,7 @@ export const serverState = {
       size_bytes: 18420,
       file_type: 'md',
       indexed_at: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
-      content: 'Guia de orquestração do JARVIS AI Hub: roteamento entre modelos locais e nuvem, motor de aprovações humanas e isolamento de workspace.',
+      content: 'Guia de orquestração do Calmon Studio: roteamento entre modelos locais e nuvem, motor de aprovações humanas e isolamento de workspace.',
     },
     {
       name: 'politica-aprovacoes-seguranca.md',
@@ -1124,7 +1124,7 @@ export const serverState = {
       'sess_welcome_01',
       {
         session_id: 'sess_welcome_01',
-        title: 'Boas-vindas ao JARVIS AI Hub',
+        title: 'Boas-vindas ao Calmon Studio',
         first_prompt: 'Apresente o estado atual da plataforma e os próximos passos recomendados.',
         first_intent: 'system_overview',
         last_activity: new Date(Date.now() - 1000 * 60 * 8).toISOString(),
@@ -1742,6 +1742,22 @@ export function syncAgentInstalledSkillsFromSkillList() {
   }
 }
 syncAgentInstalledSkillsFromSkillList();
+
+export function appendServerLog(
+  level: 'INFO' | 'WARNING' | 'ERROR',
+  source: string,
+  message: string
+): void {
+  const entry = {
+    id: `log_${Date.now().toString(36)}_${crypto.randomBytes(2).toString('hex')}`,
+    timestamp: nowIso(),
+    level,
+    source,
+    message,
+  };
+  serverState.serverLogs = [entry, ...serverState.serverLogs].slice(0, 250);
+  broadcastRealtimeEvent('server_log', entry);
+}
 
 export function getActiveHardwareProfile(): NotebookHardwareProfile {
   return serverState.hardwareProfiles.find((p) => p.id === serverState.activeHardwareProfileId) || serverState.hardwareProfiles[0];

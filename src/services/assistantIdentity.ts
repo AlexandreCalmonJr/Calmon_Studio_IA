@@ -6,7 +6,7 @@ export interface AssistantNamePreset {
   recommendedMode: WorkspaceExperienceMode;
 }
 
-export const DEFAULT_ASSISTANT_NAME = 'JARVIS';
+export const DEFAULT_ASSISTANT_NAME = 'Calmon';
 
 export const ASSISTANT_NAME_PRESETS: AssistantNamePreset[] = [
   { name: 'JARVIS', tagline: 'Clássico & Estratégico', recommendedMode: 'engineering' },

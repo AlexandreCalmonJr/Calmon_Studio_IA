@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Cpu, FileText, ShieldCheck, Save, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import {
   ALLOWED_AUTONOMY_POLICIES,
@@ -132,7 +133,7 @@ export const AgentCoreInspectorModal: React.FC<AgentCoreInspectorModalProps> = (
     }
   };
 
-  return (
+  const modalNode = (
     <div
       className="jarvis-modal-backdrop"
       role="dialog"
@@ -532,4 +533,6 @@ export const AgentCoreInspectorModal: React.FC<AgentCoreInspectorModalProps> = (
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalNode, document.body) : modalNode;
 };

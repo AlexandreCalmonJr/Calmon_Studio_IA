@@ -43,6 +43,32 @@ function makePairingCode(): string {
   return `JRVS-${seg()}`;
 }
 
+function resolveVoiceNavigationAction(command: string): { tab: string; label: string } | null {
+  const norm = command
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+
+  const rules: Array<{ pattern: RegExp; tab: string; label: string }> = [
+    { pattern: /\b(abri[r]?|ir para|vai para|mostra[r]?|novo)\b.*\b(chat|conversa|conversas)\b|\b(chat)\b/, tab: 'chat', label: 'o Chat' },
+    { pattern: /\b(abri[r]?|ir para|vai para|mostra[r]?)\b.*\b(tarefa|tarefas)\b/, tab: 'tasks', label: 'Tarefas' },
+    { pattern: /\b(abri[r]?|ir para|vai para|mostra[r]?)\b.*\b(fluxo|fluxos|workflow)\b/, tab: 'workflows', label: 'o Monitor de Fluxos' },
+    { pattern: /\b(abri[r]?|ir para|vai para|mostra[r]?)\b.*\b(agente|agentes)\b/, tab: 'agents', label: 'a Central de Agentes' },
+    { pattern: /\b(abri[r]?|ir para|vai para|mostra[r]?)\b.*\b(configuracao|configuracoes|ajuste|ajustes)\b/, tab: 'settings', label: 'Configurações' },
+    { pattern: /\b(abri[r]?|ir para|vai para|mostra[r]?)\b.*\b(loja|pacote|pacotes)\b/, tab: 'store', label: 'a Loja Unificada' },
+    { pattern: /\b(abri[r]?|ir para|vai para|mostra[r]?)\b.*\b(projeto|projetos)\b/, tab: 'workspace', label: 'Projetos' },
+    { pattern: /\b(abri[r]?|ir para|vai para|voltar para)\b.*\b(inicio|visao geral|home)\b/, tab: 'overview', label: 'a Visão Geral' },
+  ];
+
+  for (const rule of rules) {
+    if (rule.pattern.test(norm)) {
+      return { tab: rule.tab, label: rule.label };
+    }
+  }
+  return null;
+}
+
 export function createVoiceCompanionRouter(deps?: { store?: LocalSqliteBrainStore }): Router {
   const router = express.Router();
 
@@ -109,12 +135,15 @@ export function createVoiceCompanionRouter(deps?: { store?: LocalSqliteBrainStor
 
     const openInc = serverState.sentinelIncidents.filter((i) => i.status === 'open').length;
     const pendingApp = serverState.approvals.filter((a) => a.status === 'pending').length;
+    const navAction = practiceMode === 'general' ? resolveVoiceNavigationAction(effectiveCommand) : null;
 
     let reply = '';
     let modelUsed = 'voice-local-fast';
     let executionMode: 'LOCAL' | 'ONLINE' = 'LOCAL';
 
-    if (practiceMode === 'english') {
+    if (navAction) {
+      reply = `Abrindo ${navAction.label} agora.`;
+    } else if (practiceMode === 'english') {
       reply = `Great job, ${userName.split(' ')[0]}! I heard: "${effectiveCommand}". Here is a natural tip: keep your intonation relaxed and try answering — "What is your main goal for today?"`;
     } else if (/briefing|resumo|hoje|dia/i.test(effectiveCommand)) {
       reply = `Aqui é ${assistantName}! Seu ecossistema está saudável: você tem ${pendingApp} aprovação(ões) pendente(s), ${openInc} incidente(s) aberto(s) na Kira Sentinela e ${serverState.companionDevices.filter((d) => d.status === 'online').length} notebook(s) conectado(s) via Desktop Companion. ${attachmentNote}`.trim();
@@ -128,7 +157,7 @@ export function createVoiceCompanionRouter(deps?: { store?: LocalSqliteBrainStor
     }
 
     // Tenta enriquecer com motor híbrido rápido (timeout curto de 4.5s para voz fluida)
-    if (serverState.providerConnectivity.gemini_connected || serverState.providerConnectivity.ollama_connected) {
+    if (!navAction && (serverState.providerConnectivity.gemini_connected || serverState.providerConnectivity.ollama_connected)) {
       try {
         const activeHw = getActiveHardwareProfile();
         const voicePrompt =
@@ -167,12 +196,61 @@ export function createVoiceCompanionRouter(deps?: { store?: LocalSqliteBrainStor
       detected_wake_word: wake.detected,
       trigger_phrase: wake.triggerPhrase,
       command_extracted: effectiveCommand,
+      action: navAction ? { type: 'navigate', tab: navAction.tab } : null,
       model_used: modelUsed,
       execution_mode: executionMode,
       practice_mode: practiceMode,
       attachment_acknowledged: attachmentNote || undefined,
       timestamp: nowIso(),
     });
+  });
+
+  // --- SÍNTESE DE VOZ NEURAL (OPENAI TTS QUANDO CONFIGURADO) ---
+  router.post('/voice/tts', requireAuth, async (req: Request, res: Response) => {
+    const text = String(req.body?.text || '').trim().slice(0, 600);
+    if (!text) {
+      res.status(400).json({ detail: 'Texto vazio para síntese de voz.' });
+      return;
+    }
+    const store = deps?.store;
+    const ownerUserId = getOwnerUserId(req);
+    const openaiCred = store
+      ? resolveExternalCredentialForRequest(req, store, ownerUserId, undefined, 'openai')
+      : getEnvProviderCredential('openai');
+
+    if (!openaiCred?.apiKey) {
+      res.json({ audio_base64: null, fallback: true });
+      return;
+    }
+
+    try {
+      const resp = await fetch('https://api.openai.com/v1/audio/speech', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${openaiCred.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'tts-1',
+          voice: 'nova',
+          input: text,
+          response_format: 'mp3',
+        }),
+      });
+      if (!resp.ok) {
+        res.json({ audio_base64: null, fallback: true });
+        return;
+      }
+      const arr = Buffer.from(await resp.arrayBuffer());
+      res.json({
+        audio_base64: arr.toString('base64'),
+        mime_type: 'audio/mpeg',
+        provider: 'openai',
+        fallback: false,
+      });
+    } catch {
+      res.json({ audio_base64: null, fallback: true });
+    }
   });
 
   // --- TRANSCRIÇÃO DE ÁUDIO VIA BACKEND (FALLBACK PARA CHROMIUM / DESKTOP) ---

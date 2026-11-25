@@ -400,7 +400,7 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
                   lineHeight: 1.2,
                 }}
               >
-                {isSimpleMode ? 'Modo Simples' : 'AI Hub · Completo'}
+                {isSimpleMode ? 'Modo Simples' : 'Calmon Studio · Completo'}
               </div>
             </div>
           )}
@@ -808,7 +808,7 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {assistantName} Hub
+                    {assistantName} Studio
                   </div>
                   <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
                     Sessão autenticada
