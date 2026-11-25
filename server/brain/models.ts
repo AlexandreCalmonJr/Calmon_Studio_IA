@@ -223,6 +223,54 @@ export interface McpToolLogModel {
 
 export const BRAIN_SCHEMA_VERSION = '2.0.0';
 
+/**
+ * Versão numérica do schema para controle via PRAGMA user_version.
+ * Incrementar sempre que uma nova migration for adicionada à lista SCHEMA_MIGRATIONS.
+ */
+export const SCHEMA_USER_VERSION = 2;
+
+/**
+ * Lista ordenada de migrations (v0→v1, v1→v2, etc.).
+ * Cada migration tem um índice que representa o user_version APÓS sua aplicação.
+ * Para adicionar uma nova: incrementar SCHEMA_USER_VERSION e adicionar ao array.
+ */
+export const SCHEMA_MIGRATIONS: Array<{ version: number; description: string; sql: string }> = [
+  {
+    version: 1,
+    description: 'Schema inicial (tabelas núcleo criadas via SQLITE_SCHEMA_DDL)',
+    sql: '', // Aplicado pelo SQLITE_SCHEMA_DDL no construtor
+  },
+  {
+    version: 2,
+    description: 'Adiciona tabelas auth_users e auth_sessions para persistência de contas e sessões no SQLite',
+    sql: `
+CREATE TABLE IF NOT EXISTS auth_users (
+  username TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'developer',
+  is_active INTEGER NOT NULL DEFAULT 1,
+  must_change_password INTEGER NOT NULL DEFAULT 0,
+  salt TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS auth_sessions (
+  session_id TEXT PRIMARY KEY,
+  username TEXT NOT NULL REFERENCES auth_users(username) ON DELETE CASCADE,
+  role TEXT NOT NULL DEFAULT 'developer',
+  kind TEXT NOT NULL DEFAULT 'human',
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_username ON auth_sessions(username);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires ON auth_sessions(expires_at);
+`,
+  },
+];
+
 export const ALLOWED_MEMORY_FILENAMES: readonly MemoryFilename[] = [
   'SOUL.md',
   'MEMORY.md',
@@ -624,6 +672,8 @@ export const CORE_SQLITE_TABLES = [
   'app_tasks',
   'coding_session_messages',
   'agent_conversation_history',
+  'auth_users',
+  'auth_sessions',
 ] as const;
 
 export const WORKSPACE_SQLITE_TABLES = [

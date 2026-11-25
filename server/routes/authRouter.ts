@@ -21,6 +21,7 @@ import {
   persistAllUsersAndProfiles,
 } from '../serverState.ts';
 import { isBootstrapAdminUser } from '../serverHardening.ts';
+import { serverRateLimit, RATE_LIMITS, getClientIp } from '../rateLimiter.ts';
 import type { LocalSqliteBrainStore } from '../brain/sqliteBrainStore.ts';
 
 export interface AuthRouterDeps {
@@ -57,6 +58,12 @@ export function createAuthRouter(deps?: AuthRouterDeps): Router {
   });
 
   router.post('/auth/password-login', (req: Request, res: Response) => {
+    const clientIp = getClientIp(req as unknown as Parameters<typeof getClientIp>[0]);
+    const rl = serverRateLimit('auth/login', clientIp, RATE_LIMITS.authLogin.limit, RATE_LIMITS.authLogin.windowMs);
+    if (!rl.allowed) {
+      res.status(429).json({ detail: `Muitas tentativas de login. Tente novamente em ${Math.ceil(rl.retryAfterMs / 1000)}s.` });
+      return;
+    }
     const username = String(req.body?.username || '').trim().toLowerCase();
     const password = String(req.body?.password || '');
     const user = users.get(username);
@@ -64,7 +71,7 @@ export function createAuthRouter(deps?: AuthRouterDeps): Router {
       res.status(401).json({ detail: 'Utilizador ou palavra-passe inválidos.' });
       return;
     }
-    const record = createSessionForUser(req, res, user);
+    const record = createSessionForUser(req, res, user, store);
     res.json({
       status: 'authenticated',
       user_id: user.username,
@@ -81,7 +88,7 @@ export function createAuthRouter(deps?: AuthRouterDeps): Router {
       return;
     }
     const admin = users.get('admin')!;
-    const record = createSessionForUser(req, res, admin);
+    const record = createSessionForUser(req, res, admin, store);
     res.json({
       status: 'authenticated',
       user_id: admin.username,
@@ -126,6 +133,12 @@ export function createAuthRouter(deps?: AuthRouterDeps): Router {
 
   // Simplified household / personal account registration (starts in Simple Mode with custom assistant name)
   router.post('/auth/register-personal', (req: Request, res: Response) => {
+    const clientIp = getClientIp(req as unknown as Parameters<typeof getClientIp>[0]);
+    const rl = serverRateLimit('auth/register', clientIp, RATE_LIMITS.authRegister.limit, RATE_LIMITS.authRegister.windowMs);
+    if (!rl.allowed) {
+      res.status(429).json({ detail: `Limite de registros atingido. Tente novamente em ${Math.ceil(rl.retryAfterMs / 60_000)} minuto(s).` });
+      return;
+    }
     const rawUsername = String(req.body?.username || '').trim().toLowerCase();
     const display_name = String(req.body?.display_name || '').trim();
     const password = String(req.body?.password || '');
@@ -165,7 +178,7 @@ export function createAuthRouter(deps?: AuthRouterDeps): Router {
       experienceMode: experience_mode,
     });
 
-    const record = createSessionForUser(req, res, account);
+    const record = createSessionForUser(req, res, account, store);
     persistAllUsersAndProfiles(store);
     res.status(201).json({
       status: 'authenticated',
@@ -232,7 +245,10 @@ export function createAuthRouter(deps?: AuthRouterDeps): Router {
 
   router.post('/auth/logout', (req: Request, res: Response) => {
     const session = getSessionFromReq(req);
-    if (session) sessions.delete(session.session_id);
+    if (session) {
+      sessions.delete(session.session_id);
+      try { store?.deleteAuthSession(session.session_id); } catch { /* não bloqueia */ }
+    }
     clearSessionCookie(req, res);
     res.json({ status: 'logged_out' });
   });

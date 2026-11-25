@@ -1826,7 +1826,7 @@ export function clearSessionCookie(req: Request, res: Response) {
   res.setHeader('Set-Cookie', attrs.join('; '));
 }
 
-export function createSessionForUser(req: Request, res: Response, user: UserAccount): SessionRecord {
+export function createSessionForUser(req: Request, res: Response, user: UserAccount, store?: import('./brain/sqliteBrainStore.ts').LocalSqliteBrainStore): SessionRecord {
   const session_id = crypto.randomBytes(32).toString('hex');
   const record: SessionRecord = {
     session_id,
@@ -1836,6 +1836,8 @@ export function createSessionForUser(req: Request, res: Response, user: UserAcco
     created_at: Date.now(),
   };
   sessions.set(session_id, record);
+  // Persiste no SQLite para sobreviver a reinicializações do servidor
+  try { store?.upsertAuthSession(record); } catch { /* não bloqueia */ }
   setSessionCookie(req, res, session_id);
   return record;
 }
@@ -2196,18 +2198,35 @@ export function persistStateNamespace(
 
 export function persistAllUsersAndProfiles(store: LocalSqliteBrainStore | undefined): void {
   if (!store) return;
-  persistStateNamespace(store, 'users', Array.from(users.entries()));
+  // Persiste no SQLite relacional (auth_users) em vez de blob JSON
+  for (const [, user] of users.entries()) {
+    try { store.upsertAuthUser(user); } catch { /* não bloqueia */ }
+  }
+  // Mantém perfis e progresso em app_state_snapshots (ainda não migrados)
   persistStateNamespace(store, 'user_profiles', Array.from(userProfiles.entries()));
   persistStateNamespace(store, 'learning_progress', Array.from(learningProgress.entries()));
 }
 
 export function hydrateServerStateFromSqlite(store: LocalSqliteBrainStore): void {
-  const savedUsers = store.loadStateNamespace<Array<[string, UserAccount]>>('users');
-  if (Array.isArray(savedUsers)) {
-    for (const [k, u] of savedUsers) {
-      if (k && u?.username) users.set(k, u);
+  // Prioridade 1: carregar usuários da tabela auth_users (relacional)
+  const sqliteUsers = store.listAuthUsers();
+  if (sqliteUsers.length > 0) {
+    for (const u of sqliteUsers) {
+      users.set(u.username, u);
+    }
+  } else {
+    // Fallback: migrar de app_state_snapshots para auth_users
+    const savedUsers = store.loadStateNamespace<Array<[string, UserAccount]>>('users');
+    if (Array.isArray(savedUsers) && savedUsers.length > 0) {
+      store.migrateUsersSnapshotIfNeeded(savedUsers);
+      for (const [k, u] of savedUsers) {
+        if (k && u?.username) users.set(k, u);
+      }
     }
   }
+
+  // Limpeza de sessões expiradas do SQLite
+  try { store.purgeExpiredAuthSessions(); } catch { /* não bloqueia */ }
 
   const savedProfiles = store.loadStateNamespace<Array<[string, Record<string, any>]>>('user_profiles');
   if (Array.isArray(savedProfiles)) {
@@ -2223,17 +2242,35 @@ export function hydrateServerStateFromSqlite(store: LocalSqliteBrainStore): void
     }
   }
 
-  const savedChatSessions = store.loadStateNamespace<Array<[string, StoredChatSession]>>('chat_sessions');
-  if (Array.isArray(savedChatSessions)) {
-    serverState.chatSessions.clear();
-    for (const [k, s] of savedChatSessions) {
-      if (k && s?.session_id) serverState.chatSessions.set(k, s);
-    }
-  }
-
+  store.migrateLegacyChatSessionsSnapshotIfNeeded();
   const savedTasks = store.listTaskRecords(250);
   if (savedTasks.length > 0) {
     serverState.tasksList = savedTasks;
+  }
+
+  const relationalSessions = store.listChatSessionsRelational(120);
+  if (relationalSessions.length > 0) {
+    serverState.chatSessions.clear();
+    for (const row of relationalSessions) {
+      const dbMsgs = store.getChatSessionMessagesRelational(row.id, 250);
+      const firstUser = dbMsgs.find((m) => m.role === 'user')?.content || '';
+      const sessionTasks = savedTasks.filter((t) => String(t.session_id || '') === row.id);
+      serverState.chatSessions.set(row.id, {
+        session_id: row.id,
+        title: row.title,
+        first_prompt: firstUser,
+        first_intent: row.mode || 'standard',
+        last_activity: row.updated_at || row.created_at,
+        messages: dbMsgs.map((m, idx) => ({
+          id: idx + 1,
+          session_id: row.id,
+          role: m.role === 'user' ? 'user' : 'assistant',
+          content: m.content,
+          created_at: m.created_at,
+        })),
+        tasks: sessionTasks,
+      });
+    }
   }
 
   const savedSkills = store.loadStateNamespace<typeof serverState.skillsList>('skills_list');

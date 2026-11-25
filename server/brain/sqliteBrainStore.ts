@@ -40,6 +40,8 @@ import {
 import {
   BRAIN_SCHEMA_VERSION,
   CORE_SQLITE_TABLES,
+  SCHEMA_MIGRATIONS,
+  SCHEMA_USER_VERSION,
   SQLITE_SCHEMA_DDL,
   type AgentWorkspaceModel,
   type AuditLogModel,
@@ -135,22 +137,48 @@ export class LocalSqliteBrainStore {
 
     this.db = new DatabaseSync(this.dbPath);
     this.db.exec(SQLITE_SCHEMA_DDL);
-    this.ensureProviderVaultColumns();
+    this.runSchemaMigrations();
 
     this.ensureInitialRecords(options);
     this.ensureDefaultWorkspaceAndMcp();
   }
 
-  private ensureProviderVaultColumns(): void {
-    const columns = this.db
-      .prepare('PRAGMA table_info(provider_vault_keys)')
-      .all() as Array<{ name: string }>;
-    const existing = new Set(columns.map((c) => String(c.name)));
-    if (!existing.has('last_latency_ms')) {
-      this.db.exec('ALTER TABLE provider_vault_keys ADD COLUMN last_latency_ms INTEGER');
+  /**
+   * Sistema de migrations versionadas via PRAGMA user_version.
+   * Aplica automaticamente todas as migrations pendentes em ordem sequencial,
+   * com backup automático antes da primeira migration em produção.
+   */
+  private runSchemaMigrations(): void {
+    const currentVersion = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
+    if (currentVersion >= SCHEMA_USER_VERSION) return;
+
+    // Backup automático antes de qualquer alteração de schema em banco existente
+    if (currentVersion > 0) {
+      try {
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const backupPath = path.join(this.backupsDir, `pre-migration-v${currentVersion}-to-v${SCHEMA_USER_VERSION}-${stamp}.db`);
+        fs.copyFileSync(this.dbPath, backupPath);
+      } catch {
+        // Não bloqueia a migration se o backup falhar (ex: disco cheio temporário)
+      }
     }
-    if (!existing.has('last_status_code')) {
-      this.db.exec('ALTER TABLE provider_vault_keys ADD COLUMN last_status_code INTEGER');
+
+    for (const migration of SCHEMA_MIGRATIONS) {
+      if (migration.version <= currentVersion) continue;
+      if (!migration.sql.trim()) {
+        // Migration sem SQL (ex: v1 que apenas marca a versão inicial)
+        this.db.exec(`PRAGMA user_version = ${migration.version}`);
+        continue;
+      }
+      try {
+        this.db.exec('BEGIN IMMEDIATE');
+        this.db.exec(migration.sql);
+        this.db.exec(`PRAGMA user_version = ${migration.version}`);
+        this.db.exec('COMMIT');
+      } catch (err) {
+        try { this.db.exec('ROLLBACK'); } catch { /* já revertido */ }
+        throw new Error(`Migration v${migration.version} (${migration.description}) falhou: ${String(err)}`);
+      }
     }
   }
 
@@ -2209,6 +2237,168 @@ export class LocalSqliteBrainStore {
     return Number(res.changes || 0);
   }
 
+  public upsertChatSessionRecord(session: {
+    id: string;
+    user_id?: string;
+    title: string;
+    mode?: string;
+    created_at?: string;
+    updated_at?: string;
+  }): void {
+    if (this.closed) return;
+    const id = String(session.id || '').slice(0, 128);
+    if (!id) return;
+    const now = nowIso();
+    this.db
+      .prepare(
+        `INSERT INTO chat_sessions (id, user_id, title, mode, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           title = excluded.title,
+           mode = excluded.mode,
+           updated_at = excluded.updated_at`
+      )
+      .run(
+        id,
+        String(session.user_id || 'admin').slice(0, 64),
+        String(session.title || 'Conversa').slice(0, 200),
+        String(session.mode || 'standard').slice(0, 32),
+        String(session.created_at || now),
+        String(session.updated_at || now)
+      );
+  }
+
+  public appendChatMessageRecord(msg: {
+    id: string;
+    session_id: string;
+    role: string;
+    content: string;
+    agent_role?: string | null;
+    created_at?: string;
+  }): void {
+    if (this.closed) return;
+    const sid = String(msg.session_id || '').slice(0, 128);
+    if (!sid) return;
+    const now = nowIso();
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO chat_sessions (id, user_id, title, mode, created_at, updated_at)
+         VALUES (?, 'admin', 'Conversa', 'standard', ?, ?)`
+      )
+      .run(sid, now, now);
+    this.db
+      .prepare(
+        `INSERT INTO chat_messages (id, session_id, role, content, agent_role, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO NOTHING`
+      )
+      .run(
+        String(msg.id || `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`).slice(0, 128),
+        sid,
+        String(msg.role || 'user').slice(0, 32),
+        String(msg.content || ''),
+        msg.agent_role ? String(msg.agent_role).slice(0, 64) : null,
+        String(msg.created_at || now)
+      );
+  }
+
+  public listChatSessionsRelational(limit = 100): Array<{
+    id: string;
+    user_id: string;
+    title: string;
+    mode: string;
+    created_at: string;
+    updated_at: string;
+  }> {
+    if (this.closed) return [];
+    const safeLimit = Math.max(1, Math.min(300, Math.floor(limit)));
+    return this.db
+      .prepare('SELECT id, user_id, title, mode, created_at, updated_at FROM chat_sessions ORDER BY updated_at DESC LIMIT ?')
+      .all(safeLimit) as Array<{
+      id: string;
+      user_id: string;
+      title: string;
+      mode: string;
+      created_at: string;
+      updated_at: string;
+    }>;
+  }
+
+  public getChatSessionMessagesRelational(
+    sessionId: string,
+    limit = 250
+  ): Array<{
+    id: string;
+    session_id: string;
+    role: string;
+    content: string;
+    agent_role: string | null;
+    created_at: string;
+  }> {
+    if (this.closed) return [];
+    const safeLimit = Math.max(1, Math.min(1000, Math.floor(limit)));
+    return this.db
+      .prepare(
+        'SELECT id, session_id, role, content, agent_role, created_at FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC LIMIT ?'
+      )
+      .all(String(sessionId), safeLimit) as Array<{
+      id: string;
+      session_id: string;
+      role: string;
+      content: string;
+      agent_role: string | null;
+      created_at: string;
+    }>;
+  }
+
+  public deleteChatSessionRecord(sessionId: string): boolean {
+    if (this.closed) return false;
+    const res = this.db.prepare('DELETE FROM chat_sessions WHERE id = ?').run(String(sessionId));
+    return Number(res.changes || 0) > 0;
+  }
+
+  public migrateLegacyChatSessionsSnapshotIfNeeded(): number {
+    if (this.closed) return 0;
+    const countRow = this.db.prepare('SELECT COUNT(*) as cnt FROM chat_sessions').get() as { cnt: number };
+    if (Number(countRow?.cnt || 0) > 0) return 0;
+
+    const legacy = this.loadStateNamespace<Array<[string, any]>>('chat_sessions');
+    if (!Array.isArray(legacy) || legacy.length === 0) return 0;
+
+    let migrated = 0;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const [, sess] of legacy) {
+        if (!sess?.session_id) continue;
+        this.upsertChatSessionRecord({
+          id: String(sess.session_id),
+          title: String(sess.title || 'Conversa'),
+          mode: String(sess.first_intent || 'standard'),
+          created_at: String(sess.last_activity || nowIso()),
+          updated_at: String(sess.last_activity || nowIso()),
+        });
+        if (Array.isArray(sess.messages)) {
+          for (let i = 0; i < sess.messages.length; i += 1) {
+            const m = sess.messages[i];
+            this.appendChatMessageRecord({
+              id: `${sess.session_id}_m_${m.id ?? i}`,
+              session_id: String(sess.session_id),
+              role: String(m.role || 'user'),
+              content: String(m.content || ''),
+              created_at: String(m.created_at || nowIso()),
+            });
+          }
+        }
+        migrated += 1;
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+    return migrated;
+  }
+
   public appendCodingMessage(input: {
     session_id: string;
     project_id?: string | null;
@@ -2353,6 +2543,202 @@ export class LocalSqliteBrainStore {
     }
     this.workspaceStores.clear();
     this.db.close();
+  }
+
+  // ==================== AUTH USERS & SESSIONS (SQLite persistente) ====================
+
+  /**
+   * Upsert de conta de usuário no SQLite.
+   * Preserva password_hash/salt se já existir e não forem enviados.
+   */
+  public upsertAuthUser(user: {
+    username: string;
+    display_name: string;
+    role: 'admin' | 'developer' | 'auditor';
+    is_active: boolean;
+    must_change_password: boolean;
+    salt: string;
+    password_hash: string;
+    created_at: string;
+  }): void {
+    const now = nowIso();
+    this.db.prepare(`
+      INSERT INTO auth_users (username, display_name, role, is_active, must_change_password, salt, password_hash, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(username) DO UPDATE SET
+        display_name = excluded.display_name,
+        role = excluded.role,
+        is_active = excluded.is_active,
+        must_change_password = excluded.must_change_password,
+        salt = excluded.salt,
+        password_hash = excluded.password_hash,
+        updated_at = excluded.updated_at
+    `).run(
+      user.username.slice(0, 64),
+      user.display_name.slice(0, 80),
+      user.role,
+      user.is_active ? 1 : 0,
+      user.must_change_password ? 1 : 0,
+      user.salt,
+      user.password_hash,
+      user.created_at,
+      now,
+    );
+  }
+
+  public getAuthUser(username: string): {
+    username: string;
+    display_name: string;
+    role: 'admin' | 'developer' | 'auditor';
+    is_active: boolean;
+    must_change_password: boolean;
+    salt: string;
+    password_hash: string;
+    created_at: string;
+  } | null {
+    const row = this.db.prepare('SELECT * FROM auth_users WHERE username = ?').get(username) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return {
+      username: String(row.username),
+      display_name: String(row.display_name),
+      role: String(row.role) as 'admin' | 'developer' | 'auditor',
+      is_active: Boolean(row.is_active),
+      must_change_password: Boolean(row.must_change_password),
+      salt: String(row.salt),
+      password_hash: String(row.password_hash),
+      created_at: String(row.created_at),
+    };
+  }
+
+  public listAuthUsers(): Array<{
+    username: string;
+    display_name: string;
+    role: 'admin' | 'developer' | 'auditor';
+    is_active: boolean;
+    must_change_password: boolean;
+    salt: string;
+    password_hash: string;
+    created_at: string;
+  }> {
+    const rows = this.db.prepare('SELECT * FROM auth_users ORDER BY created_at ASC').all() as Array<Record<string, unknown>>;
+    return rows.map((row) => ({
+      username: String(row.username),
+      display_name: String(row.display_name),
+      role: String(row.role) as 'admin' | 'developer' | 'auditor',
+      is_active: Boolean(row.is_active),
+      must_change_password: Boolean(row.must_change_password),
+      salt: String(row.salt),
+      password_hash: String(row.password_hash),
+      created_at: String(row.created_at),
+    }));
+  }
+
+  public deleteAuthUser(username: string): void {
+    this.db.prepare('DELETE FROM auth_users WHERE username = ?').run(username);
+  }
+
+  /** Persiste uma sessão com TTL de 24h (86400000ms). */
+  public upsertAuthSession(session: {
+    session_id: string;
+    username: string;
+    role: 'admin' | 'developer' | 'auditor';
+    kind: 'human' | 'service';
+    created_at: number;
+  }): void {
+    const expiresAt = session.created_at + 86_400_000;
+    this.db.prepare(`
+      INSERT INTO auth_sessions (session_id, username, role, kind, created_at, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(session_id) DO NOTHING
+    `).run(
+      session.session_id,
+      session.username,
+      session.role,
+      session.kind,
+      session.created_at,
+      expiresAt,
+    );
+  }
+
+  public getAuthSession(sessionId: string): {
+    session_id: string;
+    username: string;
+    role: 'admin' | 'developer' | 'auditor';
+    kind: 'human' | 'service';
+    created_at: number;
+  } | null {
+    const now = Date.now();
+    const row = this.db
+      .prepare('SELECT * FROM auth_sessions WHERE session_id = ? AND expires_at > ?')
+      .get(sessionId, now) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return {
+      session_id: String(row.session_id),
+      username: String(row.username),
+      role: String(row.role) as 'admin' | 'developer' | 'auditor',
+      kind: String(row.kind) as 'human' | 'service',
+      created_at: Number(row.created_at),
+    };
+  }
+
+  public deleteAuthSession(sessionId: string): void {
+    this.db.prepare('DELETE FROM auth_sessions WHERE session_id = ?').run(sessionId);
+  }
+
+  /** Remove todas as sessões de um usuário (útil ao revogar ou trocar senha). */
+  public deleteAuthSessionsByUser(username: string, exceptSessionId?: string): void {
+    if (exceptSessionId) {
+      this.db.prepare('DELETE FROM auth_sessions WHERE username = ? AND session_id != ?').run(username, exceptSessionId);
+    } else {
+      this.db.prepare('DELETE FROM auth_sessions WHERE username = ?').run(username);
+    }
+  }
+
+  /** Limpeza periódica de sessões expiradas. */
+  public purgeExpiredAuthSessions(): number {
+    const now = Date.now();
+    const result = this.db.prepare('DELETE FROM auth_sessions WHERE expires_at <= ?').run(now) as { changes: number };
+    return result.changes;
+  }
+
+  /**
+   * Migra usuários do namespace 'users' em app_state_snapshots para auth_users.
+   * Roda uma única vez na inicialização se auth_users estiver vazio.
+   */
+  public migrateUsersSnapshotIfNeeded(snapshotUsers: Array<[string, {
+    username: string; display_name: string; role: 'admin' | 'developer' | 'auditor';
+    is_active: boolean; must_change_password: boolean; salt: string; password_hash: string; created_at: string;
+  }]>): number {
+    const existing = this.db.prepare('SELECT COUNT(*) as cnt FROM auth_users').get() as { cnt: number };
+    if (existing.cnt > 0) return 0;
+    let migrated = 0;
+    try {
+      this.db.exec('BEGIN IMMEDIATE');
+      for (const [, user] of snapshotUsers) {
+        if (!user?.username) continue;
+        this.db.prepare(`
+          INSERT OR IGNORE INTO auth_users
+            (username, display_name, role, is_active, must_change_password, salt, password_hash, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          user.username.slice(0, 64),
+          (user.display_name || user.username).slice(0, 80),
+          user.role || 'developer',
+          user.is_active ? 1 : 0,
+          user.must_change_password ? 1 : 0,
+          user.salt || '',
+          user.password_hash || '',
+          user.created_at || nowIso(),
+          nowIso(),
+        );
+        migrated++;
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      try { this.db.exec('ROLLBACK'); } catch { /* já revertido */ }
+      throw err;
+    }
+    return migrated;
   }
 }
 

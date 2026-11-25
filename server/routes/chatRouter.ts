@@ -29,6 +29,7 @@ import {
   StructuredArtifactPayload,
 } from '../artifactEngine.ts';
 import type { LocalSqliteBrainStore } from '../brain/sqliteBrainStore.ts';
+import { serverRateLimit, RATE_LIMITS, getClientIp } from '../rateLimiter.ts';
 
 export interface ChatRouterDeps {
   store: LocalSqliteBrainStore;
@@ -44,6 +45,41 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
   const findWorkspaceProject = (projectId?: string) => {
     if (!projectId) return null;
     return serverState.workspaceProjects.find((p) => p.id === projectId) || null;
+  };
+
+  const persistChatTurnRelational = (
+    session: {
+      session_id: string;
+      title: string;
+      first_intent?: string;
+      last_activity: string;
+    },
+    userContent: string,
+    assistantContent: string,
+    agentRole?: string
+  ) => {
+    store.upsertChatSessionRecord({
+      id: session.session_id,
+      title: session.title,
+      mode: session.first_intent || 'standard',
+      updated_at: session.last_activity,
+    });
+    const ts = Date.now().toString(36);
+    store.appendChatMessageRecord({
+      id: `${session.session_id}_u_${ts}_${crypto.randomBytes(2).toString('hex')}`,
+      session_id: session.session_id,
+      role: 'user',
+      content: userContent,
+      created_at: session.last_activity,
+    });
+    store.appendChatMessageRecord({
+      id: `${session.session_id}_a_${ts}_${crypto.randomBytes(2).toString('hex')}`,
+      session_id: session.session_id,
+      role: 'assistant',
+      content: assistantContent,
+      agent_role: agentRole || null,
+      created_at: nowIso(),
+    });
   };
 
   // --- CHAT & TASKS ---
@@ -62,7 +98,8 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
   router.get('/chat/sessions/:id', requireAuth, (req: Request, res: Response) => {
     const s = serverState.chatSessions.get(req.params.id);
     if (!s) {
-      res.json({ session_id: req.params.id, tasks: [], messages: [] });
+      const dbMessages = store.getChatSessionMessagesRelational(req.params.id);
+      res.json({ session_id: req.params.id, tasks: [], messages: dbMessages });
       return;
     }
     res.json({ session_id: s.session_id, tasks: s.tasks, messages: s.messages });
@@ -70,7 +107,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
 
   router.delete('/chat/sessions/:id', requireAuth, (req: Request, res: Response) => {
     serverState.chatSessions.delete(req.params.id);
-    persistStateNamespace(store, 'chat_sessions', Array.from(serverState.chatSessions.entries()));
+    store.deleteChatSessionRecord(req.params.id);
     res.json({ deleted: true });
   });
 
@@ -91,18 +128,26 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
   });
 
   router.post('/chat', requireAuth, async (req: Request, res: Response) => {
+    const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
+    const ownerUserId = user?.username || 'admin';
+
+    // Rate limiting: 60 mensagens/minuto por usuário autenticado
+    const rlChat = serverRateLimit('chat', ownerUserId, RATE_LIMITS.chat.limit, RATE_LIMITS.chat.windowMs);
+    if (!rlChat.allowed) {
+      res.status(429).json({ detail: `Limite de mensagens atingido (${RATE_LIMITS.chat.limit}/min). Aguarde ${Math.ceil(rlChat.retryAfterMs / 1000)}s.` });
+      return;
+    }
+
     const prompt = String(req.body?.prompt || '').trim();
     const sessionId = String(req.body?.session_id || `sess_${Date.now()}`);
     const projectId = req.body?.project_id ? String(req.body.project_id) : undefined;
     const requestedModel = req.body?.model ? String(req.body.model) : undefined;
     const enableWebSearch = typeof req.body?.enable_web_search === 'boolean' ? req.body.enable_web_search : undefined;
-    const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
     const profile = user ? userProfiles.get(user.username) : undefined;
     const assistantName = String(req.body?.assistant_name || profile?.assistantName || 'JARVIS');
     const activeAgent = detectInvokedAgent(prompt, sessionId);
     const activeHw = getActiveHardwareProfile();
     const taskId = `tsk_${Date.now()}`;
-    const ownerUserId = user?.username || 'admin';
 
     const existingSession = serverState.chatSessions.get(sessionId);
     const agentCore = store.getAgentCore(ownerUserId, activeAgent.role, {
@@ -238,7 +283,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
       const storedTask = { ...taskResponse, status: 'completed', created_at: nowIso() };
       serverState.tasksList.unshift(storedTask);
       store.upsertTaskRecord(storedTask);
-      persistStateNamespace(store, 'chat_sessions', Array.from(serverState.chatSessions.entries()));
+      persistChatTurnRelational(session, prompt, result.text, activeAgent.role);
       persistStateNamespace(store, 'telemetry_records', serverState.telemetryRecords.slice(0, 500));
       res.json(taskResponse);
     } catch (err: any) {
@@ -249,18 +294,26 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
   });
 
   router.post('/chat/stream', requireAuth, async (req: Request, res: Response) => {
+    const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
+    const ownerUserId = user?.username || 'admin';
+
+    // Rate limiting: mesma janela do /chat (60/min por usuário)
+    const rlStream = serverRateLimit('chat', ownerUserId, RATE_LIMITS.chat.limit, RATE_LIMITS.chat.windowMs);
+    if (!rlStream.allowed) {
+      res.status(429).json({ detail: `Limite de mensagens atingido (${RATE_LIMITS.chat.limit}/min). Aguarde ${Math.ceil(rlStream.retryAfterMs / 1000)}s.` });
+      return;
+    }
+
     const prompt = String(req.body?.prompt || '').trim();
     const sessionId = String(req.body?.session_id || `sess_${Date.now()}`);
     const projectId = req.body?.project_id ? String(req.body.project_id) : undefined;
     const requestedModel = req.body?.model ? String(req.body.model) : undefined;
     const enableWebSearch = typeof req.body?.enable_web_search === 'boolean' ? req.body.enable_web_search : undefined;
-    const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
     const profile = user ? userProfiles.get(user.username) : undefined;
     const assistantName = String(req.body?.assistant_name || profile?.assistantName || 'JARVIS');
     const activeAgent = detectInvokedAgent(prompt, sessionId);
     const activeHw = getActiveHardwareProfile();
     const taskId = `tsk_${Date.now()}`;
-    const ownerUserId = user?.username || 'admin';
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -653,7 +706,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
       const storedStreamTask = { ...taskData, status: 'completed', created_at: nowIso() };
       serverState.tasksList.unshift(storedStreamTask);
       store.upsertTaskRecord(storedStreamTask);
-      persistStateNamespace(store, 'chat_sessions', Array.from(serverState.chatSessions.entries()));
+      persistChatTurnRelational(session, prompt, result.text, primaryAgent.role);
       persistStateNamespace(store, 'telemetry_records', serverState.telemetryRecords.slice(0, 500));
       persistStateNamespace(store, 'brain_memories', serverState.brainMemories.slice(0, 250));
 

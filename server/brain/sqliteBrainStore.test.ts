@@ -25,7 +25,7 @@ test('LocalSqliteBrainStore bootstraps WAL SQLite database on disk with all 12 c
     assert.equal(fs.existsSync(store1.dbPath), true);
 
     const tables = store1.getTableStats();
-    assert.equal(tables.length, 28);
+    assert.equal(tables.length, 30); // 28 originais + auth_users + auth_sessions (Fase 2)
     assert.ok(tables.some((t) => t.table === 'brain_identity' && t.rows === 1));
     assert.ok(tables.some((t) => t.table === 'brain_profiles' && t.rows === 3));
     assert.ok(tables.some((t) => t.table === 'agent_workspaces' && t.rows === 1));
@@ -38,6 +38,8 @@ test('LocalSqliteBrainStore bootstraps WAL SQLite database on disk with all 12 c
     assert.ok(tables.some((t) => t.table === 'app_tasks'));
     assert.ok(tables.some((t) => t.table === 'coding_session_messages'));
     assert.ok(tables.some((t) => t.table === 'agent_conversation_history'));
+    assert.ok(tables.some((t) => t.table === 'auth_users'));
+    assert.ok(tables.some((t) => t.table === 'auth_sessions'));
 
     const added = store1.addBrainProfile({
       name: 'Docker Escritório',
@@ -218,6 +220,143 @@ test('LocalSqliteBrainStore persists custom_packs created in Dev/Admin Pack Stud
 
     assert.equal(store2.deleteCustomPack('admin', 'dados_analytics_pro'), true);
     assert.equal(store2.listCustomPacks().length, 0);
+    store2.close();
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('LocalSqliteBrainStore persists chat_sessions and chat_messages relationally and migrates legacy snapshots', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-chat-rel-'));
+  try {
+    const store1 = createLocalSqliteBrainStore({ dataDir: tempDir });
+    store1.saveStateNamespace('chat_sessions', [
+      [
+        'sess_legacy_1',
+        {
+          session_id: 'sess_legacy_1',
+          title: 'Conversa Legada',
+          first_intent: 'standard',
+          last_activity: '2026-11-25T10:00:00.000Z',
+          messages: [
+            { id: 1, role: 'user', content: 'Oi legado', created_at: '2026-11-25T10:00:00.000Z' },
+            { id: 2, role: 'assistant', content: 'Resposta legada', created_at: '2026-11-25T10:00:01.000Z' },
+          ],
+        },
+      ],
+    ]);
+
+    const migrated = store1.migrateLegacyChatSessionsSnapshotIfNeeded();
+    assert.equal(migrated, 1);
+
+    store1.upsertChatSessionRecord({ id: 'sess_rel_2', title: 'Nova Sessão SQLite', mode: 'standard' });
+    store1.appendChatMessageRecord({
+      id: 'msg_rel_u1',
+      session_id: 'sess_rel_2',
+      role: 'user',
+      content: 'Olá banco relacional',
+    });
+    store1.close();
+
+    const store2 = createLocalSqliteBrainStore({ dataDir: tempDir });
+    const sessions = store2.listChatSessionsRelational();
+    assert.equal(sessions.length, 2);
+    const msgsLegacy = store2.getChatSessionMessagesRelational('sess_legacy_1');
+    assert.equal(msgsLegacy.length, 2);
+    assert.equal(msgsLegacy[0].content, 'Oi legado');
+    const msgsRel = store2.getChatSessionMessagesRelational('sess_rel_2');
+    assert.equal(msgsRel.length, 1);
+    assert.equal(msgsRel[0].content, 'Olá banco relacional');
+
+    assert.equal(store2.deleteChatSessionRecord('sess_legacy_1'), true);
+    assert.equal(store2.getChatSessionMessagesRelational('sess_legacy_1').length, 0);
+    store2.close();
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('LocalSqliteBrainStore persiste auth_users e auth_sessions no SQLite (Fase 2)', () => {
+  const tempDir = makeTempDir('jarvis-auth-sqlite-');
+  try {
+    const store1 = createLocalSqliteBrainStore({ dataDir: tempDir });
+
+    // Upsert de usuário
+    store1.upsertAuthUser({
+      username: 'alice',
+      display_name: 'Alice Silva',
+      role: 'developer',
+      is_active: true,
+      must_change_password: false,
+      salt: 'abc123salt',
+      password_hash: 'fakehash',
+      created_at: '2026-01-01T00:00:00.000Z',
+    });
+    store1.upsertAuthUser({
+      username: 'bob',
+      display_name: 'Bob Costa',
+      role: 'admin',
+      is_active: true,
+      must_change_password: false,
+      salt: 'def456salt',
+      password_hash: 'fakehash2',
+      created_at: '2026-01-02T00:00:00.000Z',
+    });
+
+    // Upsert de sessão
+    store1.upsertAuthSession({
+      session_id: 'sess_alice_001',
+      username: 'alice',
+      role: 'developer',
+      kind: 'human',
+      created_at: Date.now(),
+    });
+
+    // Verificar getAuthUser
+    const alice = store1.getAuthUser('alice');
+    assert.ok(alice);
+    assert.equal(alice.display_name, 'Alice Silva');
+    assert.equal(alice.role, 'developer');
+
+    // Verificar listAuthUsers
+    const all = store1.listAuthUsers();
+    assert.equal(all.length, 2);
+
+    // Verificar getAuthSession (válida)
+    const sess = store1.getAuthSession('sess_alice_001');
+    assert.ok(sess);
+    assert.equal(sess.username, 'alice');
+
+    // Sessão expirada não deve ser retornada
+    store1.upsertAuthSession({
+      session_id: 'sess_expired',
+      username: 'alice',
+      role: 'developer',
+      kind: 'human',
+      created_at: Date.now() - 90_000_000, // 25h atrás
+    });
+    // A sessão expirada não deve ser retornada (expires_at já passou)
+    // Nota: upsertAuthSession calcula expires_at = created_at + 86400000
+    // Para uma sessão criada 25h atrás, expires_at < now, então getAuthSession retorna null
+    const expiredSess = store1.getAuthSession('sess_expired');
+    assert.equal(expiredSess, null);
+
+    // purgeExpiredAuthSessions remove sessões expiradas
+    const purged = store1.purgeExpiredAuthSessions();
+    assert.ok(purged >= 1);
+
+    // Reabrir o banco e verificar persistência
+    store1.close();
+    const store2 = createLocalSqliteBrainStore({ dataDir: tempDir });
+    const aliceReopened = store2.getAuthUser('alice');
+    assert.ok(aliceReopened);
+    assert.equal(aliceReopened.display_name, 'Alice Silva');
+
+    // deleteAuthUser também deleta sessões em cascata
+    store2.deleteAuthUser('alice');
+    assert.equal(store2.getAuthUser('alice'), null);
+    assert.equal(store2.getAuthSession('sess_alice_001'), null);
+
     store2.close();
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });

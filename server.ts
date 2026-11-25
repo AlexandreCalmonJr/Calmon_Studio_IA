@@ -64,6 +64,7 @@ export function buildApiRouter(options?: { store?: LocalSqliteBrainStore }) {
     res.on('finish', () => {
       const elapsed = Date.now() - startedAt;
       const status = res.statusCode;
+      if (req.method === 'GET' && status < 400) return;
       const level = status >= 500 ? 'ERROR' : status >= 400 ? 'WARNING' : 'INFO';
       appendServerLog(level, 'api_gateway', `${req.method} ${reqPath} → ${status} (${elapsed} ms)`);
     });
