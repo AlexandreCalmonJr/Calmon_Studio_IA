@@ -1249,7 +1249,7 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
         {selectedAppForModal && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <p style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.55 }}>
-              {selectedAppForModal.description}. Autorize o JARVIS AI Hub a interagir com este serviço através das suas chaves de API ou webhook seguro.
+              {selectedAppForModal.description}. Autorize o Calmon Studio a interagir com este serviço através das suas chaves de API ou webhook seguro.
             </p>
 
             {selectedAppForModal.isCustom && selectedAppForModal.endpoint && (

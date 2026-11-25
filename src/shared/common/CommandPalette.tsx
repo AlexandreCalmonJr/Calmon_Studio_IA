@@ -780,7 +780,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
             <span>↵ Abrir</span>
             <span>ESC Fechar</span>
           </div>
-          <span style={{ color: 'var(--text-muted)' }}>JARVIS Hub Spotlight</span>
+          <span style={{ color: 'var(--text-muted)' }}>Calmon Studio Spotlight</span>
         </div>
       </div>
     </div>

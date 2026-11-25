@@ -5,14 +5,12 @@ import {
   MessageSquare,
   Workflow,
   ListTodo,
-  TrendingUp,
   FolderKanban,
   Store,
   HelpCircle,
   Settings,
   MoreHorizontal,
   Pin,
-  Cpu,
   Check,
   Server,
   Smartphone,
@@ -21,10 +19,8 @@ import {
   Building2,
   Code2,
   Bot,
-  ShieldCheck,
   CheckSquare,
   Palette,
-  Terminal,
   ChevronRight,
   ChevronDown,
   PanelLeftClose,
@@ -36,7 +32,6 @@ import {
   Wand2,
   AppWindow,
   GitBranch,
-  Compass,
   EyeOff,
 } from 'lucide-react';
 import {
@@ -261,7 +256,6 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
       collapsible: false,
       items: [
         { id: 'agents', label: 'Central de Agentes', icon: Bot },
-        { id: 'models', label: 'Modelos & Hardware', icon: Cpu },
         { id: 'knowledge', label: 'Habilidades & Conhecimentos', icon: BookOpen },
       ],
     },
@@ -271,26 +265,19 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
       items: [
         { id: 'workspace', label: 'Projetos', icon: FolderKanban },
         { id: 'coding', label: 'IDE & Código', icon: Code2 },
-        { id: 'architecture', label: 'Agente de Arquitetura', icon: Compass },
         { id: 'app_builder', label: 'Construtor de Apps', icon: AppWindow },
         { id: 'github_import', label: 'Importar GitHub', icon: GitBranch },
-        { id: 'android_app', label: 'App Mobile Android', icon: Smartphone },
-        { id: 'brain_server', label: 'Cérebros & Servidor', icon: Server },
-        { id: 'companion', label: 'Voz & Companion', icon: Smartphone },
       ],
     },
     {
       title: 'Estúdios & Governança',
       collapsible: true,
       items: [
-        { id: 'security', label: 'Sentinela & Segurança', icon: ShieldCheck },
         { id: 'approvals', label: 'Aprovações', icon: CheckSquare, badge: pendingApprovalsCount },
-        { id: 'usage', label: 'Uso & Custos', icon: TrendingUp },
         { id: 'backend_studio', label: 'Backend Studio', icon: Wrench },
         { id: 'quality', label: 'Qualidade QA', icon: CheckSquare },
         { id: 'design', label: 'Design Studio', icon: Palette },
         { id: 'executive_report', label: 'Relatório ROI', icon: FileBarChart2 },
-        { id: 'server_logs', label: 'Logs do Servidor', icon: Terminal },
       ],
     },
   ];
@@ -307,7 +294,6 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
         { id: 'tasks', label: 'Tarefas', icon: ListTodo },
         { id: 'workflows', label: 'Monitor de Fluxos', icon: Workflow },
         { id: 'agents', label: 'Central de Agentes', icon: Bot },
-        { id: 'models', label: 'Modelos & Hardware', icon: Cpu },
         { id: 'knowledge', label: 'Habilidades & Conhecimentos', icon: BookOpen },
       ],
     },
@@ -369,7 +355,7 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
           onClick={() => onNavigate('overview')}
           aria-label="Ir para Visão Geral"
           className={collapsed ? 'btn btn-ghost btn-icon' : 'btn btn-ghost btn-sm btn-start'}
-          title={`${assistantName} AI Hub`}
+          title={`${assistantName} · Calmon Studio`}
         >
           <div
             style={{

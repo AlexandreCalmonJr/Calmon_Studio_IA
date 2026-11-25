@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Activity,
   ShieldCheck,
@@ -21,6 +21,7 @@ import {
   Cpu,
 } from 'lucide-react';
 import { SystemHealth, ApprovalRequestItem, getStatusLabel } from '../../types';
+import { fetchVoiceBriefing, VoiceBriefingResponse } from '../../services/api';
 import { ModelUsageCharts } from './ModelUsageCharts';
 import { getAccountStorageKey } from '../../services/accountScope';
 import { useAssistantIdentity } from '../../context/AssistantIdentityContext';
@@ -138,6 +139,21 @@ export const Overview: React.FC<OverviewProps> = ({
   const greeting = getTimeBasedGreeting(assistantName, profile.displayName);
   const starterPrompts = isSimpleMode ? SIMPLE_STARTER_PROMPTS : ENGINEERING_STARTER_PROMPTS;
   const [quickPrompt, setQuickPrompt] = useState('');
+  const [briefing, setBriefing] = useState<VoiceBriefingResponse | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetchVoiceBriefing()
+      .then((data) => {
+        if (active) setBriefing(data);
+      })
+      .catch(() => {
+        // offline fallback: briefing opcional
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
   const [onboardingDismissed, setOnboardingDismissed] = useState<boolean>(() => {
     try {
       return localStorage.getItem(getAccountStorageKey('jarvis_overview_onboarding_dismissed')) === 'true';
@@ -295,6 +311,25 @@ export const Overview: React.FC<OverviewProps> = ({
           </button>
         </form>
 
+        {briefing?.briefing_line && (
+          <div
+            style={{
+              fontSize: '0.8rem',
+              color: 'var(--text-secondary)',
+              padding: '8px 12px',
+              borderRadius: '10px',
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border-subtle)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+            }}
+          >
+            <Activity size={14} color="var(--accent-light)" style={{ flexShrink: 0 }} />
+            <span>{briefing.briefing_line}</span>
+          </div>
+        )}
+
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Sugestões rápidas:</span>
           {starterPrompts.map((item) => (
@@ -349,10 +384,10 @@ export const Overview: React.FC<OverviewProps> = ({
         </section>
       )}
 
-      {/* Guia de Primeiros Passos (dispensável) */}
-      {!onboardingDismissed && (
+      {/* Guia de Primeiros Passos (apenas no Modo Simples, dispensável) */}
+      {isSimpleMode && !onboardingDismissed && (
         <section
-          aria-label="Primeiros passos no JARVIS"
+          aria-label="Primeiros passos no Calmon Studio"
           className="glass-panel"
           style={{
             padding: '16px 20px',

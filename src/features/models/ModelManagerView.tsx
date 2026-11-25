@@ -249,8 +249,8 @@ export const ModelManagerView: React.FC = () => {
   return (
     <div className="jarvis-page-shell">
       <PageHeader
-        title="Central de Modelos & Hardware"
-        subtitle="Calibre GPU e RAM do seu notebook, gerencie Ollama, Hugging Face e Gemini Online e compare respostas na Arena."
+        title="Modelos & Hardware"
+        subtitle="Calibre GPU e RAM do seu computador, gerencie Ollama, Hugging Face e provedores na nuvem."
         meta={[
           <span key="hw-vram" className="jarvis-tabular">
             {activeProfile ? `${activeProfile.gpu_name} · ${activeProfile.vram_gb} GB VRAM` : `${localModelsCount} modelos locais`}
@@ -259,7 +259,7 @@ export const ModelManagerView: React.FC = () => {
             key="hybrid-status"
             style={{ color: geminiConnected ? 'var(--info-text)' : 'var(--success-text)', fontWeight: 600 }}
           >
-            {geminiConnected ? 'Motor Híbrido (Local + Gemini)' : 'Modo 100% Local'}
+            {geminiConnected ? 'Motor Híbrido (Local + Nuvem)' : 'Modo 100% Local'}
           </span>,
           <span
             key="hf-status"

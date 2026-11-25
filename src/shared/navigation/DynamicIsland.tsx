@@ -11,7 +11,7 @@ interface DynamicIslandProps {
 }
 
 export const DynamicIsland: React.FC<DynamicIslandProps> = ({
-  activeAgentName = 'JARVIS AI Hub',
+  activeAgentName = 'Calmon Studio',
   systemStatus,
   onOpenVoice,
   variant = 'inline',

@@ -55,7 +55,7 @@ test('sanitizeCustomPackInput builds valid custom pack and merges into catalog',
     {
       name: 'Pacote Dados & Analytics',
       category: 'engineering',
-      tabs: ['usage', 'executive_report', 'invalid_tab_xyz'],
+      tabs: ['design', 'executive_report', 'invalid_tab_xyz'],
       agents: [
         {
           proper_name: 'Clara Dados',
@@ -77,7 +77,7 @@ test('sanitizeCustomPackInput builds valid custom pack and merges into catalog',
 
   assert.equal(custom.id, 'pacote_dados_analytics');
   assert.equal(custom.is_custom, true);
-  assert.deepEqual(custom.tabs, ['usage', 'executive_report']);
+  assert.deepEqual(custom.tabs, ['design', 'executive_report']);
   assert.equal(custom.agents[0].handle, '@dados');
   assert.equal(custom.study_tracks.length, 1);
 

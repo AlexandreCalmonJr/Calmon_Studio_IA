@@ -475,9 +475,9 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
       <main style={styles.screen}>
         <section style={styles.panel}>
           <div style={styles.brandRow}>
-            <div style={styles.mark}>J</div>
+            <div style={styles.mark}>C</div>
             <div>
-              <div style={styles.brand}>JARVIS AI HUB</div>
+              <div style={styles.brand}>CALMON STUDIO</div>
               <div style={styles.brandSub}>Hub pessoal e multi-agentes</div>
             </div>
           </div>
@@ -521,9 +521,9 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
         <section style={styles.panel} className="jarvis-auth-panel" aria-labelledby="login-title">
           {/* Brand Header */}
           <div style={styles.brandRow}>
-            <div style={styles.mark}>J</div>
+            <div style={styles.mark}>C</div>
             <div>
-              <div style={styles.brand}>JARVIS AI HUB</div>
+              <div style={styles.brand}>CALMON STUDIO</div>
               <div style={styles.brandSub}>Espaço inteligente, modular e amigável</div>
             </div>
           </div>

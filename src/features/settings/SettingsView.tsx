@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import QRCode from 'qrcode';
 import {
   Settings,
@@ -29,6 +29,10 @@ import {
   Server,
   Volume2,
   X,
+  ShieldCheck,
+  TrendingUp,
+  Compass,
+  Radio,
 } from 'lucide-react';
 import { getUserProfile, UserProfileData } from '../../shared/common/UserProfileModal';
 import { notify } from '../../shared/common/Toast';
@@ -69,17 +73,62 @@ import {
   saveSidebarHidden,
 } from '../../services/navigationShell';
 
+const CompanionHubView = lazy(() =>
+  import('../companion/CompanionHubView').then((m) => ({ default: m.CompanionHubView }))
+);
+const SecurityCenterView = lazy(() =>
+  import('../security/SecurityCenterView').then((m) => ({ default: m.SecurityCenterView }))
+);
+const AndroidMobileHubView = lazy(() =>
+  import('../mobile/AndroidMobileHubView').then((m) => ({ default: m.AndroidMobileHubView }))
+);
+const ModelManagerView = lazy(() =>
+  import('../models/ModelManagerView').then((m) => ({ default: m.ModelManagerView }))
+);
+const BrainServerHubView = lazy(() =>
+  import('../brain/BrainServerHubView').then((m) => ({ default: m.BrainServerHubView }))
+);
+const ServerLogsView = lazy(() =>
+  import('../logs/ServerLogsView').then((m) => ({ default: m.ServerLogsView }))
+);
+const UsageAnalyticsView = lazy(() =>
+  import('../usage/UsageAnalyticsView').then((m) => ({ default: m.UsageAnalyticsView }))
+);
+const ArchitectureAgentView = lazy(() =>
+  import('../architecture/ArchitectureAgentView').then((m) => ({ default: m.ArchitectureAgentView }))
+);
+
+const EMBEDDED_SETTINGS_TABS = new Set([
+  'providers',
+  'companion',
+  'security',
+  'android_app',
+  'brain_server',
+  'server_logs',
+  'usage',
+  'architecture',
+]);
+
 interface SettingsViewProps {
   initialSubTab?: string;
   onNavigate?: (tab: string) => void;
+  onOpenVoiceHud?: () => void;
+  onRefreshSecurity?: () => void;
+  onAskArchitect?: (prompt: string) => void;
+  canManagePacks?: boolean;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
   initialSubTab = 'general',
   onNavigate,
+  onOpenVoiceHud,
+  onRefreshSecurity,
+  onAskArchitect,
+  canManagePacks = false,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<string>(initialSubTab);
   const [searchTerm, setSearchTerm] = useState('');
+  const [showAdvancedInSimple, setShowAdvancedInSimple] = useState(false);
 
   // Configurações Gerais
   const [sendShortcut, setSendShortcut] = useState<'enter' | 'ctrl_enter'>('enter');
@@ -536,6 +585,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     </span>
   );
 
+  const isAdvancedVisible = identity.experienceMode !== 'simple' || showAdvancedInSimple;
+
   const MENU_SECTIONS = [
     {
       title: 'Preferências',
@@ -557,14 +608,34 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     {
       title: 'Este computador',
       items: [
-        { id: 'providers', label: 'Provedores de IA', icon: Cpu },
+        { id: 'providers', label: 'Modelos & Provedores', icon: Cpu },
         { id: 'behavior', label: 'Comportamento do app', icon: Power },
-        { id: 'island', label: 'Dynamic Island', icon: Layers },
+        ...(isAdvancedVisible
+          ? [
+              { id: 'island', label: 'Dynamic Island', icon: Layers },
+              { id: 'computer', label: 'Uso do computador', icon: Cpu },
+            ]
+          : []),
         { id: 'dock', label: 'Dock de agentes', icon: Sparkles },
-        { id: 'computer', label: 'Uso do computador', icon: Cpu },
         { id: 'updates', label: 'Atualizações', icon: RefreshCw },
       ],
     },
+    ...(isAdvancedVisible
+      ? [
+          {
+            title: 'Sistema & Infraestrutura',
+            items: [
+              { id: 'companion', label: 'Voz & Companion', icon: Radio },
+              { id: 'security', label: 'Sentinela & Segurança', icon: ShieldCheck },
+              { id: 'android_app', label: 'App Mobile (Android)', icon: Smartphone },
+              { id: 'brain_server', label: 'Cérebro & Servidor', icon: Server },
+              { id: 'server_logs', label: 'Logs & Métricas', icon: Terminal },
+              { id: 'usage', label: 'Uso e Custos', icon: TrendingUp },
+              { id: 'architecture', label: 'Arquitetura', icon: Compass },
+            ],
+          },
+        ]
+      : []),
   ];
 
   const normalizedSearch = searchTerm.trim().toLowerCase();
@@ -640,30 +711,50 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </nav>
 
         <div className="jarvis-settings-nav__footer">
-          <button
-            type="button"
-            onClick={() => setActiveSubTab('server')}
-            aria-current={activeSubTab === 'server' ? 'page' : undefined}
-            className={`jarvis-subnav-btn ${activeSubTab === 'server' ? 'is-active' : ''}`}
-          >
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '9px', minWidth: 0 }}>
-              <Server
-                size={15}
-                color={activeSubTab === 'server' ? 'var(--accent-light)' : 'var(--text-muted)'}
-                style={{ flexShrink: 0 }}
-              />
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                Servidor & Diagnóstico
+          {identity.experienceMode === 'simple' && (
+            <button
+              type="button"
+              onClick={() => setShowAdvancedInSimple((prev) => !prev)}
+              className="jarvis-subnav-btn"
+              style={{ marginBottom: '2px' }}
+            >
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '9px', minWidth: 0 }}>
+                <Settings size={15} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {showAdvancedInSimple ? 'Ocultar avançadas' : 'Opções avançadas'}
+                </span>
               </span>
-            </span>
-            <ChevronRight size={13} color="var(--text-muted)" />
-          </button>
+            </button>
+          )}
+          {isAdvancedVisible && (
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('server')}
+              aria-current={activeSubTab === 'server' ? 'page' : undefined}
+              className={`jarvis-subnav-btn ${activeSubTab === 'server' ? 'is-active' : ''}`}
+            >
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '9px', minWidth: 0 }}>
+                <Server
+                  size={15}
+                  color={activeSubTab === 'server' ? 'var(--accent-light)' : 'var(--text-muted)'}
+                  style={{ flexShrink: 0 }}
+                />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  Servidor & Diagnóstico
+                </span>
+              </span>
+              <ChevronRight size={13} color="var(--text-muted)" />
+            </button>
+          )}
         </div>
       </aside>
 
       {/* Conteúdo Principal */}
       <main className="jarvis-settings-content">
-        <div className="jarvis-settings-container">
+        <div
+          className="jarvis-settings-container"
+          style={EMBEDDED_SETTINGS_TABS.has(activeSubTab) ? { maxWidth: 'none' } : undefined}
+        >
           {/* ================================================================= */}
           {/* ABA: GERAL                                                        */}
           {/* ================================================================= */}
@@ -803,7 +894,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <div className="jarvis-setting-row__info">
                       <div className="jarvis-setting-row__title">Vincular telemetria à minha conta</div>
                       <div className="jarvis-setting-row__desc">
-                        Ativado: os metadados de uso e confiabilidade são associados à sua conta local no JARVIS AI Hub, incluindo ferramentas acionadas e resumo diário. Desativado: apenas métricas básicas de turnos e tokens são registradas de forma anônima.
+                        Ativado: os metadados de uso e confiabilidade são associados à sua conta local no Calmon Studio, incluindo ferramentas acionadas e resumo diário. Desativado: apenas métricas básicas de turnos e tokens são registradas de forma anônima.
                       </div>
                     </div>
                     <div className="jarvis-setting-row__control">
@@ -1180,7 +1271,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                         <strong style={{ fontSize: '0.92rem', color: 'var(--text-primary)' }}>
-                          Servidor JARVIS Hub na Rede Local
+                          Servidor Calmon Studio na Rede Local
                         </strong>
                         <span
                           style={{
@@ -1581,64 +1672,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           )}
 
           {/* ================================================================= */}
-          {/* ABA: PROVEDORES DE IA                                             */}
+          {/* ABA UNIFICADA: MODELOS & PROVEDORES DE IA                         */}
           {/* ================================================================= */}
           {activeSubTab === 'providers' && (
             <>
               <PageHeader
                 icon={<Cpu size={18} />}
-                title="Provedores de IA & Modelos"
-                subtitle="Gerencie os provedores conectados, modelos locais instalados e chaves de APIs na nuvem."
-                actions={
-                  onNavigate ? (
-                    <button
-                      type="button"
-                      onClick={() => onNavigate('models')}
-                      className="btn btn-secondary btn-sm"
-                    >
-                      <span>Abrir Gestor de Modelos</span>
-                    </button>
-                  ) : undefined
-                }
+                title="Modelos & Provedores de IA"
+                subtitle="Configure chaves de API (OpenAI, Anthropic, Gemini, DeepSeek, Groq), Ollama local e hardware."
               />
-
-              <section className="jarvis-settings-card">
-                <div className="jarvis-setting-row">
-                  <div className="jarvis-setting-row__info">
-                    <div className="jarvis-setting-row__title">Provedor Padrão de Inferência</div>
-                    <div className="jarvis-setting-row__desc">
-                      Utilizado para orquestração automática e conversas do chat.
-                    </div>
-                  </div>
-                  <div
-                    className="jarvis-settings-subcard"
-                    style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', padding: '8px 12px' }}
-                  >
-                    Configurado por conta em Modelos → Rotas de Agentes
-                  </div>
-                </div>
-              </section>
 
               <section className="jarvis-settings-section">
                 <h3 className="jarvis-settings-section__title">Runtimes Locais</h3>
                 <div className="jarvis-settings-card">
                   <div className="jarvis-setting-row">
                     <div className="jarvis-setting-row__info">
-                      <div className="jarvis-setting-row__title">OpenCode CLI</div>
-                      <div className="jarvis-setting-row__desc">
-                        Disponível neste computador · Motor local integrado
-                      </div>
-                    </div>
-                    <span style={{ fontSize: '0.76rem', fontWeight: 600, color: '#4ade80' }}>
-                      Integrado
-                    </span>
-                  </div>
-
-                  <div className="jarvis-setting-row">
-                    <div className="jarvis-setting-row__info">
                       <div className="jarvis-setting-row__title">Ollama Local Daemon</div>
                       <div className="jarvis-setting-row__desc">
-                        <code>http://localhost:11434</code> · Modelos locais configurados no Gestor de Modelos
+                        <code>http://localhost:11434</code> · Modelos locais configurados abaixo
                       </div>
                     </div>
                     <button
@@ -1654,13 +1705,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </section>
 
               <section className="jarvis-settings-section">
-                <h3 className="jarvis-settings-section__title">Chaves de API de Terceiros (Anthropic, OpenAI, DeepSeek)</h3>
+                <h3 className="jarvis-settings-section__title">Chaves de API de Terceiros (Anthropic, OpenAI, DeepSeek, Groq)</h3>
                 <ThirdPartyApiKeysCard />
               </section>
 
               <section className="jarvis-settings-section">
-                <h3 className="jarvis-settings-section__title">Gerenciador Avançado do Cofre (KeyVault)</h3>
+                <h3 className="jarvis-settings-section__title">Cofre de Chaves (KeyVault)</h3>
                 <KeyVaultManager />
+              </section>
+
+              <section className="jarvis-settings-section">
+                <Suspense
+                  fallback={
+                    <div className="jarvis-settings-card" style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                      A carregar Modelos &amp; Hardware...
+                    </div>
+                  }
+                >
+                  <ModelManagerView />
+                </Suspense>
               </section>
             </>
           )}
@@ -2093,7 +2156,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <PageHeader
                 icon={<CreditCard size={18} />}
                 title="Cobrança & Quotas"
-                subtitle="JARVIS AI Hub é auto-hospedado: execute modelos locais no Ollama ou use chaves próprias no cofre sem cobranças da plataforma."
+                subtitle="Calmon Studio é auto-hospedado: execute modelos locais no Ollama ou use chaves próprias no cofre sem cobranças da plataforma."
               />
 
               <div className="jarvis-callout jarvis-callout--info">
@@ -2242,7 +2305,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <PageHeader
                 icon={<RefreshCw size={18} />}
                 title="Atualizações do Sistema"
-                subtitle="JARVIS AI Hub v3.0.1 · O estado de atualização não é verificado automaticamente nesta instalação."
+                subtitle="Calmon Studio v3.0.1 · O estado de atualização não é verificado automaticamente nesta instalação."
               />
 
               <section className="jarvis-settings-card">
@@ -2326,7 +2389,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <PageHeader
                 icon={<Server size={18} />}
                 title="Servidor & Diagnóstico"
-                subtitle="Instância local do JARVIS Hub executando em FastAPI e SQLite."
+                subtitle="Instância local do Calmon Studio executando em Node.js e SQLite."
                 meta={[
                   <span
                     key="fastapi-status"
@@ -2624,15 +2687,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         <option value="ERROR">ERROR</option>
                       </select>
 
-                      {onNavigate && (
-                        <button
-                          type="button"
-                          onClick={() => onNavigate('server_logs')}
-                          className="btn btn-secondary btn-sm"
-                        >
-                          <span>Ver Logs ao Vivo</span>
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => setActiveSubTab('server_logs')}
+                        className="btn btn-secondary btn-sm"
+                      >
+                        <span>Ver Logs ao Vivo</span>
+                      </button>
 
                       <button
                         type="button"
@@ -2647,6 +2708,44 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </div>
               </section>
             </>
+          )}
+
+          {EMBEDDED_SETTINGS_TABS.has(activeSubTab) && (
+            <Suspense
+              fallback={
+                <div
+                  className="jarvis-settings-card"
+                  style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}
+                >
+                  A carregar módulo...
+                </div>
+              }
+            >
+              {activeSubTab === 'companion' && (
+                <CompanionHubView
+                  onOpenVoiceHud={onOpenVoiceHud || (() => {})}
+                  onNavigate={onNavigate || (() => {})}
+                />
+              )}
+              {activeSubTab === 'security' && (
+                <SecurityCenterView onRefresh={onRefreshSecurity || (() => {})} />
+              )}
+              {activeSubTab === 'android_app' && <AndroidMobileHubView />}
+              {activeSubTab === 'brain_server' && (
+                <BrainServerHubView
+                  onNavigate={onNavigate}
+                  canManagePacks={canManagePacks}
+                />
+              )}
+              {activeSubTab === 'server_logs' && <ServerLogsView />}
+              {activeSubTab === 'usage' && <UsageAnalyticsView />}
+              {activeSubTab === 'architecture' && (
+                <ArchitectureAgentView
+                  onAskArchitect={onAskArchitect || (() => {})}
+                  onNavigate={onNavigate || (() => {})}
+                />
+              )}
+            </Suspense>
           )}
         </div>
       </main>

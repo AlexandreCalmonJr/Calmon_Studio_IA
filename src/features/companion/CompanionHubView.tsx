@@ -35,7 +35,6 @@ import {
 } from '../../services/api';
 import { useAssistantIdentity } from '../../context/AssistantIdentityContext';
 import { PageHeader } from '../../shared/layout/PageHeader';
-import { PWAInstallButton } from '../../shared/pwa/PWAInstallButton';
 import { useOfflineQueue, usePWAInstall } from '../../shared/pwa/usePWAInstall';
 import { notify } from '../../shared/common/Toast';
 
@@ -266,8 +265,8 @@ export const CompanionHubView: React.FC<CompanionHubViewProps> = ({
     <div className="jarvis-page-shell">
       <PageHeader
         icon={<Smartphone size={18} />}
-        title="Voz, PWA & Desktop Companion"
-        subtitle={`Experiência "Homem de Ferro" completa: comando de voz "Ei ${assistantName}", pareamento PC ↔ Celular via QR Code, Web Push/Telegram e aplicativo instalável offline.`}
+        title="Voz & Desktop Companion"
+        subtitle={`Comando de voz "Ei ${assistantName}", pareamento PC ↔ Celular via QR Code, Web Push/Telegram e fila offline.`}
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
             <button type="button" onClick={onOpenVoiceHud} className="btn btn-primary btn-sm">
@@ -832,10 +831,6 @@ export const CompanionHubView: React.FC<CompanionHubViewProps> = ({
                       </strong>
                     </div>
                   ))}
-                </div>
-
-                <div>
-                  <PWAInstallButton showFallbackInfo />
                 </div>
               </section>
 

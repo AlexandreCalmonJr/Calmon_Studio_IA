@@ -27,6 +27,7 @@ import {
   FileCode2,
   Sliders,
 } from 'lucide-react';
+import { PageHeader } from '../../shared/layout/PageHeader';
 import {
   AndroidMobileCapabilities,
   AndroidMobileConfig,
@@ -307,82 +308,28 @@ export const AndroidMobileHubView: React.FC = () => {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingBottom: '36px' }}>
-      {/* Cabeçalho Principal */}
-      <section
-        className="jarvis-settings-card"
-        style={{
-          padding: '22px 24px',
-          display: 'flex',
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '18px',
-          background:
-            'linear-gradient(135deg, rgba(249, 115, 22, 0.09) 0%, rgba(15, 19, 28, 0.96) 55%, rgba(15, 19, 28, 1) 100%)',
-          borderColor: 'rgba(249, 115, 22, 0.28)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', flex: '1 1 420px', maxWidth: '660px' }}>
-          <div
-            style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '12px',
-              background: 'linear-gradient(135deg, #f97316 0%, #c2410c 100%)',
-              color: '#ffffff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-              boxShadow: '0 8px 20px rgba(249, 115, 22, 0.28)',
-            }}
-          >
-            <Smartphone size={22} />
-          </div>
-          <div>
-            <h1
-              style={{
-                margin: 0,
-                fontSize: '1.28rem',
-                fontWeight: 700,
-                color: 'var(--text-primary)',
-                letterSpacing: '-0.02em',
-              }}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', paddingBottom: '36px' }}>
+      <PageHeader
+        icon={<Smartphone size={18} />}
+        title={`${appName} — App Mobile Android`}
+        subtitle="Conecte seu celular por QR Code e baixe o projeto Capacitor 6 + Kotlin pronto para gerar o APK/AAB."
+        actions={
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+            <button
+              type="button"
+              disabled={downloadingZip}
+              onClick={() => void handleDownloadAndroidZip()}
+              className="btn btn-primary btn-sm"
             >
-              {appName} — Aplicativo Android (.apk &amp; .aab)
-            </h1>
-            <p
-              style={{
-                margin: '6px 0 0',
-                fontSize: '0.88rem',
-                color: 'var(--text-secondary)',
-                lineHeight: 1.5,
-              }}
-            >
-              Conecte seu celular por <strong>QR Code sem digitação</strong>, gerencie dispositivos pareados e
-              baixe o projeto oficial <strong>Capacitor 6 + Kotlin/XML</strong> pronto para gerar o{' '}
-              <strong>APK instalável</strong> ou o <strong>AAB da Play Store</strong>.
-            </p>
+              {downloadingZip ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
+              <span>Baixar Projeto Android (.zip)</span>
+            </button>
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+              {files.length || 10} arquivos · {formatKb(zipSizeBytes)} · {packageId}
+            </span>
           </div>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
-          <button
-            type="button"
-            disabled={downloadingZip}
-            onClick={() => void handleDownloadAndroidZip()}
-            className="btn btn-primary"
-          >
-            {downloadingZip ? <Loader2 size={15} className="spin" /> : <Download size={15} />}
-            <span>Baixar Projeto Android (.zip)</span>
-          </button>
-          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-            {files.length || 10} arquivos nativos · {formatKb(zipSizeBytes)} · {packageId}
-          </span>
-        </div>
-      </section>
+        }
+      />
 
       {errorMsg && (
         <div

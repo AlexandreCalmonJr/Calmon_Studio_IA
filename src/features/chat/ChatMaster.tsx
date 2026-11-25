@@ -7,7 +7,7 @@ import { ArtifactCanvas, CanvasArtifact } from './ArtifactCanvas';
 import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
 import { ChatProjectModal } from './ChatProjectModal';
-import { getSessionMessagesLocally, saveSessionMessagesLocally } from './ChatHistoryDrawer';
+import { getLocalSessionsCatalog, getSessionMessagesLocally, saveSessionMessagesLocally } from './ChatHistoryDrawer';
 import { OpenBotConversationRail } from './OpenBotConversationRail';
 import { OpenBotChatHeader, ChatTabItem } from './OpenBotChatHeader';
 import { getAccountStorageKey } from '../../services/accountScope';
@@ -219,6 +219,7 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
     }
 
     // 2. Busca do backend (SQLite) para garantir integridade e mensagens persistidas
+    let reconstructedMessages: ChatMessage[] = [];
     try {
       const details = await fetchChatSessionDetails(sid);
       if (details) {
@@ -273,6 +274,7 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
         }
 
         if (reconstructed.length > 0) {
+          reconstructedMessages = reconstructed;
           setMessages(reconstructed);
           saveSessionMessagesLocally(sid, reconstructed);
         } else if (!local || local.length === 0) {
@@ -286,7 +288,7 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
       }
     }
 
-    // Atualiza aba da conversa com nome amigável para agentes reais
+    // Atualiza aba da conversa com nome amigável (agente, catálogo local, 1ª mensagem ou 'Novo Chat')
     const agentKey = sid.startsWith('agent_')
       ? sid.slice(6)
       : sid.startsWith('agent-')
@@ -296,9 +298,22 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
       ? myAgents.find((a) => a.role === agentKey)
       : null;
 
+    const catalogTitle = getLocalSessionsCatalog().find((s) => s.id === sid)?.title;
+    const firstUserMsg = (
+      reconstructedMessages.find((m) => m.sender === 'user')?.text ||
+      local?.find((m) => m.sender === 'user')?.text ||
+      ''
+    ).trim();
+    const derivedMsgTitle = firstUserMsg
+      ? firstUserMsg.slice(0, 28) + (firstUserMsg.length > 28 ? '...' : '')
+      : '';
+
     const resolvedTitle =
-      titleHint ||
-      (matchedAgent ? getAgentProperName(matchedAgent) : agentKey ? agentKey.toUpperCase() : 'Chat ' + sid.substring(0, 8));
+      (titleHint && !titleHint.startsWith('Chat sess_') ? titleHint : '') ||
+      (matchedAgent ? getAgentProperName(matchedAgent) : agentKey ? agentKey.toUpperCase() : '') ||
+      (catalogTitle && !catalogTitle.startsWith('Chat sess_') ? catalogTitle : '') ||
+      derivedMsgTitle ||
+      'Novo Chat';
 
     setTabs((prev) => {
       const exists = prev.find((t) => t.id === sid);
@@ -363,7 +378,12 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
     // Atualiza título da aba ativa caso ainda seja o nome genérico inicial
     setTabs((prev) =>
       prev.map((t) =>
-        t.id === activeTabId && (t.title === assistantName || t.title === 'JARVIS Master' || t.title === 'Novo Chat' || t.title === 'Calmon Dev')
+        t.id === activeTabId &&
+        (t.title === assistantName ||
+          t.title === 'JARVIS Master' ||
+          t.title === 'Novo Chat' ||
+          t.title === 'Calmon Dev' ||
+          t.title.startsWith('Chat sess_'))
           ? { ...t, title: textToSend.slice(0, 24) + (textToSend.length > 24 ? '...' : '') }
           : t
       )

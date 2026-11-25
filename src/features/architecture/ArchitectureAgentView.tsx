@@ -17,6 +17,7 @@ import {
   fetchArchitectureAnalysis,
   type ProjectArchitectureReport,
 } from '../../services/api/packs';
+import { PageHeader } from '../../shared/layout/PageHeader';
 
 interface ArchitectureAgentViewProps {
   onAskArchitect: (prompt: string) => void;
@@ -103,55 +104,44 @@ export const ArchitectureAgentView: React.FC<ArchitectureAgentViewProps> = ({
 
   return (
     <div className="jarvis-arch-page">
-      <header className="jarvis-arch-header">
-        <div className="jarvis-arch-header-copy">
-          <div className="jarvis-kicker-text">
-            <span>Agente de Arquitetura</span>
-            <span aria-hidden="true"> · </span>
-            <span className="mono">Vetor (@arquiteto)</span>
-            <span aria-hidden="true"> · </span>
-            <span>Inspeção Real do Repositório</span>
+      <PageHeader
+        icon={<Compass size={18} />}
+        title="Diagnóstico Arquitetural & Plano Poliglota"
+        subtitle="Inspeção real da estrutura do projeto, padrões implementados e recomendações de evolução."
+        actions={
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={loading}
+              onClick={() => void runAnalysis()}
+            >
+              {loading ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
+              <span>{loading ? 'Analisando...' : 'Reanalisar'}</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() =>
+                onAskArchitect(
+                  '@arquiteto Gere um Blueprint C4 atualizado do repositório atual considerando os módulos instalados e a evolução para arquitetura poliglota.'
+                )
+              }
+            >
+              <MessageSquare size={14} />
+              <span>Consultar @arquiteto</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => onNavigate('store')}
+            >
+              <Package size={14} />
+              <span>Loja</span>
+            </button>
           </div>
-          <h1 className="jarvis-arch-title">Diagnóstico Arquitetural & Plano Poliglota</h1>
-          <p className="jarvis-arch-subtitle">
-            Inspeciona a árvore real de diretórios e arquivos do projeto, identifica padrões de
-            engenharia já implementados e recomenda evoluções nos módulos, pacotes e camadas
-            poliglotas (Node.js/TS, SQLite WAL, Postgres/Supabase e Workers Python/Go).
-          </p>
-        </div>
-
-        <div className="jarvis-arch-header-actions">
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={loading}
-            onClick={() => void runAnalysis()}
-          >
-            {loading ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />}
-            <span>{loading ? 'Analisando projeto...' : 'Reanalisar Estrutura'}</span>
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() =>
-              onAskArchitect(
-                '@arquiteto Gere um Blueprint C4 atualizado do repositório atual considerando os módulos instalados e a evolução para arquitetura poliglota.'
-              )
-            }
-          >
-            <MessageSquare size={16} />
-            <span>Consultar @arquiteto</span>
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() => onNavigate('store')}
-          >
-            <Package size={16} />
-            <span>Loja de Pacotes</span>
-          </button>
-        </div>
-      </header>
+        }
+      />
 
       {error && (
         <div className="jarvis-inline-alert is-error" role="alert">

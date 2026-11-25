@@ -88,7 +88,6 @@ export interface SelectableModuleTab {
 }
 
 export const ALL_MODULAR_TABS_CATALOG: readonly SelectableModuleTab[] = [
-  { id: 'architecture', label: 'Agente de Arquitetura', group: 'Engenharia & Arquitetura' },
   { id: 'backend_studio', label: 'Backend Studio', group: 'Engenharia & Arquitetura' },
   { id: 'design', label: 'Design Studio', group: 'Engenharia & Arquitetura' },
   { id: 'quality', label: 'Qualidade QA', group: 'Engenharia & Arquitetura' },
@@ -97,17 +96,10 @@ export const ALL_MODULAR_TABS_CATALOG: readonly SelectableModuleTab[] = [
   { id: 'workspace', label: 'Projetos', group: 'Desenvolvimento' },
   { id: 'github_import', label: 'Importar GitHub', group: 'Desenvolvimento' },
   { id: 'app_builder', label: 'Construtor de Apps', group: 'Desenvolvimento' },
-  { id: 'security', label: 'Sentinela & Segurança', group: 'Segurança & Governança' },
   { id: 'approvals', label: 'Aprovações', group: 'Segurança & Governança' },
-  { id: 'server_logs', label: 'Logs do Servidor', group: 'Segurança & Governança' },
-  { id: 'usage', label: 'Uso & Custos', group: 'Segurança & Governança' },
   { id: 'creative_studio', label: 'Estúdio Criativo', group: 'Produtividade' },
   { id: 'office', label: 'Escritório Vivo', group: 'Produtividade' },
-  { id: 'models', label: 'Modelos & Chaves', group: 'Produtividade' },
   { id: 'skills', label: 'Habilidades', group: 'Produtividade' },
-  { id: 'android_app', label: 'App Mobile Android', group: 'Voz & Local' },
-  { id: 'companion', label: 'Voz & Companion', group: 'Voz & Local' },
-  { id: 'brain_server', label: 'Cérebros & Servidor', group: 'Voz & Local' },
   { id: 'advisor', label: 'Hardware', group: 'Voz & Local' },
 ] as const;
 
@@ -137,6 +129,13 @@ export const CORE_ALWAYS_VISIBLE_TABS: readonly string[] = [
   'store',
   'pack_studio',
   'architecture',
+  'companion',
+  'security',
+  'android_app',
+  'models',
+  'brain_server',
+  'server_logs',
+  'usage',
   'learning',
   'settings',
   'not_found',
@@ -368,12 +367,9 @@ export const MODULE_PACK_CATALOG: readonly ModulePackDefinition[] = [
     category: 'security',
     category_label: MODULE_PACK_CATEGORY_LABELS.security,
     version: '1.1.0',
-    tabs: ['security', 'approvals', 'server_logs', 'usage'],
+    tabs: ['approvals'],
     tab_labels: {
-      security: 'Sentinela & Segurança',
       approvals: 'Aprovações',
-      server_logs: 'Logs do Servidor',
-      usage: 'Uso & Custos',
     },
     agents: [
       {
@@ -421,11 +417,10 @@ export const MODULE_PACK_CATALOG: readonly ModulePackDefinition[] = [
     category: 'productivity',
     category_label: MODULE_PACK_CATEGORY_LABELS.productivity,
     version: '1.1.0',
-    tabs: ['creative_studio', 'office', 'models', 'skills'],
+    tabs: ['creative_studio', 'office', 'skills'],
     tab_labels: {
       creative_studio: 'Estúdio Criativo',
       office: 'Escritório Vivo',
-      models: 'Modelos & Chaves',
       skills: 'Habilidades',
     },
     agents: [
@@ -473,11 +468,8 @@ export const MODULE_PACK_CATALOG: readonly ModulePackDefinition[] = [
     category: 'infrastructure',
     category_label: MODULE_PACK_CATEGORY_LABELS.infrastructure,
     version: '1.0.0',
-    tabs: ['android_app', 'companion', 'brain_server', 'advisor'],
+    tabs: ['advisor'],
     tab_labels: {
-      android_app: 'App Mobile Android',
-      companion: 'Voz & Companion',
-      brain_server: 'Cérebros & Servidor',
       advisor: 'Hardware',
     },
     agents: [

@@ -410,7 +410,7 @@ export function useChatStream(
       try {
         mdText = await exportChatSessionMarkdown(sessionId);
       } catch {
-        mdText = `# 📜 Conversa JARVIS AI Hub\n**Sessão:** \`${sessionId}\`\n\n---\n\n` +
+        mdText = `# 📜 Conversa Calmon Studio\n**Sessão:** \`${sessionId}\`\n\n---\n\n` +
           messages.map((m) => `### ${m.sender === 'user' ? '👤 Usuário' : '🤖 JARVIS'} (${m.timestamp}):\n${m.text}\n`).join('\n---\n\n');
       }
 

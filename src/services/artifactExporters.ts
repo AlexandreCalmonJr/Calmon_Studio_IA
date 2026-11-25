@@ -16,7 +16,7 @@ export async function exportArtifactToPptx(artifact: StructuredArtifactPayload):
   const PptxGenJS = (typeof pptxModule.default === 'function' ? pptxModule.default : (pptxModule.default as any)?.default || pptxModule) as any;
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_16x9';
-  pptx.author = artifact.author || 'JARVIS AI Hub';
+  pptx.author = artifact.author || 'Calmon Studio';
   pptx.title = artifact.title;
 
   const slides = artifact.slides && artifact.slides.length > 0
@@ -58,7 +58,7 @@ export async function exportArtifactToPptx(artifact: StructuredArtifactPayload):
     color: '9CA3AF',
     fontFace: 'Calibri',
   });
-  cover.addText(`${artifact.author || 'JARVIS AI Hub'} · ${new Date(artifact.created_at || Date.now()).toLocaleDateString('pt-BR')}`, {
+  cover.addText(`${artifact.author || 'Calmon Studio'} · ${new Date(artifact.created_at || Date.now()).toLocaleDateString('pt-BR')}`, {
     x: 0.7,
     y: 4.85,
     w: 8.0,
@@ -151,7 +151,7 @@ export async function exportArtifactToPdf(artifact: StructuredArtifactPayload): 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10.5);
   doc.text(
-    `${artifact.subtitle || 'Documento Gerado'}  ·  ${artifact.author || 'JARVIS AI Hub'}  ·  ${new Date(artifact.created_at || Date.now()).toLocaleDateString('pt-BR')}`,
+    `${artifact.subtitle || 'Documento Gerado'}  ·  ${artifact.author || 'Calmon Studio'}  ·  ${new Date(artifact.created_at || Date.now()).toLocaleDateString('pt-BR')}`,
     margin,
     104
   );

@@ -3,6 +3,7 @@ import { AuthGate } from './features/auth/AuthGate';
 import { PrimaryRail } from './shared/navigation/PrimaryRail';
 import { AgentDock } from './shared/navigation/AgentDock';
 import { DynamicIsland } from './shared/navigation/DynamicIsland';
+import { AiOrbButton, VOICE_HUD_STATE_EVENT, VOICE_HUD_TOGGLE_EVENT } from './shared/navigation/AiOrbButton';
 import { LaunchpadOverlay } from './shared/navigation/LaunchpadOverlay';
 import { LaunchpadGlyph } from './shared/navigation/NavIcon';
 import { SystemHealth, ApprovalRequestItem, AgentInfo } from './types';
@@ -16,7 +17,6 @@ import {
   CircleHelp,
   Plus,
   Mic,
-  Radio,
   LayoutDashboard,
   MessageSquare,
   Smartphone,
@@ -55,7 +55,7 @@ import {
   SIDEBAR_HIDDEN_UPDATED_EVENT,
   toggleDockFavorite,
 } from './services/navigationShell';
-import { OfflineIndicator, PWAInstallButton } from './shared/pwa/PWAInstallButton';
+import { OfflineIndicator } from './shared/pwa/PWAInstallButton';
 import { VoiceLiveHudModal } from './features/companion/VoiceLiveHudModal';
 import { ErrorBanner } from './shared/layout/StateFeedback';
 import { pathForTab, tabFromLocation } from './router';
@@ -289,7 +289,7 @@ const NotFoundView: React.FC<{ onGoHome: () => void }> = ({ onGoHome }) => (
       Página não encontrada
     </h1>
     <p style={{ maxWidth: '420px', fontSize: '0.9rem' }}>
-      Este endereço não corresponde a uma página disponível no JARVIS AI Hub.
+      Este endereço não corresponde a uma página disponível no Calmon Studio.
     </p>
     <button type="button" className="btn btn-primary" onClick={onGoHome}>
       Ir para a Visão Geral
@@ -378,6 +378,23 @@ const DashboardApp: React.FC = () => {
       setShowVoiceHud(true);
     },
   });
+
+  useEffect(() => {
+    const handleToggle = () => {
+      setPendingVoiceCommand(null);
+      setShowVoiceHud((prev) => !prev);
+    };
+    window.addEventListener(VOICE_HUD_TOGGLE_EVENT, handleToggle);
+    return () => window.removeEventListener(VOICE_HUD_TOGGLE_EVENT, handleToggle);
+  }, []);
+
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent(VOICE_HUD_STATE_EVENT, {
+        detail: { active: showVoiceHud || wakeWord.enabled },
+      })
+    );
+  }, [showVoiceHud, wakeWord.enabled]);
 
   useEffect(() => {
     setUserProfile(identityProfile);
@@ -955,13 +972,24 @@ const DashboardApp: React.FC = () => {
               </div>
             </div>
 
+            {/* Centro: Orb de IA animado com a letra C */}
+            <AiOrbButton
+              assistantName={assistantName}
+              active={showVoiceHud || wakeWord.enabled}
+              centered
+              onClick={() => {
+                setPendingVoiceCommand(null);
+                setShowVoiceHud((prev) => !prev);
+              }}
+            />
+
             {/* Direita: Telemetria Inline (DynamicIsland), Comando Ctrl+K, Ação Principal, Perfil */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
               {showDynamicIsland && !isSimpleMode && (
                 <div className="hide-mobile jarvis-topbar-hide-tablet">
                   <DynamicIsland
                     variant="inline"
-                    activeAgentName={`${assistantName} AI Hub`}
+                    activeAgentName="Calmon Studio"
                     systemStatus={{
                       cpu: systemResources?.cpu_percent ?? null,
                       memory: systemResources?.ram_percent ?? null,
@@ -970,45 +998,6 @@ const DashboardApp: React.FC = () => {
                   />
                 </div>
               )}
-
-              <div className="jarvis-topbar-hide-narrow">
-                <PWAInstallButton compact />
-              </div>
-
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPendingVoiceCommand(null);
-                    setShowVoiceHud(true);
-                  }}
-                  className="btn btn-secondary btn-sm"
-                  title={`Clique para falar agora com ${assistantName}`}
-                  aria-label={`Falar agora com ${assistantName}`}
-                  style={{ borderColor: 'var(--border-accent)', color: 'var(--accent-light)' }}
-                >
-                  <Mic size={13} />
-                  <span className="hide-mobile jarvis-topbar-hide-narrow">Ei {assistantName}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={wakeWord.toggle}
-                  aria-pressed={wakeWord.enabled}
-                  className={`btn btn-icon-sm ${wakeWord.enabled ? 'btn-primary' : 'btn-ghost'}`}
-                  title={
-                    wakeWord.enabled
-                      ? `Escuta mãos-livres ativa: diga "Ei ${assistantName}" sem clicar`
-                      : `Ativar escuta contínua para chamar "Ei ${assistantName}" sem clicar`
-                  }
-                  aria-label={
-                    wakeWord.enabled
-                      ? `Pausar escuta contínua Ei ${assistantName}`
-                      : `Ativar escuta contínua Ei ${assistantName}`
-                  }
-                >
-                  <Radio size={14} />
-                </button>
-              </div>
 
               <button
                 type="button"
@@ -1353,7 +1342,15 @@ const DashboardApp: React.FC = () => {
                       onOpenProfile={() => setShowProfileModal(true)}
                     />
                   )}
-                  {activeTab === 'settings' && <SettingsView onNavigate={navigate} />}
+                  {activeTab === 'settings' && (
+                    <SettingsView
+                      onNavigate={navigate}
+                      onOpenVoiceHud={() => setShowVoiceHud(true)}
+                      onRefreshSecurity={loadData}
+                      onAskArchitect={handleStartChatFromOverview}
+                      canManagePacks={canManagePacks}
+                    />
+                  )}
                   {activeTab === 'companion' && (
                     <CompanionHubView
                       onOpenVoiceHud={() => setShowVoiceHud(true)}
@@ -1532,6 +1529,12 @@ const DashboardApp: React.FC = () => {
         onInitialCommandConsumed={() => setPendingVoiceCommand(null)}
         wakeWordEnabled={wakeWord.enabled}
         onToggleWakeWord={wakeWord.toggle}
+        onOpenChat={(prompt) => {
+          setShowVoiceHud(false);
+          setPendingVoiceCommand(null);
+          if (prompt) setPendingChatPrompt(prompt);
+          navigate('chat');
+        }}
       />
 
       {/* Navegação Inferior Mobile PWA (visível apenas abaixo de 768px) */}

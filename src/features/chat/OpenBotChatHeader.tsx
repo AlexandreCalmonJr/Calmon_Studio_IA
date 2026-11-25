@@ -12,6 +12,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { FormattedChatModel } from '../../services/chatModels';
+import { AiOrbButton } from '../../shared/navigation/AiOrbButton';
 
 export interface ChatTabItem {
   id: string;
@@ -94,6 +95,7 @@ export const OpenBotChatHeader: React.FC<OpenBotChatHeaderProps> = ({
 
   return (
     <header
+      className="openbot-chat-header"
       style={{
         height: 'calc(var(--topbar-height) - 4px)',
         margin: '10px 16px 0',
@@ -193,6 +195,9 @@ export const OpenBotChatHeader: React.FC<OpenBotChatHeaderProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Centro: Orb de IA animado com a letra C */}
+      <AiOrbButton centered />
 
       {/* Direita: Projeto, Seletor de Modelo e Exportação */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>

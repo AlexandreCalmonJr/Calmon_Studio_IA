@@ -23,6 +23,7 @@ import {
   X,
 } from 'lucide-react';
 import { notify } from '../../shared/common/Toast';
+import { AiOrbButton } from '../../shared/navigation/AiOrbButton';
 import {
   fetchAgents,
   fetchWorkflowsHub,
@@ -473,6 +474,7 @@ export const WorkflowCanvasView: React.FC = () => {
     >
       {/* Top Header: Switcher, Cron Schedule & Primary Run CTA */}
       <header
+        className="jarvis-workflow-header"
         style={{
           margin: '10px 16px 0',
           padding: '8px 16px',
@@ -489,6 +491,7 @@ export const WorkflowCanvasView: React.FC = () => {
           flexWrap: 'wrap',
           zIndex: 30,
           flexShrink: 0,
+          position: 'relative',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', minWidth: 0 }}>
@@ -633,6 +636,9 @@ export const WorkflowCanvasView: React.FC = () => {
             </label>
           </div>
         </div>
+
+        {/* Centro: Orb de IA animado com a letra C */}
+        <AiOrbButton centered />
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <button
