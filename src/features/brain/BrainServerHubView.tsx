@@ -7,6 +7,7 @@ import {
   BookOpen,
   Check,
   CheckCircle2,
+  Clock,
   Cloud,
   Code2,
   Copy,
@@ -60,10 +61,20 @@ import {
   type BrainSchemaResponse,
 } from '../../services/api/brainServer';
 import {
+  fetchModulePacks,
   fetchPackageUpdatesStatus,
+  PACKS_UPDATED_EVENT,
   PACK_UPDATES_CHANGED_EVENT,
+  type ModulePacksPayload,
   type VersionCheckReport,
 } from '../../services/api/packs';
+import type { ModulePackWithState } from '../../services/modulePackEngine';
+import {
+  evaluateSyncFreshness,
+  reconcileLocalPacksWithServerMetadata,
+  type SyncFreshnessState,
+  type UpdateBadgeState,
+} from '../../services/packageVersionEngine';
 
 import { BrainMemoryPanel } from './BrainMemoryPanel';
 import { BrainPythonLanesPanel } from './BrainPythonLanesPanel';
@@ -85,29 +96,32 @@ interface BrainServerHubViewProps {
   canManagePacks?: boolean;
 }
 
-const MODE_BADGE_MAP: Record<BrainMode, { label: string; color: string; bg: string }> = {
+const MODE_BADGE_MAP: Record<BrainMode, { label: string; color: string; bg: string; border: string }> = {
   local_sqlite: {
     label: 'Local · SQLite (Sem Docker)',
-    color: '#6ee7b7',
+    color: '#047857',
     bg: 'rgba(16, 185, 129, 0.14)',
+    border: 'rgba(16, 185, 129, 0.35)',
   },
   docker_postgres: {
     label: 'Docker · PostgreSQL + pgvector',
-    color: '#93c5fd',
-    bg: 'rgba(59, 130, 246, 0.16)',
+    color: '#1d4ed8',
+    bg: 'rgba(59, 130, 246, 0.14)',
+    border: 'rgba(59, 130, 246, 0.35)',
   },
   cloud: {
     label: 'Remoto · HTTPS Seguro',
-    color: '#fdba74',
-    bg: 'rgba(249, 115, 22, 0.16)',
+    color: '#b45309',
+    bg: 'rgba(245, 158, 11, 0.16)',
+    border: 'rgba(245, 158, 11, 0.38)',
   },
 };
 
 const METHOD_COLORS: Record<string, { color: string; bg: string }> = {
-  GET: { color: '#6ee7b7', bg: 'rgba(16, 185, 129, 0.14)' },
-  POST: { color: '#fdba74', bg: 'rgba(249, 115, 22, 0.16)' },
-  PUT: { color: '#93c5fd', bg: 'rgba(59, 130, 246, 0.16)' },
-  DELETE: { color: '#fca5a5', bg: 'rgba(239, 68, 68, 0.16)' },
+  GET: { color: '#047857', bg: 'rgba(16, 185, 129, 0.14)' },
+  POST: { color: '#b45309', bg: 'rgba(245, 158, 11, 0.16)' },
+  PUT: { color: '#1d4ed8', bg: 'rgba(59, 130, 246, 0.14)' },
+  DELETE: { color: '#b91c1c', bg: 'rgba(239, 68, 68, 0.14)' },
 };
 
 export const BrainServerHubView: React.FC<BrainServerHubViewProps> = ({
@@ -124,9 +138,13 @@ export const BrainServerHubView: React.FC<BrainServerHubViewProps> = ({
   const [loadingBrains, setLoadingBrains] = useState<boolean>(true);
   const [busyProfileId, setBusyProfileId] = useState<string | null>(null);
 
-  // Verificação de Versões (Pacotes Modulares & Agentes)
-  const [updatesReport, setUpdatesReport] = useState<VersionCheckReport | null>(null);
+  // Verificação de Versões: compara pacotes locais vs. metadados do servidor
+  const [localPacks, setLocalPacks] = useState<ModulePackWithState[]>([]);
+  const [serverUpdatesReport, setServerUpdatesReport] = useState<VersionCheckReport | null>(null);
   const [checkingUpdates, setCheckingUpdates] = useState<boolean>(true);
+  const [lastSuccessfulSyncAt, setLastSuccessfulSyncAt] = useState<string | null>(null);
+  const [syncClockMs, setSyncClockMs] = useState<number>(() => Date.now());
+  const versionCheckSeqRef = useRef<number>(0);
 
   // Formulário Novo Cérebro
   const [newName, setNewName] = useState<string>('');
@@ -158,39 +176,90 @@ export const BrainServerHubView: React.FC<BrainServerHubViewProps> = ({
   // Filtro da Aba Mapa da API
   const [apiSearch, setApiSearch] = useState<string>('');
 
+  const { report: updatesReport, badgeState: updateBadgeState } = useMemo<{
+    report: VersionCheckReport | null;
+    badgeState: UpdateBadgeState;
+  }>(
+    () =>
+      reconcileLocalPacksWithServerMetadata({
+        localPacks,
+        serverReport: serverUpdatesReport,
+        serverBrainVersion: brainInfo?.version || null,
+      }),
+    [localPacks, serverUpdatesReport, brainInfo?.version]
+  );
+
+  const syncFreshness = useMemo<SyncFreshnessState>(
+    () => evaluateSyncFreshness(lastSuccessfulSyncAt, syncClockMs),
+    [lastSuccessfulSyncAt, syncClockMs]
+  );
+
+  // Atualiza apenas o relógio local a cada 30s para indicar frescor sem disparar novo fetch
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setSyncClockMs(Date.now());
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const loadUpdatesStatus = async (silent = false) => {
-    setCheckingUpdates(true);
+    const seq = ++versionCheckSeqRef.current;
+    if (!silent) {
+      setCheckingUpdates(true);
+    }
     try {
-      const report = await fetchPackageUpdatesStatus();
-      setUpdatesReport(report);
+      const [localPayload, serverReport] = await Promise.all([
+        fetchModulePacks().catch(() => null),
+        fetchPackageUpdatesStatus(),
+      ]);
+      if (seq !== versionCheckSeqRef.current) return;
+      if (localPayload?.packs) {
+        setLocalPacks(localPayload.packs);
+      }
+      setServerUpdatesReport(serverReport);
+      const syncedAt = serverReport.summary?.checked_at || new Date().toISOString();
+      setLastSuccessfulSyncAt(syncedAt);
+      setSyncClockMs(Date.now());
     } catch (err: any) {
-      if (!silent) {
+      if (seq === versionCheckSeqRef.current && !silent) {
         notify(err?.message || 'Não foi possível verificar versões de pacotes e agentes.', 'error');
       }
     } finally {
-      setCheckingUpdates(false);
+      if (seq === versionCheckSeqRef.current) {
+        setCheckingUpdates(false);
+      }
     }
   };
 
   const loadAllBrainState = async () => {
+    const seq = ++versionCheckSeqRef.current;
     setLoadingBrains(true);
     try {
-      const [info, profs, schema, updates] = await Promise.all([
+      const [info, profs, schema, localPayload, serverReport] = await Promise.all([
         fetchBrainInfoApi(),
         fetchBrainProfilesApi(),
         fetchBrainSchemaApi().catch(() => null),
+        fetchModulePacks().catch(() => null),
         fetchPackageUpdatesStatus().catch(() => null),
       ]);
+      if (seq !== versionCheckSeqRef.current) return;
       setBrainInfo(info);
       setProfiles(profs.profiles);
       setActiveProfileId(profs.activeProfileId);
       if (schema) setSchemaInfo(schema);
-      if (updates) setUpdatesReport(updates);
+      if (localPayload?.packs) setLocalPacks(localPayload.packs);
+      if (serverReport) {
+        setServerUpdatesReport(serverReport);
+        setLastSuccessfulSyncAt(serverReport.summary?.checked_at || new Date().toISOString());
+        setSyncClockMs(Date.now());
+      }
     } catch (err: any) {
       notify(err?.message || 'Não foi possível carregar os Cérebros conectados.', 'error');
     } finally {
-      setLoadingBrains(false);
-      setCheckingUpdates(false);
+      if (seq === versionCheckSeqRef.current) {
+        setLoadingBrains(false);
+        setCheckingUpdates(false);
+      }
     }
   };
 
@@ -202,13 +271,26 @@ export const BrainServerHubView: React.FC<BrainServerHubViewProps> = ({
     const onUpdatesChanged = (event: Event) => {
       const custom = event as CustomEvent<VersionCheckReport>;
       if (custom.detail?.summary) {
-        setUpdatesReport(custom.detail);
+        setServerUpdatesReport(custom.detail);
+        setLastSuccessfulSyncAt(custom.detail.summary.checked_at || new Date().toISOString());
+        setSyncClockMs(Date.now());
       } else {
         void loadUpdatesStatus(true);
       }
     };
+    const onPacksUpdated = (event: Event) => {
+      const custom = event as CustomEvent<ModulePacksPayload>;
+      if (Array.isArray(custom.detail?.packs)) {
+        setLocalPacks(custom.detail.packs);
+      }
+      void loadUpdatesStatus(true);
+    };
     window.addEventListener(PACK_UPDATES_CHANGED_EVENT, onUpdatesChanged);
-    return () => window.removeEventListener(PACK_UPDATES_CHANGED_EVENT, onUpdatesChanged);
+    window.addEventListener(PACKS_UPDATED_EVENT, onPacksUpdated);
+    return () => {
+      window.removeEventListener(PACK_UPDATES_CHANGED_EVENT, onUpdatesChanged);
+      window.removeEventListener(PACKS_UPDATED_EVENT, onPacksUpdated);
+    };
   }, []);
 
   useEffect(() => {
@@ -278,6 +360,7 @@ export const BrainServerHubView: React.FC<BrainServerHubViewProps> = ({
       );
       const info = await fetchBrainInfoApi();
       setBrainInfo(info);
+      void loadUpdatesStatus(true);
       notify(`Conectado ao Cérebro "${res.active.name}" com sucesso!`, 'success');
     } catch (err: any) {
       notify(err?.message || 'Falha ao alternar o Cérebro.', 'error');
@@ -468,49 +551,126 @@ export const BrainServerHubView: React.FC<BrainServerHubViewProps> = ({
                   fontSize: '0.78rem',
                   fontWeight: 700,
                   cursor: 'pointer',
-                  border:
-                    (updatesReport?.summary.total_updates_available ?? 0) > 0
-                      ? '1px solid #d97706'
-                      : '1px solid #16a34a',
-                  backgroundColor:
-                    (updatesReport?.summary.total_updates_available ?? 0) > 0
-                      ? '#fef3c7'
-                      : '#dcfce7',
-                  color:
-                    (updatesReport?.summary.total_updates_available ?? 0) > 0
-                      ? '#92400e'
-                      : '#166534',
+                  border: updateBadgeState.hasUpdates ? '1px solid #d97706' : '1px solid #16a34a',
+                  backgroundColor: updateBadgeState.hasUpdates ? '#fef3c7' : '#dcfce7',
+                  color: updateBadgeState.hasUpdates ? '#92400e' : '#166534',
                 }}
               >
                 <ArrowUpCircle
                   size={15}
-                  color={
-                    (updatesReport?.summary.total_updates_available ?? 0) > 0 ? '#b45309' : '#15803d'
-                  }
+                  color={updateBadgeState.hasUpdates ? '#b45309' : '#15803d'}
                 />
                 <span>
                   {checkingUpdates && !updatesReport
                     ? 'Verificando versões...'
-                    : (updatesReport?.summary.total_updates_available ?? 0) > 0
-                      ? `${updatesReport!.summary.total_updates_available} atualização(ões) disponível(is) (${updatesReport!.summary.outdated_packages} pacote · ${updatesReport!.summary.outdated_agents} agente)`
+                    : updateBadgeState.hasUpdates
+                      ? `${updateBadgeState.totalUpdatesAvailable} atualização(ões) disponível(is) (${updateBadgeState.outdatedPackagesCount} pacote · ${updateBadgeState.outdatedAgentsCount} agente)`
                       : 'Pacotes e agentes atualizados'}
                 </span>
               </button>
 
-              {canManagePacks &&
-                onNavigate &&
-                (updatesReport?.summary.total_updates_available ?? 0) > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => onNavigate('pack_studio')}
-                    data-testid="brain-hero-pack-studio-btn"
-                    className="btn btn-secondary btn-sm"
+              {canManagePacks && onNavigate && updateBadgeState.hasUpdates && (
+                <button
+                  type="button"
+                  onClick={() => onNavigate('pack_studio')}
+                  data-testid="brain-hero-pack-studio-btn"
+                  className="btn btn-secondary btn-sm"
+                >
+                  <Package size={13} />
+                  <span>Aplicar no Estúdio de Pacotes</span>
+                  <ArrowUpRight size={13} />
+                </button>
+              )}
+
+              <div
+                data-testid="brain-last-sync-indicator"
+                data-sync-level={syncFreshness.level}
+                title={
+                  syncFreshness.lastSyncAt
+                    ? `Última sincronização bem-sucedida em ${new Date(syncFreshness.lastSyncAt).toLocaleString('pt-BR')} (${syncFreshness.statusLabel})`
+                    : 'Nenhuma sincronização concluída nesta sessão'
+                }
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '6px',
+                  padding: '5px 11px',
+                  borderRadius: '8px',
+                  fontSize: '0.74rem',
+                  fontWeight: 600,
+                  border:
+                    syncFreshness.level === 'stale'
+                      ? '1px solid #d97706'
+                      : syncFreshness.level === 'fresh' || syncFreshness.level === 'aging'
+                        ? '1px solid var(--border-color)'
+                        : '1px solid var(--border-subtle)',
+                  backgroundColor:
+                    syncFreshness.level === 'stale'
+                      ? '#fef3c7'
+                      : 'var(--bg-primary)',
+                  color:
+                    syncFreshness.level === 'stale'
+                      ? '#92400e'
+                      : 'var(--text-secondary)',
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: '7px',
+                    height: '7px',
+                    borderRadius: '999px',
+                    flexShrink: 0,
+                    backgroundColor:
+                      syncFreshness.level === 'fresh'
+                        ? '#16a34a'
+                        : syncFreshness.level === 'aging'
+                          ? '#2563eb'
+                          : syncFreshness.level === 'stale'
+                            ? '#d97706'
+                            : '#94a3b8',
+                  }}
+                />
+                <Clock
+                  size={13}
+                  color={
+                    syncFreshness.level === 'stale'
+                      ? '#b45309'
+                      : syncFreshness.level === 'fresh'
+                        ? '#15803d'
+                        : 'var(--text-muted)'
+                  }
+                />
+                <span>
+                  Última sincronização:{' '}
+                  <strong
+                    style={{
+                      fontFamily: 'var(--font-mono)',
+                      color:
+                        syncFreshness.level === 'stale' ? '#78350f' : 'var(--text-primary)',
+                    }}
                   >
-                    <Package size={13} />
-                    <span>Aplicar no Estúdio de Pacotes</span>
-                    <ArrowUpRight size={13} />
-                  </button>
+                    {syncFreshness.formattedTime}
+                  </strong>
+                </span>
+                <span style={{ opacity: 0.7 }}>·</span>
+                <span>{syncFreshness.relativeLabel}</span>
+                {syncFreshness.level === 'stale' && (
+                  <span
+                    style={{
+                      fontSize: '0.68rem',
+                      fontWeight: 800,
+                      padding: '1px 6px',
+                      borderRadius: '5px',
+                      backgroundColor: '#fde68a',
+                      color: '#78350f',
+                    }}
+                  >
+                    Desatualizado
+                  </span>
                 )}
+              </div>
             </div>
           </div>
         </div>
@@ -539,7 +699,7 @@ export const BrainServerHubView: React.FC<BrainServerHubViewProps> = ({
             id: 'updates' as const,
             label: 'Versões & Updates',
             icon: ArrowUpCircle,
-            badgeCount: updatesReport?.summary.total_updates_available ?? 0,
+            badgeCount: updateBadgeState.totalUpdatesAvailable,
           },
           { id: 'memory_hybrid' as const, label: 'Memória & Markdown', icon: BookOpen, badgeCount: 0 },
           { id: 'python_lanes' as const, label: 'Worker Python & Filas', icon: Cpu, badgeCount: 0 },
@@ -588,6 +748,7 @@ export const BrainServerHubView: React.FC<BrainServerHubViewProps> = ({
           report={updatesReport}
           loading={checkingUpdates}
           canManagePacks={canManagePacks}
+          syncFreshness={syncFreshness}
           onRefresh={() => void loadUpdatesStatus(false)}
           onOpenPackStudio={onNavigate ? () => onNavigate('pack_studio') : undefined}
         />
@@ -739,12 +900,13 @@ export const BrainServerHubView: React.FC<BrainServerHubViewProps> = ({
                             {isCurrent && (
                               <span
                                 style={{
-                                  fontSize: '0.66rem',
+                                  fontSize: '0.68rem',
                                   fontWeight: 700,
-                                  padding: '2px 7px',
+                                  padding: '2px 8px',
                                   borderRadius: '6px',
-                                  backgroundColor: 'rgba(16, 185, 129, 0.16)',
-                                  color: '#6ee7b7',
+                                  border: '1px solid rgba(22, 163, 74, 0.38)',
+                                  backgroundColor: 'rgba(22, 163, 74, 0.14)',
+                                  color: '#15803d',
                                 }}
                               >
                                 Ativo agora
@@ -752,10 +914,11 @@ export const BrainServerHubView: React.FC<BrainServerHubViewProps> = ({
                             )}
                             <span
                               style={{
-                                fontSize: '0.66rem',
+                                fontSize: '0.68rem',
                                 fontWeight: 600,
-                                padding: '2px 7px',
+                                padding: '2px 8px',
                                 borderRadius: '6px',
+                                border: `1px solid ${modeMeta.border}`,
                                 backgroundColor: modeMeta.bg,
                                 color: modeMeta.color,
                               }}
@@ -786,8 +949,9 @@ export const BrainServerHubView: React.FC<BrainServerHubViewProps> = ({
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: '5px',
-                            fontSize: '0.72rem',
-                            color: profile.status === 'online' ? '#6ee7b7' : 'var(--text-muted)',
+                            fontSize: '0.73rem',
+                            fontWeight: 600,
+                            color: profile.status === 'online' ? '#15803d' : 'var(--text-muted)',
                           }}
                         >
                           <Wifi size={13} />

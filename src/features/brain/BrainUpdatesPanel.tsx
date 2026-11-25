@@ -2,6 +2,8 @@ import React from 'react';
 import {
   ArrowUpRight,
   CheckCircle2,
+  Clock,
+  CloudDownload,
   Cpu,
   HardDrive,
   Loader2,
@@ -10,12 +12,17 @@ import {
   ShieldCheck,
   Sparkles,
 } from 'lucide-react';
-import type { VersionCheckReport } from '../../services/packageVersionEngine';
+import {
+  resolvePackageCacheStatusMeta,
+  type SyncFreshnessState,
+  type VersionCheckReport,
+} from '../../services/packageVersionEngine';
 
 interface BrainUpdatesPanelProps {
   report: VersionCheckReport | null;
   loading: boolean;
   canManagePacks: boolean;
+  syncFreshness?: SyncFreshnessState;
   onRefresh: () => void;
   onOpenPackStudio?: () => void;
 }
@@ -24,6 +31,7 @@ export const BrainUpdatesPanel: React.FC<BrainUpdatesPanelProps> = ({
   report,
   loading,
   canManagePacks,
+  syncFreshness,
   onRefresh,
   onOpenPackStudio,
 }) => {
@@ -69,6 +77,33 @@ export const BrainUpdatesPanel: React.FC<BrainUpdatesPanelProps> = ({
             <span style={{ fontSize: '0.73rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
               Cache Local de Artefatos · Hub v{report?.summary.hub_current_version || '3.0.1'}
             </span>
+            {syncFreshness && (
+              <span
+                data-testid="brain-updates-panel-last-sync"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  fontSize: '0.72rem',
+                  fontWeight: 600,
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  border:
+                    syncFreshness.level === 'stale'
+                      ? '1px solid #d97706'
+                      : '1px solid var(--border-color)',
+                  backgroundColor:
+                    syncFreshness.level === 'stale' ? '#fef3c7' : 'var(--bg-primary)',
+                  color:
+                    syncFreshness.level === 'stale' ? '#92400e' : 'var(--text-secondary)',
+                }}
+              >
+                <Clock size={11} />
+                <span>
+                  Última sincronização: {syncFreshness.formattedTime} ({syncFreshness.relativeLabel})
+                </span>
+              </span>
+            )}
           </div>
 
           <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -210,10 +245,33 @@ export const BrainUpdatesPanel: React.FC<BrainUpdatesPanelProps> = ({
                       color: 'var(--text-muted)',
                     }}
                   >
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                      <HardDrive size={11} />
-                      <span>Cache local · {pkg.artifact_size_kb} KB</span>
-                    </span>
+                    {(() => {
+                      const cacheMeta = resolvePackageCacheStatusMeta(
+                        pkg.cache_status,
+                        pkg.installed,
+                        pkg.has_update
+                      );
+                      return (
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            color: cacheMeta.readyForImmediateDeploy ? '#047857' : '#1d4ed8',
+                            fontWeight: 600,
+                          }}
+                        >
+                          {cacheMeta.readyForImmediateDeploy ? (
+                            <HardDrive size={11} />
+                          ) : (
+                            <CloudDownload size={11} />
+                          )}
+                          <span>
+                            {cacheMeta.badgeLabel} · {pkg.artifact_size_kb} KB
+                          </span>
+                        </span>
+                      );
+                    })()}
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                       <ShieldCheck size={11} />
                       <span>{pkg.checksum_sha256.slice(0, 22)}…</span>

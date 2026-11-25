@@ -62,6 +62,7 @@ export interface ModulePackDefinition {
 
 export interface ModulePackWithState extends ModulePackDefinition {
   installed: boolean;
+  installed_version?: string | null;
   installed_at: string | null;
 }
 
