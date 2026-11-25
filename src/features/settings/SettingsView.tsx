@@ -1,4 +1,4 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import QRCode from 'qrcode';
 import {
   Settings,
@@ -129,6 +129,100 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [activeSubTab, setActiveSubTab] = useState<string>(initialSubTab);
   const [searchTerm, setSearchTerm] = useState('');
   const [showAdvancedInSimple, setShowAdvancedInSimple] = useState(false);
+
+  // Calibração de Microfone & Diagnóstico de Voz
+  const [micCalibrating, setMicCalibrating] = useState(false);
+  const [micLevel, setMicLevel] = useState(0);
+  const [micDeviceLabel, setMicDeviceLabel] = useState<string | null>(null);
+  const [speechTestStatus, setSpeechTestStatus] = useState<string | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const micAudioCtxRef = useRef<AudioContext | null>(null);
+  const micRafRef = useRef<number | null>(null);
+
+  const stopMicCalibration = () => {
+    if (micRafRef.current !== null) {
+      cancelAnimationFrame(micRafRef.current);
+      micRafRef.current = null;
+    }
+    micStreamRef.current?.getTracks().forEach((t) => t.stop());
+    micStreamRef.current = null;
+    if (micAudioCtxRef.current) {
+      void micAudioCtxRef.current.close().catch(() => {});
+      micAudioCtxRef.current = null;
+    }
+    setMicCalibrating(false);
+    setMicLevel(0);
+  };
+
+  useEffect(() => {
+    return () => stopMicCalibration();
+  }, []);
+
+  const startMicCalibration = async () => {
+    if (micCalibrating) {
+      stopMicCalibration();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micStreamRef.current = stream;
+      const track = stream.getAudioTracks()[0];
+      setMicDeviceLabel(track?.label || 'Microfone padrão do sistema');
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        micAudioCtxRef.current = ctx;
+        const src = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        src.connect(analyser);
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        const tick = () => {
+          analyser.getByteFrequencyData(data);
+          const avg = data.reduce((sum, v) => sum + v, 0) / (data.length || 1);
+          setMicLevel(Math.min(100, Math.round((avg / 128) * 100)));
+          micRafRef.current = requestAnimationFrame(tick);
+        };
+        tick();
+      }
+      setMicCalibrating(true);
+    } catch (err: any) {
+      notify(`Erro ao acessar microfone: ${err?.name || ''} ${err?.message || ''}`.trim(), 'error');
+      setSpeechTestStatus(`Erro getUserMedia: ${err?.name || 'Error'} — ${err?.message || 'Permissão negada'}`);
+    }
+  };
+
+  const runSpeechEngineTest = () => {
+    const SpeechRecognitionCtor =
+      (window as unknown as { SpeechRecognition?: any; webkitSpeechRecognition?: any }).SpeechRecognition ||
+      (window as unknown as { webkitSpeechRecognition?: any }).webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) {
+      setSpeechTestStatus('SpeechRecognition indisponível neste navegador.');
+      return;
+    }
+    try {
+      const rec = new SpeechRecognitionCtor();
+      rec.lang = 'pt-BR';
+      rec.interimResults = true;
+      setSpeechTestStatus('Ouvindo por alguns segundos... fale algo agora.');
+      rec.onresult = (ev: any) => {
+        const text = ev?.results?.[0]?.[0]?.transcript || '';
+        if (text) setSpeechTestStatus(`Reconhecido: "${text}"`);
+      };
+      rec.onerror = (ev: any) => {
+        setSpeechTestStatus(
+          `Erro SpeechRecognition: "${ev?.error || 'unknown'}"${ev?.message ? ` (${ev.message})` : ''}${
+            ev?.error === 'network'
+              ? ' — Chromium no Linux costuma bloquear o serviço de voz online do Google.'
+              : ''
+          }`
+        );
+      };
+      rec.start();
+    } catch (err: any) {
+      setSpeechTestStatus(`Falha ao iniciar SpeechRecognition: ${err?.message || err}`);
+    }
+  };
 
   // Configurações Gerais
   const [sendShortcut, setSendShortcut] = useState<'enter' | 'ctrl_enter'>('enter');
@@ -1626,7 +1720,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       if ('speechSynthesis' in window) {
                         window.speechSynthesis.cancel();
                         const utt = new SpeechSynthesisUtterance(
-                          'Olá! Esta é uma demonstração da voz configurada no JARVIS.',
+                          'Olá! Esta é uma demonstração da voz configurada no Calmon Studio.',
                         );
                         utt.lang = 'pt-BR';
                         utt.rate = speechSpeed;
@@ -1667,6 +1761,69 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     ))}
                   </div>
                 </div>
+              </section>
+
+              <section className="jarvis-settings-card" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div className="jarvis-setting-row">
+                  <div className="jarvis-setting-row__info">
+                    <div className="jarvis-setting-row__title">Calibração de Microfone &amp; Diagnóstico</div>
+                    <div className="jarvis-setting-row__desc">
+                      Teste se o navegador capta o áudio do microfone e verifique o motor de reconhecimento de voz.
+                    </div>
+                  </div>
+                  <div className="jarvis-setting-row__control" style={{ gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => void startMicCalibration()}
+                      className={`btn btn-sm ${micCalibrating ? 'btn-primary' : 'btn-secondary'}`}
+                    >
+                      <Mic size={14} />
+                      <span>{micCalibrating ? 'Parar Teste de Mic' : 'Calibrar Microfone'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={runSpeechEngineTest}
+                      className="btn btn-secondary btn-sm"
+                    >
+                      <span>Testar Reconhecimento</span>
+                    </button>
+                  </div>
+                </div>
+
+                {(micCalibrating || micDeviceLabel) && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+                      <span>Dispositivo: {micDeviceLabel || '—'}</span>
+                      <span className="jarvis-tabular">{micLevel}%</span>
+                    </div>
+                    <div style={{ height: '8px', borderRadius: '999px', backgroundColor: 'var(--bg-tertiary)', overflow: 'hidden' }}>
+                      <div
+                        style={{
+                          width: `${micLevel}%`,
+                          height: '100%',
+                          background: micLevel > 65 ? '#22c55e' : 'var(--accent-color)',
+                          transition: 'width 80ms linear',
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {speechTestStatus && (
+                  <div
+                    style={{
+                      padding: '8px 12px',
+                      borderRadius: '10px',
+                      backgroundColor: 'var(--bg-primary)',
+                      border: '1px solid var(--border-color)',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: '0.75rem',
+                      color: 'var(--text-secondary)',
+                    }}
+                  >
+                    {speechTestStatus}
+                  </div>
+                )}
               </section>
             </>
           )}
@@ -1722,7 +1879,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </div>
                   }
                 >
-                  <ModelManagerView />
+                  <ModelManagerView embedded />
                 </Suspense>
               </section>
             </>

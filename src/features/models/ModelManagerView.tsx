@@ -23,7 +23,11 @@ import { HardwareAdvisorView } from '../hardware/HardwareAdvisorView';
 
 type ModelsTabId = 'advisor' | 'hardware' | 'arena' | 'hub' | 'local' | 'quality';
 
-export const ModelManagerView: React.FC = () => {
+interface ModelManagerViewProps {
+  embedded?: boolean;
+}
+
+export const ModelManagerView: React.FC<ModelManagerViewProps> = ({ embedded = false }) => {
   const [data, setData] = useState<any>(null);
   const [advisor, setAdvisor] = useState<HardwareAdvisorPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -248,39 +252,75 @@ export const ModelManagerView: React.FC = () => {
 
   return (
     <div className="jarvis-page-shell">
-      <PageHeader
-        title="Modelos & Hardware"
-        subtitle="Calibre GPU e RAM do seu computador, gerencie Ollama, Hugging Face e provedores na nuvem."
-        meta={[
-          <span key="hw-vram" className="jarvis-tabular">
-            {activeProfile ? `${activeProfile.gpu_name} · ${activeProfile.vram_gb} GB VRAM` : `${localModelsCount} modelos locais`}
-          </span>,
-          <span
-            key="hybrid-status"
-            style={{ color: geminiConnected ? 'var(--info-text)' : 'var(--success-text)', fontWeight: 600 }}
-          >
-            {geminiConnected ? 'Motor Híbrido (Local + Nuvem)' : 'Modo 100% Local'}
-          </span>,
-          <span
-            key="hf-status"
-            style={{ color: hfConnected ? 'var(--success-text)' : 'var(--warning-text)', fontWeight: 500 }}
-          >
-            {hfConnected ? 'Hugging Face ativo' : 'Hugging Face desconectado'}
-          </span>,
-        ]}
-        actions={
+      {!embedded ? (
+        <PageHeader
+          title="Modelos & Hardware"
+          subtitle="Hardware real deste computador, Ollama local, Hugging Face e provedores na nuvem."
+          meta={[
+            <span key="hw-vram" className="jarvis-tabular">
+              {activeProfile
+                ? `${activeProfile.ram_gb} GB RAM · ${activeProfile.gpu_name}${activeProfile.vram_gb > 0 ? ` (${activeProfile.vram_gb} GB VRAM)` : ''}`
+                : `${localModelsCount} modelos locais`}
+            </span>,
+            <span
+              key="hybrid-status"
+              style={{ color: geminiConnected ? 'var(--info-text)' : 'var(--success-text)', fontWeight: 600 }}
+            >
+              {geminiConnected ? 'Motor Híbrido (Local + Nuvem)' : 'Modo 100% Local'}
+            </span>,
+            <span
+              key="hf-status"
+              style={{ color: hfConnected ? 'var(--success-text)' : 'var(--warning-text)', fontWeight: 500 }}
+            >
+              {hfConnected ? 'Hugging Face ativo' : 'Hugging Face desconectado'}
+            </span>,
+          ]}
+          actions={
+            <button
+              type="button"
+              onClick={() => void loadData()}
+              disabled={loading}
+              className="btn btn-ghost btn-sm"
+              title="Recarregar status de modelos e hardware"
+            >
+              <RefreshCw size={14} className={loading ? 'spin' : ''} />
+              <span>{loading ? 'Atualizando…' : 'Atualizar'}</span>
+            </button>
+          }
+        />
+      ) : (
+        <div
+          className="jarvis-settings-card"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '12px',
+            padding: '14px 16px',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 }}>
+            <div style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+              Hardware Detectado: {activeProfile ? activeProfile.cpu : 'Carregando...'}
+            </div>
+            <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+              {activeProfile
+                ? `${activeProfile.ram_gb} GB RAM · ${activeProfile.gpu_name}${activeProfile.vram_gb > 0 ? ` (${activeProfile.vram_gb} GB VRAM)` : ' (Integrada)'} · ${localModelsCount} modelo(s) Ollama`
+                : 'Consultando hardware local...'}
+            </div>
+          </div>
           <button
             type="button"
             onClick={() => void loadData()}
             disabled={loading}
-            className="btn btn-ghost btn-sm"
-            title="Recarregar status de modelos e hardware"
+            className="btn btn-secondary btn-xs"
           >
-            <RefreshCw size={14} className={loading ? 'spin' : ''} />
+            <RefreshCw size={13} className={loading ? 'spin' : ''} />
             <span>{loading ? 'Atualizando…' : 'Atualizar'}</span>
           </button>
-        }
-      />
+        </div>
+      )}
 
       {!roleLoaded ? (
         <div role="status" className="jarvis-callout jarvis-callout--info">

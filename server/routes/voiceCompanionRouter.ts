@@ -4,6 +4,8 @@ import {
   serverState,
   userProfiles,
   requireAuth,
+  getOwnerUserId,
+  resolveExternalCredentialForRequest,
   getSessionFromReq,
   persistStateNamespace,
   nowIso,
@@ -18,6 +20,7 @@ import {
   PushNotificationServerItem,
   CompanionDeviceServer,
 } from '../serverState.ts';
+import { getEnvProviderCredential } from '../providerEngine.ts';
 import { validateSafeExternalUrl } from '../serverHardening.ts';
 import {
   buildContextualGreeting,
@@ -170,6 +173,109 @@ export function createVoiceCompanionRouter(deps?: { store?: LocalSqliteBrainStor
       attachment_acknowledged: attachmentNote || undefined,
       timestamp: nowIso(),
     });
+  });
+
+  // --- TRANSCRIÇÃO DE ÁUDIO VIA BACKEND (FALLBACK PARA CHROMIUM / DESKTOP) ---
+  router.post('/voice/transcribe', requireAuth, async (req: Request, res: Response) => {
+    const rawBase64 = String(req.body?.audio_base64 || '').trim();
+    const mimeType = String(req.body?.mime_type || 'audio/webm').split(';')[0].trim() || 'audio/webm';
+    const language = String(req.body?.language || 'pt').slice(0, 5);
+
+    if (!rawBase64 || rawBase64.length > 10 * 1024 * 1024) {
+      res.status(400).json({ detail: 'Áudio inválido ou acima do limite permitido.' });
+      return;
+    }
+
+    const store = deps?.store;
+    const ownerUserId = getOwnerUserId(req);
+    const audioBuffer = Buffer.from(rawBase64, 'base64');
+    const ext = mimeType.includes('mp4') ? 'mp4' : mimeType.includes('ogg') ? 'ogg' : 'webm';
+
+    const tryWhisperProvider = async (
+      providerId: 'groq' | 'openai',
+      endpoint: string,
+      model: string
+    ): Promise<string | null> => {
+      const cred = store
+        ? resolveExternalCredentialForRequest(req, store, ownerUserId, undefined, providerId)
+        : getEnvProviderCredential(providerId);
+      if (!cred?.apiKey) return null;
+
+      const form = new FormData();
+      form.append('file', new Blob([audioBuffer], { type: mimeType }), `voice.${ext}`);
+      form.append('model', model);
+      form.append('language', language);
+
+      const resp = await fetch(endpoint, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${cred.apiKey}` },
+        body: form,
+      });
+      if (!resp.ok) return null;
+      const data = (await resp.json()) as { text?: string };
+      return data?.text?.trim() || null;
+    };
+
+    try {
+      const groqText = await tryWhisperProvider(
+        'groq',
+        'https://api.groq.com/openai/v1/audio/transcriptions',
+        'whisper-large-v3-turbo'
+      );
+      if (groqText) {
+        res.json({ transcript: groqText, provider: 'groq', model: 'whisper-large-v3-turbo' });
+        return;
+      }
+
+      const openaiText = await tryWhisperProvider(
+        'openai',
+        'https://api.openai.com/v1/audio/transcriptions',
+        'whisper-1'
+      );
+      if (openaiText) {
+        res.json({ transcript: openaiText, provider: 'openai', model: 'whisper-1' });
+        return;
+      }
+
+      const geminiKey =
+        (store && resolveExternalCredentialForRequest(req, store, ownerUserId, undefined, 'gemini')?.apiKey) ||
+        process.env.GEMINI_API_KEY ||
+        '';
+      if (geminiKey) {
+        const gResp = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(geminiKey)}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [
+                {
+                  parts: [
+                    { text: `Transcreva exatamente o que foi falado neste áudio em ${language}. Retorne apenas a transcrição, sem comentários.` },
+                    { inlineData: { mimeType, data: rawBase64 } },
+                  ],
+                },
+              ],
+            }),
+          }
+        );
+        if (gResp.ok) {
+          const gData = (await gResp.json()) as any;
+          const gText = gData?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+          if (gText) {
+            res.json({ transcript: gText, provider: 'gemini', model: 'gemini-2.5-flash' });
+            return;
+          }
+        }
+      }
+
+      res.status(422).json({
+        detail:
+          'Nenhum provedor de transcrição (Groq, OpenAI ou Gemini) configurado no Cofre de Chaves. Adicione uma chave em Configurações → Modelos & Provedores.',
+      });
+    } catch (err: any) {
+      res.status(502).json({ detail: err?.message || 'Falha ao transcrever áudio no servidor.' });
+    }
   });
 
   // --- NOTIFICAÇÕES PUSH & PONTE TELEGRAM / WEBHOOK ---

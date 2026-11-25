@@ -168,13 +168,29 @@ export function useWakeWordListener({
         };
 
         rec.onerror = (event: any) => {
-          const errCode = event?.error || '';
+          const errCode = event?.error || 'unknown';
+          const errMsg = event?.message ? ` (${event.message})` : '';
+          console.warn(`[WakeWord] SpeechRecognition error: ${errCode}${errMsg}`);
           if (errCode === 'not-allowed' || errCode === 'service-not-allowed') {
             setPermissionError('Permita o uso do microfone no navegador para ativação por voz.');
             setWakeWordEnabledPref(false);
             setEnabledState(false);
             stopRecognizer();
             notify('Permissão de microfone bloqueada pelo navegador.', 'warning');
+            return;
+          }
+          if (errCode === 'network') {
+            setPermissionError('Serviço de reconhecimento de voz do navegador indisponível (erro network no Chromium).');
+            setWakeWordEnabledPref(false);
+            setEnabledState(false);
+            stopRecognizer();
+            return;
+          }
+          if (errCode === 'audio-capture') {
+            setPermissionError('Nenhum microfone detectado ou dispositivo ocupado (audio-capture).');
+            setWakeWordEnabledPref(false);
+            setEnabledState(false);
+            stopRecognizer();
             return;
           }
           setListening(false);

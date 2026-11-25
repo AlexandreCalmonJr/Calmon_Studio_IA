@@ -13,9 +13,11 @@ import {
   createAgent,
   deleteAgent,
   fetchAgentVersions,
+  fetchModels,
   rollbackAgentVersion,
   updateAgentConfig,
 } from '../../api';
+import { parseChatModelOptions } from '../../services/chatModels';
 import {
   MASCOT_ACCESSORY_LABELS,
   MASCOT_CATALOG,
@@ -38,14 +40,10 @@ interface AgentCreatorModalProps {
   onSaved: () => Promise<void> | void;
 }
 
-const MODEL_CHOICES = [
-  { id: 'gemini-4-hydrogen', label: 'Gemini 4 Hydrogen (Online · Pesquisa Web)' },
-  { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite (Online · Ultra Rápido)' },
-  { id: 'llama3.1:8b', label: 'Llama 3.1 8B (Local Ollama · Privacidade)' },
-  { id: 'qwen2.5-coder:7b', label: 'Qwen 2.5 Coder 7B (Local Ollama · Código)' },
-  { id: 'llama3.2:3b', label: 'Llama 3.2 3B (Local Ollama · Leve)' },
-  { id: 'auto_hybrid', label: 'Híbrido Automático (Local + Gemini)' },
-];
+const DEFAULT_MODEL_CHOICE = {
+  id: 'auto_hybrid',
+  label: 'Automático (Local + Provedores instalados)',
+};
 
 const CATEGORY_CHOICES = [
   { id: 'studies', label: 'Estudos & Pesquisa' },
@@ -84,7 +82,40 @@ export const AgentCreatorModal: React.FC<AgentCreatorModalProps> = ({
   );
   const [mascotMood, setMascotMood] = useState<MascotMood>((initialMascot.mood as MascotMood) || 'idle');
 
-  const [preferredModel, setPreferredModel] = useState(editingAgent?.preferred_model || 'gemini-4-hydrogen');
+  const [preferredModel, setPreferredModel] = useState(editingAgent?.preferred_model || 'auto_hybrid');
+  const [installedModelOptions, setInstalledModelOptions] = useState<Array<{ id: string; label: string }>>([
+    DEFAULT_MODEL_CHOICE,
+  ]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let active = true;
+    fetchModels()
+      .then((res) => {
+        if (!active) return;
+        const parsed = parseChatModelOptions(res).map((m) => ({
+          id: m.id,
+          label: `${m.label} (${m.provider})`,
+        }));
+        const merged = [DEFAULT_MODEL_CHOICE, ...parsed];
+        if (
+          editingAgent?.preferred_model &&
+          !merged.some((m) => m.id === editingAgent.preferred_model)
+        ) {
+          merged.push({
+            id: editingAgent.preferred_model,
+            label: `${editingAgent.preferred_model} (Atual)`,
+          });
+        }
+        setInstalledModelOptions(merged);
+      })
+      .catch(() => {
+        // fallback mantém opção automática
+      });
+    return () => {
+      active = false;
+    };
+  }, [isOpen, editingAgent?.preferred_model]);
   const [routingPolicy, setRoutingPolicy] = useState<'auto_hybrid' | 'local_only' | 'online_only'>(
     editingAgent?.routing_policy || 'auto_hybrid'
   );
@@ -549,7 +580,7 @@ export const AgentCreatorModal: React.FC<AgentCreatorModalProps> = ({
                     onChange={(e) => setPreferredModel(e.target.value)}
                     className="jarvis-input"
                   >
-                    {MODEL_CHOICES.map((m) => (
+                    {installedModelOptions.map((m) => (
                       <option key={m.id} value={m.id}>
                         {m.label}
                       </option>
@@ -567,9 +598,9 @@ export const AgentCreatorModal: React.FC<AgentCreatorModalProps> = ({
                     onChange={(e) => setRoutingPolicy(e.target.value as any)}
                     className="jarvis-input"
                   >
-                    <option value="auto_hybrid">Automático Híbrido (Local com fallback Gemini)</option>
-                    <option value="local_only">Somente Local (Ollama no notebook)</option>
-                    <option value="online_only">Somente Online (Gemini + Pesquisa Web)</option>
+                    <option value="auto_hybrid">Automático Híbrido (Local + Nuvem)</option>
+                    <option value="local_only">Somente Local (Ollama instalado)</option>
+                    <option value="online_only">Somente Online (Provedores configurados)</option>
                   </select>
                 </div>
 

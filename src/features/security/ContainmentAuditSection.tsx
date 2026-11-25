@@ -398,7 +398,7 @@ export const ContainmentAuditSection: React.FC<ContainmentAuditSectionProps> = (
         title={pendingKillAction?.mode === 'global' ? 'Acionar Kill Switch Global' : 'Cancelar tarefa'}
         description={
           pendingKillAction?.mode === 'global'
-            ? 'ATENÇÃO: Deseja suspender imediatamente todas as operações e ferramentas do JARVIS HUB?'
+            ? 'ATENÇÃO: Deseja suspender imediatamente todas as operações e ferramentas do Calmon Studio?'
             : pendingKillAction?.mode === 'task'
               ? `Cancelar a tarefa '${pendingKillAction.taskId}'? Esta ação não pode ser desfeita.`
               : null

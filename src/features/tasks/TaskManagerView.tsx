@@ -966,7 +966,7 @@ export const TaskManagerView: React.FC = () => {
                     Nenhuma tarefa encontrada
                   </div>
                   <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: 0 }}>
-                    As tarefas são registadas quando um fluxo é executado no Chat JARVIS.
+                    As tarefas são registadas quando um fluxo é executado no Chat do Calmon Studio.
                   </p>
                 </div>
               ) : viewMode === 'kanban' ? (

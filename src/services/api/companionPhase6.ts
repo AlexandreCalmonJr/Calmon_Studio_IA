@@ -107,6 +107,19 @@ export async function sendVoiceTurn(payload: {
   return handleApiResponse(res, 'Falha ao processar comando de voz.');
 }
 
+export async function transcribeVoiceAudio(payload: {
+  audio_base64: string;
+  mime_type: string;
+  language?: string;
+}): Promise<{ transcript: string; provider: string; model: string }> {
+  const res = await apiFetch(`${API_BASE}/voice/transcribe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleApiResponse(res, 'Falha ao transcrever áudio.');
+}
+
 export async function fetchPushConfig(): Promise<PushBridgeConfig> {
   const res = await apiFetch(`${API_BASE}/push/config`);
   return handleApiResponse(res, 'Falha ao carregar configuração de notificações push.');

@@ -524,7 +524,7 @@ export const CodingAgentView: React.FC = () => {
       {/* Header */}
       <header className="jarvis-page-header">
         <div>
-          <h1 className="jarvis-page-header__title">IDE & Código JARVIS</h1>
+          <h1 className="jarvis-page-header__title">IDE & Código</h1>
           <p className="jarvis-page-header__subtitle" style={{ maxWidth: '760px' }}>
             Editor integrado estilo Claude Code com Diff visual lado a lado, checkpoints reversíveis em 1 clique e terminal de agente confinado ao projeto.
           </p>

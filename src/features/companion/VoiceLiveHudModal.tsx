@@ -5,12 +5,13 @@ import {
   MicOff,
   Send,
   Sparkles,
+  Terminal,
   Volume2,
   VolumeX,
   WifiOff,
   X,
 } from 'lucide-react';
-import { sendVoiceTurn } from '../../services/api';
+import { sendVoiceTurn, transcribeVoiceAudio } from '../../services/api';
 import { useAssistantIdentity } from '../../context/AssistantIdentityContext';
 import { useOfflineQueue } from '../../shared/pwa/usePWAInstall';
 import { notify } from '../../shared/common/Toast';
@@ -95,8 +96,20 @@ export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({
   const [speechOutEnabled, setSpeechOutEnabled] = useState<boolean>(() => getVoiceAutoSpeakPref());
   const [inputText, setInputText] = useState('');
   const [turns, setTurns] = useState<VoiceTurnItem[]>([]);
+  const [voiceLogs, setVoiceLogs] = useState<string[]>([]);
+  const [showLogs, setShowLogs] = useState(false);
 
   const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+
+  const appendVoiceLog = (entry: string) => {
+    const ts = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const line = `[${ts}] ${entry}`;
+    console.info('[VoiceDiag]', line);
+    setVoiceLogs((prev) => [...prev.slice(-24), line]);
+  };
 
   useEffect(() => {
     const syncVoicePref = () => setSpeechOutEnabled(getVoiceAutoSpeakPref());
@@ -111,6 +124,16 @@ export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({
       // ignore
     }
     recognitionRef.current = null;
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch {
+        // ignore
+      }
+    } else {
+      recordingStreamRef.current?.getTracks().forEach((t) => t.stop());
+      recordingStreamRef.current = null;
+    }
     setListening(false);
   };
 
@@ -171,15 +194,101 @@ export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({
     }
   };
 
+  const probeMicrophoneHardware = async () => {
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        appendVoiceLog('navigator.mediaDevices.getUserMedia indisponível (contexto não seguro?)');
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const tracks = stream.getAudioTracks();
+      const label = tracks[0]?.label || 'Microfone padrão';
+      appendVoiceLog(`Hardware OK: "${label}" (${tracks.length} faixa(s) de áudio)`);
+      tracks.forEach((t) => t.stop());
+    } catch (err: any) {
+      appendVoiceLog(`Falha getUserMedia: ${err?.name || 'Error'} — ${err?.message || err}`);
+    }
+  };
+
+  const startMediaRecorderFallback = async () => {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      appendVoiceLog('MediaRecorder indisponível neste navegador.');
+      setMicHint('Gravação de áudio indisponível — digite abaixo.');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordingStreamRef.current = stream;
+      recordedChunksRef.current = [];
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : 'audio/webm';
+      const recorder = new MediaRecorder(stream, { mimeType });
+      recorder.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size > 0) recordedChunksRef.current.push(ev.data);
+      };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        recordingStreamRef.current = null;
+        mediaRecorderRef.current = null;
+        const blob = new Blob(recordedChunksRef.current, { type: mimeType });
+        recordedChunksRef.current = [];
+        if (blob.size < 400) {
+          appendVoiceLog('Áudio muito curto ignorado.');
+          return;
+        }
+        appendVoiceLog(`Áudio gravado (${(blob.size / 1024).toFixed(1)} KB) → enviando para /voice/transcribe...`);
+        setProcessing(true);
+        try {
+          const base64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const raw = String(reader.result || '');
+              resolve(raw.includes(',') ? raw.split(',')[1] : raw);
+            };
+            reader.onerror = () => reject(new Error('Falha ao ler áudio'));
+            reader.readAsDataURL(blob);
+          });
+          const res = await transcribeVoiceAudio({
+            audio_base64: base64,
+            mime_type: mimeType,
+            language: 'pt',
+          });
+          appendVoiceLog(`Transcrito (${res.provider}/${res.model}): "${res.transcript}"`);
+          setProcessing(false);
+          void handleSendCommand(res.transcript);
+        } catch (err: any) {
+          setProcessing(false);
+          const msg = err?.message || 'Falha na transcrição pelo servidor.';
+          appendVoiceLog(`Erro /voice/transcribe: ${msg}`);
+          setMicHint(msg);
+          setShowLogs(true);
+        }
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setListening(true);
+      setMicHint('Gravando áudio (modo servidor) — toque no botão para enviar.');
+      appendVoiceLog(`MediaRecorder iniciado (${mimeType})`);
+    } catch (err: any) {
+      setListening(false);
+      appendVoiceLog(`Falha MediaRecorder: ${err?.name || 'Error'} — ${err?.message || err}`);
+      setMicHint('Permita o microfone no navegador ou digite abaixo.');
+    }
+  };
+
   const startMicrophone = (silentIfUnsupported = false) => {
     const SpeechRecognitionCtor =
       (window as unknown as { SpeechRecognition?: any; webkitSpeechRecognition?: any }).SpeechRecognition ||
       (window as unknown as { webkitSpeechRecognition?: any }).webkitSpeechRecognition;
 
+    appendVoiceLog(
+      `Browser: ${navigator.userAgent.includes('Chromium') ? 'Chromium' : navigator.userAgent.includes('Chrome') ? 'Chrome' : 'Outro'} | SpeechRecognition=${Boolean(SpeechRecognitionCtor)}`
+    );
+
     if (!SpeechRecognitionCtor) {
-      const msg = 'Microfone indisponível neste navegador — digite abaixo.';
-      setMicHint(msg);
-      if (!silentIfUnsupported) notify(msg, 'info');
+      appendVoiceLog('SpeechRecognition indisponível; ativando MediaRecorder (servidor).');
+      if (!silentIfUnsupported) void startMediaRecorderFallback();
       return;
     }
 
@@ -190,6 +299,10 @@ export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({
       rec.lang = 'pt-BR';
       rec.interimResults = true;
       rec.maxAlternatives = 1;
+      rec.onstart = () => appendVoiceLog('onstart: reconhecimento iniciado (pt-BR)');
+      rec.onaudiostart = () => appendVoiceLog('onaudiostart: captura de áudio iniciada');
+      rec.onsoundstart = () => appendVoiceLog('onsoundstart: som detectado');
+      rec.onspeechstart = () => appendVoiceLog('onspeechstart: fala detectada');
       rec.onresult = (event: any) => {
         let interim = '';
         let finalText = '';
@@ -198,27 +311,45 @@ export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({
           if (event.results[i]?.isFinal) finalText += chunk;
           else interim += chunk;
         }
-        if (interim.trim()) setInputText(interim.trim());
+        if (interim.trim()) {
+          setInputText(interim.trim());
+          appendVoiceLog(`onresult (parcial): "${interim.trim()}"`);
+        }
         if (finalText.trim()) {
+          appendVoiceLog(`onresult (final): "${finalText.trim()}"`);
           setListening(false);
           setInputText('');
           void handleSendCommand(finalText.trim());
         }
       };
       rec.onerror = (ev: any) => {
+        const code = ev?.error || 'unknown';
+        const detail = ev?.message ? ` (${ev.message})` : '';
+        appendVoiceLog(`onerror: ${code}${detail}`);
         setListening(false);
-        if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
+        if (code === 'not-allowed' || code === 'service-not-allowed') {
           setMicHint('Permita o microfone no navegador ou digite abaixo.');
+        } else if (code === 'network') {
+          appendVoiceLog('SpeechRecognition falhou com "network" → alternando para MediaRecorder (servidor)...');
+          void startMediaRecorderFallback();
+        } else if (code === 'audio-capture') {
+          setMicHint('Sem captura de áudio (verifique o microfone no sistema).');
+          setShowLogs(true);
+          void probeMicrophoneHardware();
         } else if (!silentIfUnsupported) {
-          setMicHint('Não captei áudio — toque no botão para tentar de novo.');
+          setMicHint(`Erro de voz (${code}) — toque para tentar de novo.`);
         }
       };
-      rec.onend = () => setListening(false);
+      rec.onend = () => {
+        appendVoiceLog('onend: reconhecimento finalizado');
+        setListening(false);
+      };
       recognitionRef.current = rec;
       rec.start();
       setListening(true);
-    } catch {
+    } catch (err: any) {
       setListening(false);
+      appendVoiceLog(`Exceção rec.start(): ${err?.message || err}`);
       setMicHint('Toque para liberar o microfone ou digite abaixo.');
     }
   };
@@ -386,6 +517,16 @@ export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({
           )}
           <button
             type="button"
+            onClick={() => setShowLogs((prev) => !prev)}
+            className={`btn btn-icon-sm ${showLogs ? 'btn-secondary is-active' : 'btn-ghost'}`}
+            title="Ver log de diagnóstico da voz"
+            aria-label="Ver log de diagnóstico da voz"
+            aria-pressed={showLogs}
+          >
+            <Terminal size={13} />
+          </button>
+          <button
+            type="button"
             onClick={onClose}
             className="btn btn-ghost btn-icon-sm"
             title="Fechar (Esc)"
@@ -395,6 +536,46 @@ export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({
           </button>
         </div>
       </div>
+
+      {showLogs && (
+        <div
+          style={{
+            padding: '8px 10px',
+            borderRadius: '12px',
+            backgroundColor: 'var(--bg-primary)',
+            border: '1px solid var(--border-color)',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.68rem',
+            color: 'var(--text-secondary)',
+            maxHeight: '130px',
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '3px',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
+            <span style={{ color: 'var(--accent-light)', fontWeight: 600 }}>Log de Voz (Chromium/Browser)</span>
+            <button
+              type="button"
+              onClick={() => void probeMicrophoneHardware()}
+              className="btn btn-ghost btn-xs"
+              style={{ padding: '2px 6px', fontSize: '0.66rem' }}
+            >
+              Testar Mic
+            </button>
+          </div>
+          {voiceLogs.length === 0 ? (
+            <span style={{ color: 'var(--text-muted)' }}>Nenhum evento registrado ainda.</span>
+          ) : (
+            voiceLogs.map((line, i) => (
+              <div key={`${i}-${line.slice(0, 12)}`} style={{ wordBreak: 'break-word' }}>
+                {line}
+              </div>
+            ))
+          )}
+        </div>
+      )}
 
       {latestTurn && (
         <div style={s.siriReplyBox}>
