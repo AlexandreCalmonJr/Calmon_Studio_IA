@@ -1,5 +1,8 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import express, { Request, Response, Router } from 'express';
+import JSZip from 'jszip';
 import {
   serverState,
   requireAuth,
@@ -9,7 +12,10 @@ import {
   UserAccount,
   IdeCheckpointServer,
   SentinelIncidentServer,
+  persistStateNamespace,
 } from '../serverState.ts';
+import { resolveSafeProjectFilePath } from '../serverHardening.ts';
+import type { LocalSqliteBrainStore } from '../brain/sqliteBrainStore.ts';
 import { analyzeProjectArchitecture } from '../architectureAnalyzer.ts';
 import { runHybridInference } from '../hybridAiEngine.ts';
 import {
@@ -78,15 +84,146 @@ function buildDeterministicIdeProposal(
   };
 }
 
-export function createWorkspaceRouter(): Router {
+export interface WorkspaceRouterDeps {
+  store?: LocalSqliteBrainStore;
+}
+
+export function createWorkspaceRouter(deps?: WorkspaceRouterDeps): Router {
   const router = express.Router();
+  const store = deps?.store;
+
+  const persistWorkspace = () => {
+    persistStateNamespace(store, 'workspace_projects', serverState.workspaceProjects);
+    persistStateNamespace(store, 'ide_files', serverState.ideFiles);
+    persistStateNamespace(store, 'ide_checkpoints', serverState.ideCheckpoints.slice(0, 60));
+    persistStateNamespace(store, 'project_memories', Array.from(serverState.projectMemories.entries()));
+  };
 
   // --- WORKSPACE ---
   router.get('/workspace/projects', requireAuth, (_req: Request, res: Response) => res.json(serverState.workspaceProjects));
 
+  router.delete('/workspace/projects/:id', requireAuth, (req: Request, res: Response) => {
+    const projectId = String(req.params.id || '').trim();
+    const before = serverState.workspaceProjects.length;
+    serverState.workspaceProjects = serverState.workspaceProjects.filter((p) => p.id !== projectId);
+    if (serverState.workspaceProjects.length === before) {
+      res.status(404).json({ detail: 'Projeto não encontrado no workspace.' });
+      return;
+    }
+    serverState.projectMemories.delete(projectId);
+    persistWorkspace();
+    res.json({ deleted: true, project_id: projectId });
+  });
+
+  router.post('/workspace/import', requireAuth, (req: Request, res: Response) => {
+    const rawFolder = String(req.body?.folder_path || '').trim();
+    if (!rawFolder) {
+      res.status(400).json({ detail: 'Informe o caminho relativo da pasta do projeto.' });
+      return;
+    }
+    let resolvedDir: string;
+    try {
+      resolvedDir = resolveSafeProjectFilePath(process.cwd(), rawFolder);
+    } catch (err: any) {
+      res.status(400).json({ detail: err?.message || 'Caminho de pasta inválido.' });
+      return;
+    }
+    if (!fs.existsSync(resolvedDir) || !fs.statSync(resolvedDir).isDirectory()) {
+      res.status(404).json({ detail: 'Pasta não encontrada no diretório de trabalho.' });
+      return;
+    }
+    const entries = fs.readdirSync(resolvedDir, { withFileTypes: true }).slice(0, 40);
+    const files = entries.filter((e) => e.isFile()).map((e) => `${rawFolder.replace(/\/+$/, '')}/${e.name}`);
+    const projectName = String(req.body?.name || path.basename(resolvedDir)).trim().slice(0, 80);
+    const id = `proj_${projectName.toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 28)}_${Date.now().toString(36)}`;
+    const created = {
+      id,
+      name: projectName,
+      description: `Projeto importado de ${rawFolder} (${files.length} arquivos detectados).`,
+      path: rawFolder,
+      files,
+      created_at: nowIso(),
+    };
+    serverState.workspaceProjects.unshift(created as any);
+    persistWorkspace();
+    res.status(201).json(created);
+  });
+
   router.get('/workspace/projects/:id/file', requireAuth, (req: Request, res: Response) => {
-    const filePath = String(req.query.path || '');
-    res.json({ path: filePath, content: `// Visualização segura de ${filePath}\n` });
+    const filePath = String(req.query.path || '').trim();
+    if (!filePath) {
+      res.status(400).json({ detail: 'Informe o parâmetro path do arquivo.' });
+      return;
+    }
+    const ideMatch = serverState.ideFiles.find((f) => f.path === filePath);
+    if (ideMatch) {
+      res.json({ path: ideMatch.path, content: ideMatch.content, source: 'ide_store' });
+      return;
+    }
+    let resolved: string;
+    try {
+      resolved = resolveSafeProjectFilePath(process.cwd(), filePath);
+    } catch (err: any) {
+      res.status(400).json({ detail: err?.message || 'Caminho de arquivo fora do workspace.' });
+      return;
+    }
+    if (isProtectedSecretPath(filePath) && serverState.vaultLocked) {
+      res.status(403).json({ detail: 'Vault Lock ativo: arquivo sensível protegido.' });
+      return;
+    }
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+      res.status(404).json({ detail: `Arquivo "${filePath}" não encontrado.` });
+      return;
+    }
+    const content = fs.readFileSync(resolved, 'utf8').slice(0, 200_000);
+    res.json({ path: filePath, content, source: 'workspace_fs' });
+  });
+
+  router.post('/workspace/projects/:id/files/write', requireAuth, (req: Request, res: Response) => {
+    const filePath = String(req.body?.path || '').trim();
+    const content = typeof req.body?.content === 'string' ? req.body.content : '';
+    const reason = String(req.body?.reason || `Atualização em ${filePath}`).trim();
+    if (!filePath) {
+      res.status(400).json({ detail: 'Caminho de arquivo obrigatório.' });
+      return;
+    }
+    try {
+      resolveSafeProjectFilePath(process.cwd(), filePath);
+    } catch (err: any) {
+      res.status(400).json({ detail: err?.message || 'Caminho fora do workspace permitido.' });
+      return;
+    }
+    if (isProtectedSecretPath(filePath) && serverState.vaultLocked) {
+      res.status(403).json({ detail: 'Vault Lock ativo: edição de arquivo sensível bloqueada.' });
+      return;
+    }
+    let existing = serverState.ideFiles.find((f) => f.path === filePath);
+    const prev = existing?.content || '';
+    if (!existing) {
+      existing = {
+        path: filePath,
+        language: filePath.endsWith('.md') ? 'markdown' : 'typescript',
+        content,
+        protected: isProtectedSecretPath(filePath),
+        updated_at: nowIso(),
+      };
+      serverState.ideFiles.push(existing);
+    } else {
+      existing.content = content;
+      existing.updated_at = nowIso();
+    }
+    const checkpoint: IdeCheckpointServer = {
+      id: `chk_${crypto.randomBytes(4).toString('hex')}`,
+      file_path: filePath,
+      label: reason,
+      agent_name: (req as Request & { jarvisUser?: UserAccount }).jarvisUser?.username || 'workspace',
+      previous_content: prev,
+      new_content: content,
+      created_at: nowIso(),
+    };
+    serverState.ideCheckpoints.unshift(checkpoint);
+    persistWorkspace();
+    res.json({ status: 'saved', file: existing, checkpoint });
   });
 
   router.get('/workspace/projects/:id/memory', requireAuth, (req: Request, res: Response) => {
@@ -98,14 +235,112 @@ export function createWorkspaceRouter(): Router {
     const entry = { id: `pm_${Date.now()}`, ...req.body, created_at: nowIso() };
     list.unshift(entry);
     serverState.projectMemories.set(req.params.id, list);
+    persistWorkspace();
     res.status(201).json(entry);
   });
 
   router.get('/workspace/projects/:id/git-history', requireAuth, (_req: Request, res: Response) => {
-    res.json([
-      { hash: 'a1b2c3d', message: 'feat: redesign Obsidian Studio design system', author: 'admin', date: nowIso() },
-      { hash: 'e4f5g6h', message: 'fix: enforce HttpOnly cookie auth middleware', author: 'admin', date: new Date(Date.now() - 1000 * 60 * 60).toISOString() },
-    ]);
+    const checkpointCommits = serverState.ideCheckpoints.slice(0, 12).map((chk) => ({
+      hash: chk.id.slice(-7),
+      message: `${chk.label} (${chk.file_path})`,
+      author: chk.agent_name,
+      date: chk.created_at,
+    }));
+    res.json(
+      checkpointCommits.length > 0
+        ? checkpointCommits
+        : [
+            { hash: 'a1b2c3d', message: 'feat: Obsidian Studio design system', author: 'admin', date: nowIso() },
+          ]
+    );
+  });
+
+  router.post('/workspace/projects/:id/rollback', requireAuth, (req: Request, res: Response) => {
+    const latest = serverState.ideCheckpoints[0];
+    if (!latest) {
+      res.status(404).json({ detail: 'Nenhum checkpoint disponível para rollback neste projeto.' });
+      return;
+    }
+    const file = serverState.ideFiles.find((f) => f.path === latest.file_path);
+    if (file) {
+      file.content = latest.previous_content;
+      file.updated_at = nowIso();
+    }
+    persistWorkspace();
+    res.json({ status: 'rolled_back', checkpoint_id: latest.id, file_path: latest.file_path });
+  });
+
+  router.get('/workspace/projects/:id/preview', requireAuth, (req: Request, res: Response) => {
+    const proj = serverState.workspaceProjects.find((p) => p.id === req.params.id);
+    const title = proj ? String(proj.name).replace(/[<>&"]/g, '') : String(req.params.id).replace(/[<>&"]/g, '');
+    res.type('text/html').send(
+      `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${title}</title></head><body style="font-family:sans-serif;padding:24px;background:#0b0d12;color:#f1f5f9"><h1>${title}</h1><p>Pré-visualização ativa do projeto no Workspace JARVIS.</p></body></html>`
+    );
+  });
+
+  router.get('/workspace/projects/:id/export-zip', requireAuth, async (req: Request, res: Response) => {
+    const projectId = String(req.params.id || 'workspace').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const zip = new JSZip();
+    for (const file of serverState.ideFiles) {
+      if (!isProtectedSecretPath(file.path)) {
+        zip.file(file.path, file.content);
+      }
+    }
+    const proj = serverState.workspaceProjects.find((p) => p.id === req.params.id);
+    zip.file(
+      'README.jarvis.md',
+      `# ${proj?.name || projectId}\n\nExportado em ${nowIso()} pelo Workspace do JARVIS AI Hub.\n`
+    );
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${projectId}.zip"`);
+    res.send(buffer);
+  });
+
+  router.post('/workspace/projects/:id/dockerize', requireAuth, (req: Request, res: Response) => {
+    const projectId = String(req.params.id || 'workspace');
+    const dockerfileContent = `FROM node:22-alpine\nWORKDIR /app\nCOPY package*.json ./\nRUN npm ci --omit=dev\nCOPY . .\nEXPOSE 3000\nCMD ["npm", "start"]\n`;
+    const existing = serverState.ideFiles.find((f) => f.path === 'Dockerfile');
+    if (existing) {
+      existing.content = dockerfileContent;
+      existing.updated_at = nowIso();
+    } else {
+      serverState.ideFiles.push({
+        path: 'Dockerfile',
+        language: 'dockerfile',
+        content: dockerfileContent,
+        protected: false,
+        updated_at: nowIso(),
+      });
+    }
+    persistWorkspace();
+    res.json({ status: 'dockerized', project_id: projectId, files: ['Dockerfile'] });
+  });
+
+  router.post('/workspace/open-root', requireAuth, (_req: Request, res: Response) => {
+    res.json({
+      status: 'web_mode',
+      path: '.jarvis-brain/workspaces',
+      message: 'Ambiente em navegador/servidor: utilize a IDE integrada ou Exportar ZIP para acessar os arquivos.',
+    });
+  });
+
+  router.post('/workspace/projects/:id/open-folder', requireAuth, (req: Request, res: Response) => {
+    const proj = serverState.workspaceProjects.find((p) => p.id === req.params.id);
+    res.json({
+      status: 'web_mode',
+      project_id: req.params.id,
+      path: proj?.path || req.params.id,
+      message: 'Ambiente web ativo: navegue pelos arquivos na IDE ou baixe o pacote ZIP do projeto.',
+    });
+  });
+
+  router.post('/workspace/projects/:id/open-code', requireAuth, (req: Request, res: Response) => {
+    res.json({
+      status: 'web_mode',
+      project_id: req.params.id,
+      message: 'Abra o projeto diretamente na aba IDE & Código ou exporte em ZIP para editar no VS Code local.',
+    });
   });
 
   // --- AGENTE DE ARQUITETURA (ANÁLISE REAL DO PROJETO) ---
@@ -294,6 +529,7 @@ ${original}
       details: `Checkpoint ${checkpoint.id} criado (${label})`,
     });
 
+    persistWorkspace();
     broadcastRealtimeEvent('ide_checkpoint_created', { checkpoint, file_path: filePath });
     res.json({ file, checkpoint });
   });
@@ -336,6 +572,7 @@ ${original}
       details: `Rollback executado a partir do checkpoint ${checkpoint.id}`,
     });
 
+    persistWorkspace();
     broadcastRealtimeEvent('ide_checkpoint_created', { checkpoint: revertCheckpoint, file_path: file.path });
     res.json({ restored: true, file, checkpoint: revertCheckpoint });
   });

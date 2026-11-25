@@ -108,10 +108,21 @@ export const UsageAnalyticsView: React.FC = () => {
   useEffect(() => {
     void refresh();
     const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       void loadHardwareMetrics();
       void loadTelemetry();
     }, 30000);
-    return () => clearInterval(interval);
+    const handleVisibility = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        void loadHardwareMetrics();
+        void loadTelemetry();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

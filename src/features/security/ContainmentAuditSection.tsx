@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { triggerKillSwitch, fetchAuditLogs } from '../../api';
 import { API_BASE } from '../../services/api/client';
+import { apiFetch } from '../../services/sessionTransport';
 import { getOperationLabel, getSeverityLabel, getStatusLabel } from '../../types';
 import { ConfirmDialog } from '../../shared/common/ConfirmDialog';
 
@@ -52,7 +53,7 @@ export const ContainmentAuditSection: React.FC<ContainmentAuditSectionProps> = (
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${API_BASE}/auth/me`, { credentials: 'include' })
+    apiFetch(`${API_BASE}/auth/me`)
       .then(async (response) => (response.ok ? response.json() : null))
       .then((principal) => {
         if (!cancelled) setCanKill(principal?.kind === 'human' && principal?.role === 'admin');

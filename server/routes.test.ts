@@ -325,11 +325,12 @@ test('Fase 2 Modular Backend: buildApiRouter mounts all 15 domain routers and en
       assert.equal(createMockRes.status, 201);
       assert.ok(serverState.mockEndpoints.some((ep) => ep.path === '/api/teste-centralizado'));
 
-      // Verifica fallback para endpoints não mapeados
+      // Verifica 404 estruturado para endpoints não mapeados
       const unmappedRes = await fetch(`${baseUrl}/nonexistent/endpoint`, { headers: authHeaders });
-      assert.equal(unmappedRes.status, 200);
+      assert.equal(unmappedRes.status, 404);
       const unmappedJson = await unmappedRes.json();
-      assert.deepEqual(unmappedJson, { status: 'ok', items: [] });
+      assert.equal(unmappedJson.status, 404);
+      assert.equal(unmappedJson.error, 'Not Found');
     });
   } finally {
     server.close();

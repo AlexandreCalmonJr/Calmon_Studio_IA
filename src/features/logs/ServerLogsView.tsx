@@ -153,6 +153,7 @@ export const ServerLogsView: React.FC = () => {
   useEffect(() => {
     if (!isAdmin) return;
     const interval = setInterval(async () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       try {
         setMetrics(toModelMetrics(await fetchOverviewTelemetry(50)));
         setMetricsError(null);

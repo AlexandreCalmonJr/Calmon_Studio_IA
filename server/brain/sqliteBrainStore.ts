@@ -2136,6 +2136,215 @@ export class LocalSqliteBrainStore {
     return true;
   }
 
+  // ==================== PERSISTÊNCIA OPERACIONAL UNIFICADA (SQLITE WAL) ====================
+
+  public saveStateNamespace(namespace: string, payload: unknown): void {
+    const cleanNs = String(namespace || '').trim().slice(0, 80);
+    if (!cleanNs || this.closed) return;
+    this.db
+      .prepare(
+        `INSERT INTO app_state_snapshots (namespace, payload_json, updated_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(namespace) DO UPDATE SET
+           payload_json = excluded.payload_json,
+           updated_at = excluded.updated_at`
+      )
+      .run(cleanNs, JSON.stringify(payload), nowIso());
+  }
+
+  public loadStateNamespace<T>(namespace: string): T | null {
+    const cleanNs = String(namespace || '').trim().slice(0, 80);
+    if (!cleanNs || this.closed) return null;
+    const row = this.db
+      .prepare('SELECT payload_json FROM app_state_snapshots WHERE namespace = ?')
+      .get(cleanNs) as { payload_json?: string } | undefined;
+    if (!row?.payload_json) return null;
+    return safeJsonParse<T | null>(row.payload_json, null);
+  }
+
+  public upsertTaskRecord(task: Record<string, unknown>): void {
+    if (this.closed) return;
+    const taskId = String(task.task_id || task.id || `tsk_${Date.now()}`).slice(0, 128);
+    const sessionId = task.session_id ? String(task.session_id).slice(0, 128) : null;
+    const userPrompt = String(task.user_prompt || task.prompt || '').slice(0, 4000);
+    const status = String(task.status || (task.is_completed ? 'completed' : 'running')).slice(0, 32);
+    const createdAt = String(task.created_at || nowIso());
+    this.db
+      .prepare(
+        `INSERT INTO app_tasks (task_id, session_id, user_prompt, status, payload_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(task_id) DO UPDATE SET
+           session_id = excluded.session_id,
+           user_prompt = excluded.user_prompt,
+           status = excluded.status,
+           payload_json = excluded.payload_json`
+      )
+      .run(taskId, sessionId, userPrompt, status, JSON.stringify(task), createdAt);
+  }
+
+  public listTaskRecords(limit = 200): Record<string, unknown>[] {
+    if (this.closed) return [];
+    const safeLimit = Math.max(1, Math.min(500, Math.floor(limit)));
+    const rows = this.db
+      .prepare('SELECT payload_json FROM app_tasks ORDER BY created_at DESC LIMIT ?')
+      .all(safeLimit) as Array<{ payload_json: string }>;
+    return rows
+      .map((r) => safeJsonParse<Record<string, unknown> | null>(r.payload_json, null))
+      .filter((item): item is Record<string, unknown> => Boolean(item));
+  }
+
+  public deleteTaskRecord(taskId: string): boolean {
+    if (this.closed) return false;
+    const res = this.db.prepare('DELETE FROM app_tasks WHERE task_id = ?').run(String(taskId));
+    return Number(res.changes || 0) > 0;
+  }
+
+  public purgeOldTaskRecords(daysRetention: number): number {
+    if (this.closed) return 0;
+    const safeDays = Math.max(0, Math.min(3650, Number.isFinite(daysRetention) ? daysRetention : 30));
+    const cutoffIso = new Date(Date.now() - safeDays * 24 * 60 * 60 * 1000).toISOString();
+    const res = this.db
+      .prepare('DELETE FROM app_tasks WHERE created_at <= ?')
+      .run(cutoffIso);
+    return Number(res.changes || 0);
+  }
+
+  public appendCodingMessage(input: {
+    session_id: string;
+    project_id?: string | null;
+    role: string;
+    content: string;
+    tool_calls?: unknown[];
+    tool_call_id?: string | null;
+    tool_name?: string | null;
+  }): {
+    id: number;
+    session_id: string;
+    project_id: string | null;
+    role: string;
+    content: string;
+    tool_calls?: unknown[];
+    tool_call_id?: string | null;
+    tool_name?: string | null;
+    created_at: string;
+  } {
+    const createdAt = nowIso();
+    const info = this.db
+      .prepare(
+        `INSERT INTO coding_session_messages
+          (session_id, project_id, role, content, tool_calls_json, tool_call_id, tool_name, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        input.session_id.slice(0, 128),
+        input.project_id ? String(input.project_id).slice(0, 128) : null,
+        String(input.role || 'user').slice(0, 32),
+        String(input.content || '').slice(0, 32000),
+        input.tool_calls ? JSON.stringify(input.tool_calls) : null,
+        input.tool_call_id ? String(input.tool_call_id).slice(0, 128) : null,
+        input.tool_name ? String(input.tool_name).slice(0, 128) : null,
+        createdAt
+      );
+    return {
+      id: Number(info.lastInsertRowid || Date.now()),
+      session_id: input.session_id,
+      project_id: input.project_id || null,
+      role: input.role,
+      content: input.content,
+      tool_calls: input.tool_calls,
+      tool_call_id: input.tool_call_id || null,
+      tool_name: input.tool_name || null,
+      created_at: createdAt,
+    };
+  }
+
+  public listCodingMessages(sessionId: string): Array<{
+    id: number;
+    session_id: string;
+    project_id: string | null;
+    role: string;
+    content: string;
+    tool_calls?: unknown[];
+    tool_call_id?: string | null;
+    tool_name?: string | null;
+    created_at: string;
+  }> {
+    if (this.closed) return [];
+    const rows = this.db
+      .prepare('SELECT * FROM coding_session_messages WHERE session_id = ? ORDER BY id ASC LIMIT 200')
+      .all(String(sessionId)) as Array<Record<string, unknown>>;
+    return rows.map((row) => ({
+      id: Number(row.id),
+      session_id: String(row.session_id),
+      project_id: row.project_id ? String(row.project_id) : null,
+      role: String(row.role),
+      content: String(row.content),
+      tool_calls: row.tool_calls_json ? safeJsonParse<unknown[]>(String(row.tool_calls_json), undefined as any) : undefined,
+      tool_call_id: row.tool_call_id ? String(row.tool_call_id) : null,
+      tool_name: row.tool_name ? String(row.tool_name) : null,
+      created_at: String(row.created_at),
+    }));
+  }
+
+  public clearCodingMessages(sessionId: string): number {
+    if (this.closed) return 0;
+    const res = this.db
+      .prepare('DELETE FROM coding_session_messages WHERE session_id = ?')
+      .run(String(sessionId));
+    return Number(res.changes || 0);
+  }
+
+  public appendAgentHistoryMessage(
+    agentRole: string,
+    sessionId: string,
+    role: 'user' | 'assistant' | 'tool',
+    content: string
+  ): { id: number; agent_role: string; session_id: string; role: string; content: string; created_at: string } {
+    const createdAt = nowIso();
+    const info = this.db
+      .prepare(
+        `INSERT INTO agent_conversation_history (agent_role, session_id, role, content, created_at)
+         VALUES (?, ?, ?, ?, ?)`
+      )
+      .run(
+        normalizeAgentRoleSlug(agentRole),
+        String(sessionId || 'default').slice(0, 128),
+        role,
+        String(content || '').slice(0, 32000),
+        createdAt
+      );
+    return {
+      id: Number(info.lastInsertRowid || Date.now()),
+      agent_role: normalizeAgentRoleSlug(agentRole),
+      session_id: String(sessionId || 'default'),
+      role,
+      content,
+      created_at: createdAt,
+    };
+  }
+
+  public listAgentHistoryMessages(
+    agentRole: string,
+    sessionId = 'default'
+  ): Array<{ id: number; agent_role: string; session_id: string; role: string; content: string; created_at: string }> {
+    if (this.closed) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM agent_conversation_history
+         WHERE agent_role = ? AND session_id = ?
+         ORDER BY id ASC LIMIT 200`
+      )
+      .all(normalizeAgentRoleSlug(agentRole), String(sessionId || 'default')) as Array<Record<string, unknown>>;
+    return rows.map((row) => ({
+      id: Number(row.id),
+      agent_role: String(row.agent_role),
+      session_id: String(row.session_id),
+      role: String(row.role),
+      content: String(row.content),
+      created_at: String(row.created_at),
+    }));
+  }
+
   public close(): void {
     if (this.closed) return;
     this.closed = true;

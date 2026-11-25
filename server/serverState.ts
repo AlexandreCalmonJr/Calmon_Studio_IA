@@ -820,11 +820,11 @@ export const serverState = {
   agentRoutes: [
     {
       agent_role: 'jarvis_master',
-      key_id: 'local-ollama-default',
-      model: 'qwen2.5-coder:14b',
-      key_label: 'Ollama Local Runtime',
-      provider: 'ollama',
-      key_available: true,
+      key_id: 'gemini-server-default',
+      model: 'gemini-4-hydrogen',
+      key_label: 'Gemini Online Runtime',
+      provider: 'gemini',
+      key_available: isGeminiApiConfigured(),
       updated_at: nowIso(),
     },
   ] as Array<Record<string, unknown>>,
@@ -2227,3 +2227,206 @@ export const createFreshPairingSession = (opts?: {
 };
 
 serverState.activePairingSession = createFreshPairingSession();
+
+export function persistStateNamespace(
+  store: LocalSqliteBrainStore | undefined,
+  namespace: string,
+  value: unknown
+): void {
+  if (!store) return;
+  try {
+    store.saveStateNamespace(namespace, value);
+  } catch {
+    // Non-fatal fallback if database is closed during test teardown
+  }
+}
+
+export function persistAllUsersAndProfiles(store: LocalSqliteBrainStore | undefined): void {
+  if (!store) return;
+  persistStateNamespace(store, 'users', Array.from(users.entries()));
+  persistStateNamespace(store, 'user_profiles', Array.from(userProfiles.entries()));
+  persistStateNamespace(store, 'learning_progress', Array.from(learningProgress.entries()));
+}
+
+export function hydrateServerStateFromSqlite(store: LocalSqliteBrainStore): void {
+  const savedUsers = store.loadStateNamespace<Array<[string, UserAccount]>>('users');
+  if (Array.isArray(savedUsers)) {
+    for (const [k, u] of savedUsers) {
+      if (k && u?.username) users.set(k, u);
+    }
+  }
+
+  const savedProfiles = store.loadStateNamespace<Array<[string, Record<string, any>]>>('user_profiles');
+  if (Array.isArray(savedProfiles)) {
+    for (const [k, p] of savedProfiles) {
+      if (k && p) userProfiles.set(k, p);
+    }
+  }
+
+  const savedLearning = store.loadStateNamespace<Array<[string, { completed_modules: string[]; updated_at: string }]>>('learning_progress');
+  if (Array.isArray(savedLearning)) {
+    for (const [k, l] of savedLearning) {
+      if (k && l) learningProgress.set(k, l);
+    }
+  }
+
+  const savedChatSessions = store.loadStateNamespace<Array<[string, StoredChatSession]>>('chat_sessions');
+  if (Array.isArray(savedChatSessions)) {
+    serverState.chatSessions.clear();
+    for (const [k, s] of savedChatSessions) {
+      if (k && s?.session_id) serverState.chatSessions.set(k, s);
+    }
+  }
+
+  const savedTasks = store.listTaskRecords(250);
+  if (savedTasks.length > 0) {
+    serverState.tasksList = savedTasks;
+  }
+
+  const savedSkills = store.loadStateNamespace<typeof serverState.skillsList>('skills_list');
+  if (Array.isArray(savedSkills) && savedSkills.length > 0) {
+    serverState.skillsList = savedSkills;
+  }
+
+  const savedKnowledge = store.loadStateNamespace<typeof serverState.knowledgeDocs>('knowledge_docs');
+  if (Array.isArray(savedKnowledge)) {
+    serverState.knowledgeDocs = savedKnowledge;
+  }
+
+  const savedBrainMemories = store.loadStateNamespace<typeof serverState.brainMemories>('brain_memories');
+  if (Array.isArray(savedBrainMemories)) {
+    serverState.brainMemories = savedBrainMemories;
+  }
+
+  const savedWorkflows = store.loadStateNamespace<typeof serverState.savedWorkflows>('saved_workflows');
+  if (Array.isArray(savedWorkflows)) {
+    serverState.savedWorkflows = savedWorkflows;
+  }
+
+  const savedWorkflowRuns = store.loadStateNamespace<typeof serverState.workflowRuns>('workflow_runs');
+  if (Array.isArray(savedWorkflowRuns)) {
+    serverState.workflowRuns = savedWorkflowRuns;
+  }
+
+  const savedWorkspaceProjects = store.loadStateNamespace<typeof serverState.workspaceProjects>('workspace_projects');
+  if (Array.isArray(savedWorkspaceProjects)) {
+    serverState.workspaceProjects = savedWorkspaceProjects;
+  }
+
+  const savedIdeFiles = store.loadStateNamespace<typeof serverState.ideFiles>('ide_files');
+  if (Array.isArray(savedIdeFiles)) {
+    serverState.ideFiles = savedIdeFiles;
+  }
+
+  const savedIdeCheckpoints = store.loadStateNamespace<typeof serverState.ideCheckpoints>('ide_checkpoints');
+  if (Array.isArray(savedIdeCheckpoints)) {
+    serverState.ideCheckpoints = savedIdeCheckpoints;
+  }
+
+  const savedProjectMemories = store.loadStateNamespace<Array<[string, any[]]>>('project_memories');
+  if (Array.isArray(savedProjectMemories)) {
+    serverState.projectMemories.clear();
+    for (const [k, v] of savedProjectMemories) {
+      if (k && Array.isArray(v)) serverState.projectMemories.set(k, v);
+    }
+  }
+
+  const savedApprovals = store.loadStateNamespace<typeof serverState.approvals>('approvals');
+  if (Array.isArray(savedApprovals)) {
+    serverState.approvals = savedApprovals;
+  }
+
+  const savedPermissions = store.loadStateNamespace<typeof serverState.permissionsMatrix>('permissions_matrix');
+  if (Array.isArray(savedPermissions) && savedPermissions.length > 0) {
+    serverState.permissionsMatrix = savedPermissions;
+  }
+
+  const savedIncidents = store.loadStateNamespace<typeof serverState.sentinelIncidents>('sentinel_incidents');
+  if (Array.isArray(savedIncidents)) {
+    serverState.sentinelIncidents = savedIncidents;
+  }
+
+  const savedSecurityFlags = store.loadStateNamespace<{
+    networkIsolated?: boolean;
+    killSwitchActive?: boolean;
+    vaultLocked?: boolean;
+    piiShieldEnabled?: boolean;
+    quarantinedAgents?: string[];
+    onboardingCompleted?: boolean;
+    brainAutoDistill?: boolean;
+    appliedPolicies?: Array<{ id: string; project_id: string; template_id: string; applied_at: string; actor: string }>;
+  }>('security_flags');
+  if (savedSecurityFlags) {
+    if (typeof savedSecurityFlags.networkIsolated === 'boolean') serverState.networkIsolated = savedSecurityFlags.networkIsolated;
+    if (typeof savedSecurityFlags.killSwitchActive === 'boolean') serverState.killSwitchActive = savedSecurityFlags.killSwitchActive;
+    if (typeof savedSecurityFlags.vaultLocked === 'boolean') serverState.vaultLocked = savedSecurityFlags.vaultLocked;
+    if (typeof savedSecurityFlags.piiShieldEnabled === 'boolean') serverState.piiShieldEnabled = savedSecurityFlags.piiShieldEnabled;
+    if (Array.isArray(savedSecurityFlags.quarantinedAgents)) serverState.quarantinedAgents = savedSecurityFlags.quarantinedAgents;
+    if (typeof savedSecurityFlags.onboardingCompleted === 'boolean') serverState.onboardingCompleted = savedSecurityFlags.onboardingCompleted;
+    if (typeof savedSecurityFlags.brainAutoDistill === 'boolean') serverState.brainAutoDistill = savedSecurityFlags.brainAutoDistill;
+  }
+
+  const savedTelemetry = store.loadStateNamespace<typeof serverState.telemetryRecords>('telemetry_records');
+  if (Array.isArray(savedTelemetry)) {
+    serverState.telemetryRecords = savedTelemetry;
+  }
+
+  const savedConnectors = store.loadStateNamespace<typeof serverState.integrationConnectors>('integration_connectors');
+  if (Array.isArray(savedConnectors) && savedConnectors.length > 0) {
+    serverState.integrationConnectors = savedConnectors;
+  }
+
+  const savedContextSets = store.loadStateNamespace<typeof serverState.contextSets>('context_sets');
+  if (Array.isArray(savedContextSets)) {
+    serverState.contextSets = savedContextSets;
+  }
+
+  const savedMockEndpoints = store.loadStateNamespace<typeof serverState.mockEndpoints>('mock_endpoints');
+  if (Array.isArray(savedMockEndpoints)) {
+    serverState.mockEndpoints = savedMockEndpoints;
+  }
+
+  const savedPushConfig = store.loadStateNamespace<typeof serverState.pushBridgeConfig>('push_bridge_config');
+  if (savedPushConfig) {
+    serverState.pushBridgeConfig = { ...serverState.pushBridgeConfig, ...savedPushConfig };
+  }
+
+  const savedWebhooks = store.loadStateNamespace<typeof serverState.webhooksConfig>('webhooks_config');
+  if (savedWebhooks) {
+    serverState.webhooksConfig = { ...serverState.webhooksConfig, ...savedWebhooks };
+  }
+
+  const savedPerfMode = store.loadStateNamespace<typeof serverState.performanceModeState>('performance_mode');
+  if (savedPerfMode) {
+    serverState.performanceModeState = { ...serverState.performanceModeState, ...savedPerfMode };
+  }
+
+  const savedAgents = store.loadStateNamespace<typeof serverState.agentsList>('agents_list');
+  if (Array.isArray(savedAgents) && savedAgents.length > 0) {
+    serverState.agentsList = savedAgents;
+  }
+
+  const savedAgentRoutes = store.loadStateNamespace<typeof serverState.agentRoutes>('agent_routes');
+  if (Array.isArray(savedAgentRoutes)) {
+    serverState.agentRoutes = savedAgentRoutes;
+  }
+
+  const savedAgentMemories = store.loadStateNamespace<Array<[string, Array<Record<string, unknown>>]>>('agent_memories');
+  if (Array.isArray(savedAgentMemories)) {
+    serverState.agentMemories.clear();
+    for (const [k, v] of savedAgentMemories) {
+      if (k && Array.isArray(v)) serverState.agentMemories.set(k, v);
+    }
+  }
+
+  const savedAgentVersions = store.loadStateNamespace<
+    Array<[string, Array<{ version: number; saved_at: string; summary: string; snapshot: Record<string, unknown> }>]>
+  >('agent_versions');
+  if (Array.isArray(savedAgentVersions)) {
+    serverState.agentVersions.clear();
+    for (const [k, v] of savedAgentVersions) {
+      if (k && Array.isArray(v)) serverState.agentVersions.set(k, v);
+    }
+  }
+}
+

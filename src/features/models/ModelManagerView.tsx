@@ -170,10 +170,9 @@ export const ModelManagerView: React.FC = () => {
     notify(`Iniciando download de ${displayName}...`, 'info');
 
     try {
-      const response = await fetch(`${API_BASE}/models/huggingface/install`, {
+      const response = await apiFetch(`${API_BASE}/models/huggingface/install`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({ model_tag: modelTag, display_name: displayName }),
       });
 

@@ -6,10 +6,16 @@ import {
   getOwnerUserId,
   recordAgentVersion,
   getActiveHardwareProfile,
+  resolveExternalCredentialForRequest,
+  persistStateNamespace,
   nowIso,
   AgentServerRecord,
 } from '../serverState.ts';
-import { runHybridInference } from '../hybridAiEngine.ts';
+import { isGeminiModelId, runHybridInference } from '../hybridAiEngine.ts';
+import { inferExternalProviderFromModel } from '../providerEngine.ts';
+import { buildAgentRuntimeContext, type AgentRouteEntry } from '../agentRuntime.ts';
+import { searchBrainMemories } from '../../src/services/secondBrain.ts';
+import { canAgentAccessResource } from '../../src/services/integrationsCatalog.ts';
 import {
   evaluateAgentCoreReadiness,
   isValidAgentRoleSlug,
@@ -25,6 +31,69 @@ export interface AgentsRouterDeps {
 export function createAgentsRouter(deps: AgentsRouterDeps): Router {
   const router = express.Router();
   const { store } = deps;
+
+  const persistAgentsAndSkills = () => {
+    persistStateNamespace(store, 'agents_list', serverState.agentsList);
+    persistStateNamespace(store, 'skills_list', serverState.skillsList);
+    persistStateNamespace(store, 'agent_versions', Array.from(serverState.agentVersions.entries()));
+  };
+
+  const buildContextForAgentRequest = (
+    req: Request,
+    agent: AgentServerRecord,
+    prompt: string,
+    opts?: { sessionId?: string; projectId?: string; mode?: string; explicitModel?: string }
+  ) => {
+    const ownerUserId = getOwnerUserId(req);
+    const agentCore = store.getAgentCore(ownerUserId, agent.role, {
+      name: agent.name,
+      proper_name: agent.proper_name,
+      handle: agent.handle,
+      mission: agent.mission,
+      preferred_model: agent.preferred_model,
+      pack_id: agent.template_id?.startsWith('pack:') ? agent.template_id.slice(5) : null,
+    });
+    const agentRoute =
+      (serverState.agentRoutes.find((r) => String(r.agent_role || '') === agent.role) as AgentRouteEntry | undefined) ||
+      null;
+    const historyMessages = opts?.sessionId
+      ? store.listAgentHistoryMessages(agent.role, opts.sessionId)
+      : [];
+    const workspaceProject = opts?.projectId
+      ? serverState.workspaceProjects.find((p) => p.id === opts.projectId) || null
+      : null;
+    const projectMemories = opts?.projectId ? serverState.projectMemories.get(opts.projectId) || [] : [];
+    const relevantBrain = searchBrainMemories(serverState.brainMemories, prompt, {
+      username: ownerUserId,
+      limit: 3,
+    });
+    const allowedContextPacks = serverState.contextSets.filter((cs) =>
+      canAgentAccessResource(cs.allowed_agents, agent.role)
+    );
+
+    const ctx = buildAgentRuntimeContext({
+      agent,
+      agentCore,
+      skillsList: serverState.skillsList,
+      agentMemories: serverState.agentMemories.get(agent.role) || [],
+      brainMemories: relevantBrain,
+      contextSets: allowedContextPacks,
+      workspaceProject,
+      projectMemories,
+      historyMessages,
+      agentRoute,
+      explicitChatOverride: opts?.explicitModel,
+      systemDefaultModel: serverState.hybridConfig.default_model,
+      executionModeHint: opts?.mode,
+    });
+    const externalProvider = resolveExternalCredentialForRequest(
+      req,
+      store,
+      ownerUserId,
+      ctx.resolvedModel.requestedModel
+    );
+    return { ctx, externalProvider, ownerUserId };
+  };
 
   const hydrateInstalledPackResourcesForUser = (ownerUserId: string) => {
     const installed = store.listInstalledPacks(ownerUserId);
@@ -156,6 +225,7 @@ export function createAgentsRouter(deps: AgentsRouterDeps): Router {
     if (agent && updatedCore.primary_model) {
       agent.preferred_model = updatedCore.primary_model;
       agent.updated_at = nowIso();
+      persistAgentsAndSkills();
     }
 
     res.json({
@@ -263,6 +333,7 @@ export function createAgentsRouter(deps: AgentsRouterDeps): Router {
       });
     }
     recordAgentVersion(created, String(req.body?.change_summary || 'Criação do especialista'));
+    persistAgentsAndSkills();
     res.status(201).json(created);
   });
 
@@ -296,7 +367,18 @@ export function createAgentsRouter(deps: AgentsRouterDeps): Router {
       updated.is_read_only = req.body.autonomy_level === 'read_only';
     }
     serverState.agentsList[idx] = updated;
+    if (req.body?.preferred_model) {
+      const ownerUserId = getOwnerUserId(req);
+      store.upsertAgentCore(ownerUserId, updated.role, { primary_model: String(req.body.preferred_model) }, {
+        name: updated.name,
+        proper_name: updated.proper_name,
+        handle: updated.handle,
+        mission: updated.mission,
+        preferred_model: updated.preferred_model,
+      });
+    }
     recordAgentVersion(updated, summary);
+    persistAgentsAndSkills();
     res.json(updated);
   });
 
@@ -339,6 +421,7 @@ export function createAgentsRouter(deps: AgentsRouterDeps): Router {
     };
     serverState.agentsList[idx] = updated;
     recordAgentVersion(updated, `Habilidades atualizadas (${attachedNames.length} vinculadas)`);
+    persistAgentsAndSkills();
     res.json({ agent: updated, attached_skill_ids: Array.from(selectedIds) });
   });
 
@@ -362,6 +445,7 @@ export function createAgentsRouter(deps: AgentsRouterDeps): Router {
         sk.updated_at = nowIso();
       }
     }
+    persistAgentsAndSkills();
     res.json({ deleted: true, role: target.role, name: target.proper_name || target.name });
   });
 
@@ -392,26 +476,32 @@ export function createAgentsRouter(deps: AgentsRouterDeps): Router {
     };
     serverState.agentsList[idx] = restored;
     recordAgentVersion(restored, `Rollback para v${targetVersion}`);
+    persistAgentsAndSkills();
     res.json(restored);
   });
 
   router.get('/agent-routes', requireAuth, (_req: Request, res: Response) => res.json({ routes: serverState.agentRoutes }));
   router.put('/agent-routes/:role', requireAuth, (req: Request, res: Response) => {
     const role = req.params.role;
+    const targetModel = String(req.body?.model || serverState.hybridConfig.default_model).trim();
+    const detectedProvider =
+      inferExternalProviderFromModel(targetModel) || (isGeminiModelId(targetModel) ? 'gemini' : 'ollama');
     const entry = {
       agent_role: role,
-      key_id: String(req.body?.key_id || 'local-ollama-default'),
-      model: String(req.body?.model || serverState.hybridConfig.default_model),
+      key_id: String(req.body?.key_id || (detectedProvider === 'gemini' ? 'gemini-server-default' : 'local-ollama-default')),
+      model: targetModel,
       key_label: 'Roteador Híbrido',
-      provider: String(req.body?.model || '').startsWith('gemini-') ? 'gemini' : 'ollama',
+      provider: detectedProvider,
       key_available: true,
       updated_at: nowIso(),
     };
     serverState.agentRoutes = [...serverState.agentRoutes.filter((r) => r.agent_role !== role), entry];
+    persistStateNamespace(store, 'agent_routes', serverState.agentRoutes);
     res.json(entry);
   });
   router.delete('/agent-routes/:role', requireAuth, (req: Request, res: Response) => {
     serverState.agentRoutes = serverState.agentRoutes.filter((r) => r.agent_role !== req.params.role);
+    persistStateNamespace(store, 'agent_routes', serverState.agentRoutes);
     res.json({ deleted: true });
   });
 
@@ -429,23 +519,35 @@ export function createAgentsRouter(deps: AgentsRouterDeps): Router {
     };
     list.unshift(item);
     serverState.agentMemories.set(req.params.role, list);
+    persistStateNamespace(store, 'agent_memories', Array.from(serverState.agentMemories.entries()));
     res.status(201).json(item);
   });
   router.delete('/agents/:role/memories/:memoryId', requireAuth, (req: Request, res: Response) => {
     const list = (serverState.agentMemories.get(req.params.role) || []).filter((m) => m.id !== req.params.memoryId);
     serverState.agentMemories.set(req.params.role, list);
+    persistStateNamespace(store, 'agent_memories', Array.from(serverState.agentMemories.entries()));
     res.json({ deleted: true });
   });
 
   router.post('/agents/:role/playground', requireAuth, async (req: Request, res: Response) => {
     const agent = serverState.agentsList.find((a) => a.role === req.params.role) || serverState.agentsList[0];
     const prompt = String(req.body?.prompt || '').trim();
+    const projectId = req.body?.project_id ? String(req.body.project_id) : undefined;
+    const sessionId = req.body?.session_id ? String(req.body.session_id) : undefined;
+    const explicitModel = req.body?.model ? String(req.body.model) : undefined;
     const activeHw = getActiveHardwareProfile();
+    const { ctx, externalProvider } = buildContextForAgentRequest(req, agent, prompt, {
+      sessionId,
+      projectId,
+      explicitModel,
+    });
     try {
       const result = await runHybridInference({
         prompt,
-        systemInstruction: agent.system_prompt,
-        requestedModel: agent.preferred_model,
+        systemInstruction: ctx.systemInstruction,
+        history: ctx.history,
+        requestedModel: ctx.resolvedModel.requestedModel,
+        fallbackModel: ctx.resolvedModel.fallbackModel,
         routingPolicy: agent.routing_policy,
         ollamaBaseUrl: activeHw.ollama_url,
         ollamaConnected: serverState.providerConnectivity.ollama_connected,
@@ -455,12 +557,17 @@ export function createAgentsRouter(deps: AgentsRouterDeps): Router {
         agentProperName: agent.proper_name,
         strictFocus: agent.strict_focus,
         strictTopic: agent.strict_topic,
+        externalProvider,
       });
       res.json({
         agent_role: agent.role,
         agent_name: `${agent.proper_name} · ${agent.name}`,
         response: result.text,
+        requested_model: result.requestedModel,
         model_used: result.modelUsed,
+        fallback_occurred: result.fallbackOccurred,
+        routing_note: result.routingNote,
+        skills_used: ctx.skillsUsed,
         execution_mode: result.executionMode,
         latency_ms: result.latencyMs,
         reasoning: result.reasoning,
@@ -476,43 +583,198 @@ export function createAgentsRouter(deps: AgentsRouterDeps): Router {
   router.post('/agents/:role/task', requireAuth, async (req: Request, res: Response) => {
     const agent = serverState.agentsList.find((a) => a.role === req.params.role) || serverState.agentsList[0];
     const prompt = String(req.body?.prompt || '').trim();
+    const sessionId = String(req.body?.session_id || `sess_${Date.now()}`);
+    const projectId = req.body?.project_id ? String(req.body.project_id) : undefined;
+    const mode = req.body?.mode ? String(req.body.mode) : undefined;
+    const explicitModel = req.body?.model ? String(req.body.model) : undefined;
     const activeHw = getActiveHardwareProfile();
+    const { ctx, externalProvider } = buildContextForAgentRequest(req, agent, prompt, {
+      sessionId,
+      projectId,
+      mode,
+      explicitModel,
+    });
     try {
       const result = await runHybridInference({
         prompt,
-        systemInstruction: agent.system_prompt,
-        requestedModel: agent.preferred_model,
+        systemInstruction: ctx.systemInstruction,
+        history: ctx.history,
+        requestedModel: ctx.resolvedModel.requestedModel,
+        fallbackModel: ctx.resolvedModel.fallbackModel,
         routingPolicy: agent.routing_policy,
         ollamaBaseUrl: activeHw.ollama_url,
         ollamaConnected: serverState.providerConnectivity.ollama_connected,
         geminiConnected: serverState.providerConnectivity.gemini_connected,
+        enableWebSearch: agent.role === 'research_analyst',
         agentName: agent.name,
         agentProperName: agent.proper_name,
         strictFocus: agent.strict_focus,
         strictTopic: agent.strict_topic,
+        externalProvider,
       });
+      store.appendAgentHistoryMessage(agent.role, sessionId, 'user', prompt);
+      store.appendAgentHistoryMessage(agent.role, sessionId, 'assistant', result.text);
       const item = {
         task_id: `tsk_${Date.now()}`,
-        session_id: req.body?.session_id || `sess_${Date.now()}`,
+        session_id: sessionId,
         user_prompt: prompt,
         selected_agents: [agent.role],
         status: 'completed',
         is_completed: true,
         final_summary: result.text,
         execution_mode: result.executionMode,
+        requested_model: result.requestedModel,
         model_used: result.modelUsed,
+        fallback_occurred: result.fallbackOccurred,
+        routing_note: result.routingNote,
+        skills_used: ctx.skillsUsed,
         latency_ms: result.latencyMs,
         created_at: nowIso(),
       };
       serverState.tasksList.unshift(item);
+      store.upsertTaskRecord(item);
       res.json(item);
     } catch (err: any) {
       res.status(502).json({ detail: err instanceof Error ? err.message : 'Erro na tarefa do especialista.' });
     }
   });
 
+  router.post('/agents/:role/stream', requireAuth, async (req: Request, res: Response) => {
+    const agent = serverState.agentsList.find((a) => a.role === req.params.role) || serverState.agentsList[0];
+    const prompt = String(req.body?.prompt || '').trim();
+    const sessionId = String(req.body?.session_id || 'default').trim();
+    const projectId = req.body?.project_id ? String(req.body.project_id) : undefined;
+    const mode = req.body?.mode ? String(req.body.mode) : undefined;
+    const explicitModel = req.body?.model ? String(req.body.model) : undefined;
+    if (!prompt) {
+      res.status(400).json({ detail: 'Informe um comando ou pergunta para o especialista.' });
+      return;
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+
+    const sendEvent = (payload: Record<string, unknown>) => {
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      }
+    };
+
+    const { ctx, externalProvider } = buildContextForAgentRequest(req, agent, prompt, {
+      sessionId,
+      projectId,
+      mode,
+      explicitModel,
+    });
+
+    sendEvent({
+      type: 'start',
+      agent_role: agent.role,
+      agent_name: agent.proper_name || agent.name,
+      session_id: sessionId,
+      requested_model: ctx.resolvedModel.requestedModel,
+      skills_used: ctx.skillsUsed,
+    });
+    sendEvent({
+      type: 'thinking',
+      iteration: 1,
+      message: `${agent.proper_name || agent.name} analisando em ${ctx.resolvedModel.requestedModel}${ctx.skillsUsed.length > 0 ? ` com ${ctx.skillsUsed.length} habilidade(s)` : ''}...`,
+    });
+
+    const activeHw = getActiveHardwareProfile();
+    try {
+      let accumulated = '';
+      const result = await runHybridInference({
+        prompt,
+        systemInstruction: ctx.systemInstruction,
+        history: ctx.history,
+        requestedModel: ctx.resolvedModel.requestedModel,
+        fallbackModel: ctx.resolvedModel.fallbackModel,
+        routingPolicy: agent.routing_policy,
+        ollamaBaseUrl: activeHw.ollama_url,
+        ollamaConnected: serverState.providerConnectivity.ollama_connected,
+        geminiConnected: serverState.providerConnectivity.gemini_connected,
+        enableWebSearch: agent.role === 'research_analyst',
+        agentName: agent.name,
+        agentProperName: agent.proper_name,
+        strictFocus: agent.strict_focus,
+        strictTopic: agent.strict_topic,
+        externalProvider,
+        onToken: (chunk: string) => {
+          if (!chunk) return;
+          accumulated += chunk;
+          sendEvent({
+            type: 'assistant',
+            content: accumulated,
+            chunk,
+          });
+        },
+      });
+
+      store.appendAgentHistoryMessage(agent.role, sessionId, 'user', prompt);
+      store.appendAgentHistoryMessage(agent.role, sessionId, 'assistant', result.text);
+      const taskItem = {
+        task_id: `tsk_${Date.now()}`,
+        session_id: sessionId,
+        user_prompt: prompt,
+        selected_agents: [agent.role],
+        status: 'completed',
+        is_completed: true,
+        final_summary: result.text,
+        execution_mode: result.executionMode,
+        requested_model: result.requestedModel,
+        model_used: result.modelUsed,
+        fallback_occurred: result.fallbackOccurred,
+        routing_note: result.routingNote,
+        skills_used: ctx.skillsUsed,
+        latency_ms: result.latencyMs,
+        created_at: nowIso(),
+      };
+      serverState.tasksList.unshift(taskItem);
+      store.upsertTaskRecord(taskItem);
+
+      sendEvent({
+        type: 'assistant',
+        content: result.text,
+        requested_model: result.requestedModel,
+        model_used: result.modelUsed,
+        fallback_occurred: result.fallbackOccurred,
+        routing_note: result.routingNote,
+        skills_used: ctx.skillsUsed,
+        execution_mode: result.executionMode,
+        latency_ms: result.latencyMs,
+      });
+      sendEvent({
+        type: 'final',
+        summary: result.text,
+        model: result.modelUsed,
+        model_used: result.modelUsed,
+        requested_model: result.requestedModel,
+        fallback_occurred: result.fallbackOccurred,
+        routing_note: result.routingNote,
+        skills_used: ctx.skillsUsed,
+        execution_mode: result.executionMode,
+        latency_ms: result.latencyMs,
+        task: taskItem,
+        agent_role: agent.role,
+        session_id: sessionId,
+      });
+      res.end();
+    } catch (err: any) {
+      sendEvent({
+        type: 'error',
+        error: err instanceof Error ? err.message : 'Erro ao transmitir execução do especialista.',
+      });
+      res.end();
+    }
+  });
+
   router.get('/agents/:role/history', requireAuth, (req: Request, res: Response) => {
-    res.json({ agent_role: req.params.role, session_id: String(req.query.session_id || 'default'), messages: [] });
+    const sessionId = String(req.query.session_id || 'default');
+    const messages = store.listAgentHistoryMessages(req.params.role, sessionId);
+    res.json({ agent_role: req.params.role, session_id: sessionId, messages });
   });
 
   router.get('/tools', requireAuth, (_req: Request, res: Response) => {

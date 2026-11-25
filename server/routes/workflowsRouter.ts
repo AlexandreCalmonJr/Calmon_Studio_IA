@@ -7,8 +7,10 @@ import {
   nowIso,
   broadcastRealtimeEvent,
   getActiveHardwareProfile,
+  persistStateNamespace,
   UserAccount,
 } from '../serverState.ts';
+import type { LocalSqliteBrainStore } from '../brain/sqliteBrainStore.ts';
 import {
   BrainMemoryItem,
   computeTextEmbedding,
@@ -22,6 +24,10 @@ import {
   runRoundtableDeliberation,
   generateStructuredArtifact,
 } from '../artifactEngine.ts';
+
+export interface WorkflowsRouterDeps {
+  store?: LocalSqliteBrainStore;
+}
 
 const workflowTemplates = [
   {
@@ -71,8 +77,22 @@ const workflowTemplates = [
   },
 ];
 
-export function createWorkflowsRouter(): Router {
+export function createWorkflowsRouter(deps: WorkflowsRouterDeps = {}): Router {
+  const { store } = deps;
   const router = express.Router();
+
+  const persistWorkflows = () => {
+    persistStateNamespace(store, 'saved_workflows', serverState.savedWorkflows);
+    persistStateNamespace(store, 'workflow_runs', serverState.workflowRuns.slice(0, 60));
+    if (store) {
+      store.syncWorkspaceSnapshot({
+        agents: serverState.agentsList,
+        skills: serverState.skillsList,
+        workflows: serverState.savedWorkflows as any[],
+        knowledge: serverState.knowledgeDocs as any[],
+      });
+    }
+  };
 
   // --- FASE 4: ESCRITÓRIO ISOMÉTRICO VIVO, MESA REDONDA, FLOW ARCHITECT & FÁBRICA DE ARTEFATOS ---
   router.get('/office/state', requireAuth, (_req: Request, res: Response) => {
@@ -173,6 +193,7 @@ export function createWorkflowsRouter(): Router {
         updated_at: nowIso(),
       };
       serverState.brainMemories.unshift(verdictMem);
+      persistStateNamespace(store, 'brain_memories', serverState.brainMemories.slice(0, 300));
       broadcastRealtimeEvent('brain_memory_updated', { action: 'created', memory: verdictMem });
 
       res.json(session);
@@ -206,6 +227,7 @@ export function createWorkflowsRouter(): Router {
       updated_at: nowIso(),
     };
     serverState.savedWorkflows.unshift(created);
+    persistWorkflows();
     res.status(201).json(created);
   });
 
@@ -231,6 +253,7 @@ export function createWorkflowsRouter(): Router {
       updated_at: nowIso(),
     };
     serverState.savedWorkflows.unshift(created);
+    persistWorkflows();
     res.status(201).json(created);
   });
 
@@ -254,11 +277,13 @@ export function createWorkflowsRouter(): Router {
     if (Array.isArray(req.body?.nodes)) wf.nodes = req.body.nodes;
     if (Array.isArray(req.body?.connections)) wf.connections = req.body.connections;
     wf.updated_at = nowIso();
+    persistWorkflows();
     res.json(wf);
   });
 
   router.delete('/workflows/:id', requireAuth, (req: Request, res: Response) => {
     serverState.savedWorkflows = serverState.savedWorkflows.filter((w: any) => w.id !== req.params.id);
+    persistWorkflows();
     res.json({ deleted: true });
   });
 
@@ -347,6 +372,7 @@ export function createWorkflowsRouter(): Router {
           updated_at: nowIso(),
         };
         serverState.brainMemories.unshift(mem);
+        persistStateNamespace(store, 'brain_memories', serverState.brainMemories.slice(0, 300));
         broadcastRealtimeEvent('brain_memory_updated', { action: 'created', memory: mem });
         output = 'Resultado salvo automaticamente no Segundo Cérebro e notificação pronta.';
       }
@@ -383,6 +409,7 @@ export function createWorkflowsRouter(): Router {
       finished_at: finishedAt,
     };
     serverState.workflowRuns.unshift(runRecord);
+    persistWorkflows();
     res.json(runRecord);
   });
 

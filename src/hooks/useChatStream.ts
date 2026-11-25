@@ -33,7 +33,8 @@ export function useChatStream(
   activeProjectId: string | null,
   activeProjectName: string | null,
   onArtifactDetected?: (artifact: CanvasArtifact) => void,
-  onProjectsNeedRefresh?: () => void
+  onProjectsNeedRefresh?: () => void,
+  onModelChange?: (modelId: string) => void
 ) {
   const [loading, setLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -495,11 +496,13 @@ export function useChatStream(
           {
             sender: 'jarvis',
             text: '🦙 **Comando /model:**\n\n' +
-              'Uso: `/model <nome_do_modelo>`\n\n' +
-              'Modelos locais disponíveis no ecossistema:\n' +
-              '- `llama3.2:3b` (Ultra leve e rápido para respostas curtas)\n' +
-              '- `qwen2.5-coder:7b` (Especialista em geração e refatoração de código)\n' +
-              '- `qwen2.5:7b` (Raciocínio geral e arquitetura)\n\n' +
+              'Uso: `/model <nome_do_modelo>` ou `/model auto` (para voltar ao modelo padrão de cada agente)\n\n' +
+              'Exemplos de modelos disponíveis:\n' +
+              '- `auto` (Segue o modelo configurado em cada agente)\n' +
+              '- `gemini-4-hydrogen` (Gemini Online padrão)\n' +
+              '- `gemini-3.1-flash-lite` (Gemini Online rápido)\n' +
+              '- `qwen2.5-coder:7b` (Local Ollama — código)\n' +
+              '- `llama3.2:3b` (Local Ollama — leve)\n\n' +
               '*Exemplo:* `/model qwen2.5-coder:7b`',
             timestamp: timeStr,
           },
@@ -507,17 +510,27 @@ export function useChatStream(
         return;
       }
 
+      const normalizedModel = requestedModel.toLowerCase() === 'auto' ? 'auto' : requestedModel;
+      onModelChange?.(normalizedModel);
+
       setMessages((prev) => [
         ...prev,
         { sender: 'user', text: trimmed, timestamp: timeStr },
         {
           sender: 'jarvis',
-          text: `🦙 **Modelo de Inferência Configurado: \`${requestedModel}\`**\n\n` +
-            `O JARVIS Master agora priorizará o modelo **${requestedModel}** para as próximas gerações e orquestrações de código.`,
+          text:
+            normalizedModel === 'auto'
+              ? '✅ **Seleção de modelo redefinida para Automático (Agente).**\n\nAs próximas mensagens usarão o modelo configurado individualmente em cada especialista.'
+              : `✅ **Modelo ativo alterado para** \`${normalizedModel}\`\n\nAs próximas mensagens desta conversa solicitarão diretamente o modelo **${normalizedModel}**. Caso ele esteja indisponível ou offline, o sistema avisará claramente qual modelo respondeu.`,
           timestamp: timeStr,
         },
       ]);
-      notify(`Modelo de inferência alterado para: ${requestedModel}`, 'success');
+      notify(
+        normalizedModel === 'auto'
+          ? 'Modelo redefinido para Automático (Agente)'
+          : `Modelo de inferência alterado para: ${normalizedModel}`,
+        'success'
+      );
       return;
     }
 
@@ -694,6 +707,17 @@ export function useChatStream(
                   execution_mode: done.execution_mode || metaInfo?.execution_mode,
                   provider: done.provider || metaInfo?.provider,
                   model_used: done.model_used || metaInfo?.model_used,
+                  requested_model: done.requested_model || metaInfo?.requested_model,
+                  model_source: done.model_source || metaInfo?.model_source,
+                  fallback_occurred:
+                    typeof done.fallback_occurred === 'boolean'
+                      ? done.fallback_occurred
+                      : metaInfo?.fallback_occurred,
+                  skills_used: Array.isArray(done.skills_used)
+                    ? done.skills_used
+                    : Array.isArray(metaInfo?.skills_used)
+                      ? metaInfo.skills_used
+                      : [],
                   latency_ms: done.latency_ms ?? metaInfo?.latency_ms,
                   reasoning: done.reasoning || metaInfo?.reasoning,
                   routing_note: done.routing_note || metaInfo?.routing_note,

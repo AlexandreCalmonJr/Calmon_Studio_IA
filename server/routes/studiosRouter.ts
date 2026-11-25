@@ -5,7 +5,11 @@ import {
   requireAuth,
   nowIso,
   MockEndpointRecord,
+  getActiveHardwareProfile,
+  persistStateNamespace,
 } from '../serverState.ts';
+import type { LocalSqliteBrainStore } from '../brain/sqliteBrainStore.ts';
+import { runHybridInference } from '../hybridAiEngine.ts';
 import {
   APP_BUILDER_PRESETS,
   AppBlueprintSpec,
@@ -70,11 +74,17 @@ const mixHexColor = (hexA: string, hexB: string, weight: number): string => {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 };
 
-export function createStudiosRouter(): Router {
+export interface StudiosRouterDeps {
+  store?: LocalSqliteBrainStore;
+}
+
+export function createStudiosRouter(deps?: StudiosRouterDeps): Router {
   const router = express.Router();
+  const store = deps?.store;
 
   // --- CODING & STUDIOS ---
   router.get('/coding/tools', requireAuth, (_req: Request, res: Response) => {
+    const mcpServers = store ? store.listMcpServers() : [];
     res.json({
       modes: [
         { id: 'plan', label: 'Planejar (Somente leitura)', description: 'Analisa o repositório e propõe plano técnico sem alterar arquivos.' },
@@ -89,12 +99,128 @@ export function createStudiosRouter(): Router {
         { name: 'run_linter', description: 'Verifica tipagem TypeScript e lint do projeto.', risk: 'exec', requires_approval: false, parameters: {} },
       ],
       provider: { name: 'Ollama Local', model: 'qwen2.5-coder:14b', local_first: true },
-      mcp_servers: [],
+      mcp_servers: mcpServers,
     });
   });
 
-  router.get('/coding/sessions/:id/messages', requireAuth, (_req: Request, res: Response) => res.json({ messages: [] }));
-  router.post('/coding/sessions/:id/messages', requireAuth, (_req: Request, res: Response) => res.json({ status: 'saved' }));
+  router.post('/mcp/reload', requireAuth, (_req: Request, res: Response) => {
+    const servers = store ? store.listMcpServers() : [];
+    const registered = servers.flatMap((s) => (s.tools || []).map((t) => `${s.name}:${t.name}`));
+    res.json({
+      servers: servers.length,
+      tools: registered.length,
+      errors: {},
+      registered,
+      status: { reloaded_at: nowIso() },
+    });
+  });
+
+  router.get('/coding/sessions/:id/messages', requireAuth, (req: Request, res: Response) => {
+    const messages = store ? store.listCodingMessages(req.params.id) : [];
+    res.json({ messages });
+  });
+
+  router.post('/coding/sessions/:id/messages', requireAuth, (req: Request, res: Response) => {
+    const content = String(req.body?.content || '').trim();
+    if (!content) {
+      res.status(400).json({ detail: 'Conteúdo da mensagem de código é obrigatório.' });
+      return;
+    }
+    const saved = store
+      ? store.appendCodingMessage({
+          session_id: req.params.id,
+          project_id: req.body?.project_id ? String(req.body.project_id) : null,
+          role: String(req.body?.role || 'user'),
+          content,
+          tool_calls: Array.isArray(req.body?.tool_calls) ? req.body.tool_calls : undefined,
+          tool_call_id: req.body?.tool_call_id ? String(req.body.tool_call_id) : null,
+          tool_name: req.body?.tool_name ? String(req.body.tool_name) : null,
+        })
+      : { id: Date.now(), session_id: req.params.id, role: 'user', content, created_at: nowIso() };
+    res.status(201).json({ status: 'saved', message: saved });
+  });
+
+  router.delete('/coding/sessions/:id/messages', requireAuth, (req: Request, res: Response) => {
+    const deleted = store ? store.clearCodingMessages(req.params.id) : 0;
+    res.json({ deleted });
+  });
+
+  router.post('/coding/approvals/:id/decide', requireAuth, (req: Request, res: Response) => {
+    const item = serverState.approvals.find((a) => a.id === req.params.id);
+    const action = req.body?.action === 'approve' ? 'approved' : 'rejected';
+    if (item) {
+      item.status = action;
+      persistStateNamespace(store, 'approvals', serverState.approvals);
+    }
+    res.json({ status: action, id: req.params.id });
+  });
+
+  router.post('/coding/run/stream', requireAuth, async (req: Request, res: Response) => {
+    const prompt = String(req.body?.prompt || '').trim();
+    const projectId = String(req.body?.project_id || 'workspace');
+    const sessionId = String(req.body?.session_id || `coding_${projectId}`);
+    const mode = String(req.body?.mode || 'plan');
+    if (!prompt) {
+      res.status(400).json({ detail: 'Informe uma instrução de engenharia para o Coding Agent.' });
+      return;
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+
+    const sendEvent = (payload: Record<string, unknown>) => {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    store?.appendCodingMessage({
+      session_id: sessionId,
+      project_id: projectId,
+      role: 'user',
+      content: prompt,
+    });
+
+    sendEvent({ type: 'start', session_id: sessionId, project_id: projectId, mode });
+    sendEvent({ type: 'thinking', content: `Analisando projeto "${projectId}" em modo ${mode}...` });
+
+    const codingAgent =
+      serverState.agentsList.find((a) => a.role === (req.body?.agent_role || 'coding_agent')) ||
+      serverState.agentsList[0];
+    const activeHw = getActiveHardwareProfile();
+
+    try {
+      const result = await runHybridInference({
+        prompt: `[Projeto: ${projectId} | Modo: ${mode}]\n${prompt}`,
+        systemInstruction: codingAgent.system_prompt,
+        requestedModel: req.body?.model ? String(req.body.model) : codingAgent.preferred_model,
+        routingPolicy: codingAgent.routing_policy,
+        ollamaBaseUrl: activeHw.ollama_url,
+        ollamaConnected: serverState.providerConnectivity.ollama_connected,
+        geminiConnected: serverState.providerConnectivity.gemini_connected,
+        enableWebSearch: false,
+        agentName: codingAgent.name,
+        agentProperName: codingAgent.proper_name,
+      });
+
+      store?.appendCodingMessage({
+        session_id: sessionId,
+        project_id: projectId,
+        role: 'assistant',
+        content: result.text,
+      });
+
+      sendEvent({ type: 'assistant', content: result.text, model: result.modelUsed, latency_ms: result.latencyMs });
+      sendEvent({ type: 'final', content: result.text, session_id: sessionId, project_id: projectId });
+      res.end();
+    } catch (err: any) {
+      sendEvent({
+        type: 'error',
+        error: err instanceof Error ? err.message : 'Falha na execução do Coding Agent.',
+      });
+      res.end();
+    }
+  });
 
   // --- BACKEND STUDIO: MOCK SERVER ---
   router.get('/mock-server/endpoints', requireAuth, (_req: Request, res: Response) => {
@@ -121,11 +247,13 @@ export function createStudiosRouter(): Router {
         (ep) => !(ep.method === record.method && ep.path === record.path)
       ),
     ];
+    persistStateNamespace(store, 'mock_endpoints', serverState.mockEndpoints);
     res.status(201).json(record);
   });
 
   router.delete('/mock-server/endpoints/:id', requireAuth, (req: Request, res: Response) => {
     serverState.mockEndpoints = serverState.mockEndpoints.filter((ep) => ep.id !== req.params.id);
+    persistStateNamespace(store, 'mock_endpoints', serverState.mockEndpoints);
     res.json({ deleted: true });
   });
 

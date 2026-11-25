@@ -4,10 +4,26 @@ import {
   serverState,
   requireAuth,
   nowIso,
+  persistStateNamespace,
 } from '../serverState.ts';
+import type { LocalSqliteBrainStore } from '../brain/sqliteBrainStore.ts';
 
-export function createSkillsRouter(): Router {
+export interface SkillsRouterDeps {
+  store?: LocalSqliteBrainStore;
+}
+
+export function createSkillsRouter(deps?: SkillsRouterDeps): Router {
   const router = express.Router();
+  const store = deps?.store;
+  const persistSkills = () => {
+    persistStateNamespace(store, 'skills_list', serverState.skillsList);
+    store?.syncWorkspaceSnapshot({
+      agents: serverState.agentsList,
+      skills: serverState.skillsList,
+      workflows: serverState.savedWorkflows as any[],
+      knowledge: serverState.knowledgeDocs as any[],
+    });
+  };
 
   // --- SKILLS ---
   router.get('/skills', requireAuth, (_req: Request, res: Response) => {
@@ -21,6 +37,8 @@ export function createSkillsRouter(): Router {
       return;
     }
     s.is_approved = !s.is_approved;
+    s.updated_at = nowIso();
+    persistSkills();
     res.json(s);
   });
 
@@ -44,6 +62,7 @@ export function createSkillsRouter(): Router {
       ag.installed_skills = linked;
     }
 
+    persistSkills();
     res.json(s);
   });
 
@@ -76,6 +95,7 @@ export function createSkillsRouter(): Router {
       updated_at: nowIso(),
     };
     serverState.skillsList.unshift(created);
+    persistSkills();
     res.status(201).json(created);
   });
 
@@ -130,6 +150,7 @@ export function createSkillsRouter(): Router {
       updated_at: nowIso(),
     };
     serverState.skillsList.unshift(created);
+    persistSkills();
     res.status(201).json({ skill: created });
   });
 
@@ -140,6 +161,7 @@ export function createSkillsRouter(): Router {
       res.status(404).json({ detail: 'Habilidade não encontrada.', deleted: false, status: 'not_found' });
       return;
     }
+    persistSkills();
     res.json({ deleted: true, status: 'deleted' });
   });
 

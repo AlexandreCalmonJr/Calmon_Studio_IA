@@ -1364,7 +1364,9 @@ const DashboardApp: React.FC = () => {
                   {activeTab === 'app_builder' && <AppBuilderView />}
                   {activeTab === 'github_import' && <GitHubImporterView onNavigate={navigate} />}
                   {activeTab === 'android_app' && <AndroidMobileHubView />}
-                  {activeTab === 'brain_server' && <BrainServerHubView />}
+                  {activeTab === 'brain_server' && (
+                    <BrainServerHubView onNavigate={navigate} canManagePacks={canManagePacks} />
+                  )}
                 </Suspense>
               </ModuleErrorBoundary>
             </div>

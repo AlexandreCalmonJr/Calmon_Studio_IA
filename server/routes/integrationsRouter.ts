@@ -5,8 +5,11 @@ import {
   requireAuth,
   nowIso,
   recordAgentVersion,
+  persistStateNamespace,
   AgentServerRecord,
 } from '../serverState.ts';
+import type { LocalSqliteBrainStore } from '../brain/sqliteBrainStore.ts';
+import { validateSafeExternalUrl } from '../serverHardening.ts';
 import {
   ContextSetRecord,
   IntegrationConnectorRecord,
@@ -26,8 +29,31 @@ import {
 } from '../../src/services/githubImporterEngine.ts';
 import { inspectGitHubRepository as inspectGitHubRepoDetailed } from '../githubImporterServer.ts';
 
-export function createIntegrationsRouter(): Router {
+export interface IntegrationsRouterDeps {
+  store?: LocalSqliteBrainStore;
+}
+
+export function createIntegrationsRouter(deps: IntegrationsRouterDeps = {}): Router {
+  const { store } = deps;
   const router = express.Router();
+
+  const persistIntegrations = () => {
+    persistStateNamespace(store, 'integration_connectors', serverState.integrationConnectors);
+    persistStateNamespace(store, 'context_sets', serverState.contextSets);
+  };
+
+  const persistWorkspaceAssets = () => {
+    persistStateNamespace(store, 'skills_list', serverState.skillsList);
+    persistStateNamespace(store, 'knowledge_docs', serverState.knowledgeDocs);
+    if (store) {
+      store.syncWorkspaceSnapshot({
+        agents: serverState.agentsList,
+        skills: serverState.skillsList,
+        workflows: serverState.savedWorkflows as any[],
+        knowledge: serverState.knowledgeDocs as any[],
+      });
+    }
+  };
 
   // --- FASE 3: INTEGRAÇÕES REAIS (GITHUB, FIGMA, HUGGING FACE) & CONTEXT SETS ---
   router.get('/integrations', requireAuth, (_req: Request, res: Response) => {
@@ -63,6 +89,7 @@ export function createIntegrationsRouter(): Router {
       conn.allowed_agents = req.body.allowed_agents.map((r: unknown) => String(r));
     }
     conn.last_synced_at = nowIso();
+    persistIntegrations();
     res.json(conn);
   });
 
@@ -80,6 +107,7 @@ export function createIntegrationsRouter(): Router {
         gh.target_ref = inspection.full_name;
         gh.last_synced_at = nowIso();
         gh.last_sync_summary = `${inspection.full_name} · ${inspection.language} · ★ ${inspection.stars}`;
+        persistIntegrations();
       }
       res.json(inspection);
     } catch (err: any) {
@@ -130,6 +158,8 @@ export function createIntegrationsRouter(): Router {
         updated_at: nowIso(),
       };
       serverState.contextSets.unshift(ctx);
+      persistIntegrations();
+      persistWorkspaceAssets();
 
       res.status(201).json({ skill: newSkill, context_set: ctx, inspection });
     } catch (err: any) {
@@ -139,6 +169,13 @@ export function createIntegrationsRouter(): Router {
 
   router.post('/integrations/figma/sync', requireAuth, async (req: Request, res: Response) => {
     const fileUrl = String(req.body?.file_url || '').trim();
+    if (fileUrl && /^https?:\/\//i.test(fileUrl)) {
+      const urlCheck = validateSafeExternalUrl(fileUrl);
+      if (!urlCheck.valid) {
+        res.status(400).json({ detail: `URL do Figma bloqueada: ${urlCheck.reason}` });
+        return;
+      }
+    }
     const incomingToken = typeof req.body?.token === 'string' && req.body.token.trim() ? req.body.token.trim() : undefined;
     if (incomingToken) {
       serverState.integrationSecrets.set('figma', incomingToken);
@@ -178,6 +215,7 @@ export function createIntegrationsRouter(): Router {
       updated_at: nowIso(),
     };
     serverState.contextSets.unshift(ctx);
+    persistIntegrations();
 
     res.status(201).json({ pack, context_set: ctx, connector: figmaConn });
   });
@@ -205,6 +243,7 @@ export function createIntegrationsRouter(): Router {
       updated_at: nowIso(),
     };
     serverState.contextSets.unshift(created);
+    persistIntegrations();
     res.status(201).json(created);
   });
 
@@ -218,11 +257,13 @@ export function createIntegrationsRouter(): Router {
       ? req.body.allowed_agents.map((r: unknown) => String(r))
       : [];
     ctx.updated_at = nowIso();
+    persistIntegrations();
     res.json(ctx);
   });
 
   router.delete('/integrations/context-sets/:id', requireAuth, (req: Request, res: Response) => {
     serverState.contextSets = serverState.contextSets.filter((c) => c.id !== req.params.id);
+    persistIntegrations();
     res.json({ deleted: true });
   });
 
@@ -340,6 +381,7 @@ export function createIntegrationsRouter(): Router {
       if (!inspection.incorporatedModes.includes('skill')) {
         inspection.incorporatedModes.push('skill');
       }
+      persistWorkspaceAssets();
       res.status(201).json({
         mode: 'skill',
         inspection,
@@ -441,6 +483,7 @@ export function createIntegrationsRouter(): Router {
       if (!inspection.incorporatedModes.includes('agent')) {
         inspection.incorporatedModes.push('agent');
       }
+      persistWorkspaceAssets();
       res.status(201).json({
         mode: 'agent',
         inspection,
@@ -470,6 +513,7 @@ export function createIntegrationsRouter(): Router {
     if (!inspection.incorporatedModes.includes('knowledge')) {
       inspection.incorporatedModes.push('knowledge');
     }
+    persistWorkspaceAssets();
     res.status(201).json({
       mode: 'knowledge',
       inspection,

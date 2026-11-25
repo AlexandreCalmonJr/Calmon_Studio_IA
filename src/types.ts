@@ -58,6 +58,15 @@ export interface TaskStateResponse {
   execution_mode?: 'LOCAL' | 'ONLINE';
   provider?: 'ollama' | 'gemini' | string;
   model_used?: string;
+  requested_model?: string;
+  model_source?: string;
+  fallback_occurred?: boolean;
+  skills_used?: Array<{
+    id: string;
+    name: string;
+    domain?: string;
+    allowed_tools?: string[];
+  }>;
   latency_ms?: number;
   reasoning?: string;
   routing_note?: string;
@@ -237,10 +246,13 @@ export const getAgentLabel = (role: string): string => {
 };
 
 export const MODEL_LABELS: Record<string, string> = {
-  auto: 'Automático Local',
+  auto: 'Automático (Agente)',
   auto_hybrid: 'Híbrido (Local + Gemini)',
   'gemini-4-hydrogen': 'Gemini 4 Hydrogen (Online)',
   'gemini-3.1-flash-lite': 'Gemini 3.1 Flash Lite (Online)',
+  'gemini-4-neon': 'Gemini 4 Neon (Online)',
+  'gemini-4-carbon': 'Gemini 4 Carbon (Online)',
+  'gemini-4-argon': 'Gemini 4 Argon (Online)',
 };
 
 export const getModelLabel = (model?: string | null): string => {

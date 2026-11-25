@@ -14,6 +14,8 @@ import {
   Check,
   ExternalLink,
   Brain,
+  AlertTriangle,
+  Wrench,
 } from 'lucide-react';
 import { TaskStateResponse, getAgentLabel, getModelLabel, humanizeLabel } from '../../types';
 import { CanvasArtifact } from './ArtifactCanvas';
@@ -297,8 +299,23 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
               {task?.model_used && (
                 <>
                   <span>·</span>
-                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
+                  <span
+                    data-testid="message-model-used"
+                    style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}
+                  >
                     {task.model_used}
+                  </span>
+                </>
+              )}
+              {task?.skills_used && task.skills_used.length > 0 && (
+                <>
+                  <span>·</span>
+                  <span
+                    data-testid="message-skills-count"
+                    style={{ color: 'var(--accent-light)', fontWeight: 500 }}
+                    title={task.skills_used.map((s) => s.name).join(', ')}
+                  >
+                    {task.skills_used.length} {task.skills_used.length === 1 ? 'habilidade' : 'habilidades'}
                   </span>
                 </>
               )}
@@ -365,12 +382,65 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
             maxWidth: '100%',
           }}
         >
+          {/* Aviso explícito de fallback ou remapeamento de modelo (sempre visível fora da gaveta) */}
+          {isJarvis && task && (task.fallback_occurred || task.routing_note) && (
+            <div
+              data-testid="message-fallback-notice"
+              role="status"
+              style={{
+                marginBottom: '10px',
+                padding: '9px 13px',
+                borderRadius: '8px',
+                backgroundColor: task.fallback_occurred
+                  ? 'var(--warning-soft, rgba(245, 158, 11, 0.14))'
+                  : 'var(--accent-soft, rgba(59, 130, 246, 0.10))',
+                border: task.fallback_occurred
+                  ? '1px solid rgba(217, 119, 6, 0.45)'
+                  : '1px solid rgba(37, 99, 235, 0.30)',
+                borderLeft: task.fallback_occurred
+                  ? '3px solid #d97706'
+                  : '3px solid #2563eb',
+                color: 'var(--text-primary)',
+                fontSize: '0.79rem',
+                lineHeight: 1.5,
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '9px',
+              }}
+            >
+              <AlertTriangle
+                size={15}
+                color={task.fallback_occurred ? '#d97706' : '#2563eb'}
+                style={{ flexShrink: 0, marginTop: '2px' }}
+              />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <strong style={{ fontSize: '0.78rem', color: 'var(--text-primary)' }}>
+                  {task.fallback_occurred ? 'Fallback de modelo aplicado' : 'Nota de roteamento'}
+                </strong>
+                {task.requested_model &&
+                  task.model_used &&
+                  task.requested_model !== task.model_used &&
+                  (!task.routing_note || !task.routing_note.includes('Solicitado:')) && (
+                    <span style={{ fontSize: '0.77rem', color: 'var(--text-primary)' }}>
+                      Solicitado: <code>{task.requested_model}</code> → Respondido por: <code>{task.model_used}</code>
+                    </span>
+                  )}
+                <span style={{ color: 'var(--text-secondary)' }}>
+                  {task.routing_note ||
+                    `O modelo solicitado (${task.requested_model}) não estava disponível e a resposta foi atendida por ${task.model_used}.`}
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Gaveta expansível "Ver raciocínio" (estilo DeepSeek) & Etapas */}
           {isJarvis &&
             task &&
             (task.reasoning ||
               task.routing_note ||
               task.classified_intent ||
+              task.requested_model ||
+              (task.skills_used && task.skills_used.length > 0) ||
               (task.plan_steps && task.plan_steps.length > 0)) && (
               <div
                 style={{
@@ -414,6 +484,32 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
                       fontSize: '0.77rem',
                     }}
                   >
+                    {(task.model_used || task.requested_model) && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', color: 'var(--text-secondary)' }}>
+                        <strong style={{ color: 'var(--text-primary)' }}>Modelo:</strong>
+                        <span style={{ fontFamily: 'var(--font-mono)' }}>{task.model_used || task.requested_model}</span>
+                        {task.requested_model && task.model_used && task.requested_model !== task.model_used && (
+                          <span style={{ color: '#fcd34d' }}>(solicitado: {task.requested_model})</span>
+                        )}
+                        {task.model_source && (
+                          <span style={{ color: 'var(--text-muted)' }}>· origem: {task.model_source}</span>
+                        )}
+                      </div>
+                    )}
+
+                    {task.skills_used && task.skills_used.length > 0 && (
+                      <div
+                        data-testid="reasoning-skills-list"
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}
+                      >
+                        <Wrench size={12} color="var(--accent-light)" />
+                        <span style={{ color: 'var(--text-muted)' }}>Habilidades aplicadas:</span>
+                        <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
+                          {task.skills_used.map((sk) => sk.name).join(' · ')}
+                        </span>
+                      </div>
+                    )}
+
                     {task.routing_note && (
                       <div style={{ color: 'var(--text-secondary)', lineHeight: 1.45 }}>
                         <strong style={{ color: 'var(--text-primary)' }}>Roteamento:</strong> {task.routing_note}
@@ -489,11 +585,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
                               <span style={{ fontWeight: 600, color: 'var(--accent-light)' }}>
                                 {getAgentLabel(out.agent_role || out.role)}
                               </span>
-                              {out.objective && (
-                                <span style={{ color: 'var(--text-muted)', fontSize: '0.70rem' }}>
-                                  {out.objective}
-                                </span>
-                              )}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                {out.model_used && (
+                                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', color: 'var(--text-secondary)' }}>
+                                    {out.model_used}
+                                  </span>
+                                )}
+                                {out.objective && (
+                                  <span style={{ color: 'var(--text-muted)', fontSize: '0.70rem' }}>
+                                    {out.objective}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                             {out.summary && (
                               <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.74rem', whiteSpace: 'pre-wrap' }}>

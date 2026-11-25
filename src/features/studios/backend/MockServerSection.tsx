@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { API_BASE } from '../../../services/api/client';
+import { apiFetch } from '../../../services/sessionTransport';
 import {
   Server,
   Plus,
@@ -70,7 +71,7 @@ export const MockServerSection: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${API_BASE}/auth/me`, { credentials: 'include' })
+    apiFetch(`${API_BASE}/auth/me`)
       .then(async (response) => (response.ok ? response.json() : null))
       .then((principal) => {
         if (!cancelled) {

@@ -23,6 +23,7 @@ import { notify } from '../../shared/common/Toast';
 import { Modal } from '../../shared/common/Modal';
 import { PageHeader } from '../../shared/layout/PageHeader';
 import { API_BASE } from '../../services/api/client';
+import { apiFetch } from '../../services/sessionTransport';
 import { humanizeLabel } from '../../types';
 import { ALL_26_AGENTS } from '../../data/agentsCatalog';
 
@@ -71,9 +72,8 @@ export const TaskManagerView: React.FC = () => {
     if (!prompt || delegating) return;
     setDelegating(true);
     try {
-      const res = await fetch(`${API_BASE}/agents/${encodeURIComponent(selectedAgentRole)}/task`, {
+      const res = await apiFetch(`${API_BASE}/agents/${encodeURIComponent(selectedAgentRole)}/task`, {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt, mode: 'ask' }),
       });
@@ -113,7 +113,7 @@ export const TaskManagerView: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${API_BASE}/auth/me`, { credentials: 'include' })
+    apiFetch(`${API_BASE}/auth/me`)
       .then(async (response) => (response.ok ? response.json() : null))
       .then((principal) => {
         if (cancelled) return;

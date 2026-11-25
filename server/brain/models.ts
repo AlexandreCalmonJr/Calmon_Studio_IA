@@ -549,6 +549,42 @@ CREATE TABLE IF NOT EXISTS custom_packs (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS app_state_snapshots (
+  namespace TEXT PRIMARY KEY,
+  payload_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS app_tasks (
+  task_id TEXT PRIMARY KEY,
+  session_id TEXT,
+  user_prompt TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'completed',
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS coding_session_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  project_id TEXT,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  tool_calls_json TEXT,
+  tool_call_id TEXT,
+  tool_name TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS agent_conversation_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_role TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC);
@@ -558,6 +594,9 @@ CREATE INDEX IF NOT EXISTS idx_provider_vault_owner ON provider_vault_keys(owner
 CREATE INDEX IF NOT EXISTS idx_installed_packs_owner ON installed_packs(owner_user_id, is_installed);
 CREATE INDEX IF NOT EXISTS idx_agent_cores_owner ON agent_cores(owner_user_id, pack_id);
 CREATE INDEX IF NOT EXISTS idx_custom_packs_updated ON custom_packs(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_app_tasks_created ON app_tasks(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_coding_messages_session ON coding_session_messages(session_id, id ASC);
+CREATE INDEX IF NOT EXISTS idx_agent_history_role_session ON agent_conversation_history(agent_role, session_id, id ASC);
 `;
 
 export const CORE_SQLITE_TABLES = [
@@ -581,6 +620,10 @@ export const CORE_SQLITE_TABLES = [
   'installed_packs',
   'agent_cores',
   'custom_packs',
+  'app_state_snapshots',
+  'app_tasks',
+  'coding_session_messages',
+  'agent_conversation_history',
 ] as const;
 
 export const WORKSPACE_SQLITE_TABLES = [

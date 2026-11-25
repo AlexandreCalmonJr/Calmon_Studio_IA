@@ -11,6 +11,7 @@ import {
   recordAgentVersion,
   nowIso,
 } from '../serverState.ts';
+import { requireRole } from '../serverHardening.ts';
 import {
   fetchOllamaLocalModels,
   getCuratedHuggingFaceForHardware,
@@ -357,6 +358,101 @@ export function createModelsRouter(deps: ModelsRouterDeps): Router {
     const limit = Number(req.query.limit || 10);
     const result = await searchRealHuggingFace(q, limit, getActiveHardwareProfile());
     res.json(result.items);
+  });
+
+  router.post('/models/huggingface/install', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
+    const modelTag = String(req.body?.model_tag || '').trim();
+    const displayName = String(req.body?.display_name || modelTag).trim();
+    if (!modelTag || /[\s\r\n]/.test(modelTag) || modelTag.length > 160) {
+      res.status(400).json({ detail: 'Tag de modelo inválida para instalação.' });
+      return;
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+
+    const sendEvent = (payload: Record<string, unknown>) => {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    const activeHw = getActiveHardwareProfile();
+    const ollamaUrl = (activeHw.ollama_url || 'http://127.0.0.1:11434').replace(/\/+$/, '');
+    const probe = serverState.providerConnectivity.ollama_connected
+      ? await fetchOllamaLocalModels(ollamaUrl)
+      : { reachable: false, latencyMs: 0, models: [] };
+
+    if (!probe.reachable) {
+      sendEvent({
+        status: 'error',
+        message: `Ollama não está acessível em ${ollamaUrl}. Inicie o serviço Ollama na máquina local para baixar ${displayName}.`,
+      });
+      res.end();
+      return;
+    }
+
+    sendEvent({ status: 'downloading', percent: 5, message: `Conectando ao Ollama em ${ollamaUrl}...` });
+
+    try {
+      const pullRes = await fetch(`${ollamaUrl}/api/pull`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: modelTag, stream: true }),
+      });
+
+      if (!pullRes.ok || !pullRes.body) {
+        sendEvent({
+          status: 'error',
+          message: `Ollama recusou o download de ${displayName} (HTTP ${pullRes.status}).`,
+        });
+        res.end();
+        return;
+      }
+
+      const reader = pullRes.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const raw of lines) {
+          if (!raw.trim()) continue;
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed.error) {
+              sendEvent({ status: 'error', message: String(parsed.error) });
+              res.end();
+              return;
+            }
+            if (parsed.total && parsed.completed) {
+              sendEvent({
+                status: 'downloading',
+                total: Number(parsed.total),
+                completed: Number(parsed.completed),
+              });
+            } else if (parsed.status === 'success') {
+              sendEvent({ status: 'success', model: modelTag });
+              res.end();
+              return;
+            }
+          } catch {
+            // ignora linhas parciais
+          }
+        }
+      }
+
+      sendEvent({ status: 'success', model: modelTag });
+      res.end();
+    } catch (err: any) {
+      sendEvent({
+        status: 'error',
+        message: err?.message || `Falha de comunicação com o Ollama ao baixar ${displayName}.`,
+      });
+      res.end();
+    }
   });
 
   router.get('/models/agent-recommendations', requireAuth, async (_req: Request, res: Response) => {

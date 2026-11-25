@@ -18,11 +18,18 @@ import {
   clearSessionCookie,
   createSessionForUser,
   requireAuth,
+  persistAllUsersAndProfiles,
 } from '../serverState.ts';
 import { isBootstrapAdminUser } from '../serverHardening.ts';
+import type { LocalSqliteBrainStore } from '../brain/sqliteBrainStore.ts';
 
-export function createAuthRouter(): Router {
+export interface AuthRouterDeps {
+  store?: LocalSqliteBrainStore;
+}
+
+export function createAuthRouter(deps?: AuthRouterDeps): Router {
   const router = express.Router();
+  const store = deps?.store;
 
   // --- AUTH ---
   router.get('/auth/me', (req: Request, res: Response) => {
@@ -159,6 +166,7 @@ export function createAuthRouter(): Router {
     });
 
     const record = createSessionForUser(req, res, account);
+    persistAllUsersAndProfiles(store);
     res.status(201).json({
       status: 'authenticated',
       user_id: account.username,
@@ -212,6 +220,7 @@ export function createAuthRouter(): Router {
     }
 
     const record = createSessionForUser(req, res, user);
+    persistAllUsersAndProfiles(store);
     res.json({
       status: 'authenticated',
       user_id: user.username,
@@ -239,6 +248,7 @@ export function createAuthRouter(): Router {
     user.salt = salt;
     user.password_hash = hashPassword(newPassword, salt);
     user.must_change_password = false;
+    persistAllUsersAndProfiles(store);
     res.json({ status: 'updated' });
   });
 
@@ -277,6 +287,7 @@ export function createAuthRouter(): Router {
       return;
     }
     users.set(username, makeAccount(username, display_name, password, role, false));
+    persistAllUsersAndProfiles(store);
     res.status(201).json({ status: 'created', username });
   });
 
@@ -304,6 +315,7 @@ export function createAuthRouter(): Router {
         sessions.delete(sid);
       }
     }
+    persistAllUsersAndProfiles(store);
     res.json({ status: 'password_updated' });
   });
 
@@ -323,6 +335,7 @@ export function createAuthRouter(): Router {
       return;
     }
     target.is_active = Boolean(req.body?.is_active);
+    persistAllUsersAndProfiles(store);
     res.json({ status: 'updated', is_active: target.is_active });
   });
 
@@ -374,6 +387,7 @@ export function createAuthRouter(): Router {
     if (typeof req.body?.displayName === 'string' && req.body.displayName.trim()) {
       user.display_name = req.body.displayName.trim().slice(0, 80);
     }
+    persistAllUsersAndProfiles(store);
     res.json({ status: 'saved', profile: merged });
   });
 
@@ -389,6 +403,7 @@ export function createAuthRouter(): Router {
       updated_at: nowIso(),
     };
     learningProgress.set(user.username, next);
+    persistAllUsersAndProfiles(store);
     res.json(next);
   });
 

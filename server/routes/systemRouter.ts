@@ -7,7 +7,9 @@ import {
   PORT,
   BOOT_TIME,
   nowIso,
+  persistStateNamespace,
 } from '../serverState.ts';
+import { requireRole, validateSafeExternalUrl } from '../serverHardening.ts';
 import type { LocalSqliteBrainStore } from '../brain/sqliteBrainStore.ts';
 
 export interface SystemRouterDeps {
@@ -89,6 +91,15 @@ export function createSystemRouter(deps: SystemRouterDeps): Router {
 
   router.post('/system/onboarding/complete', requireAuth, (_req: Request, res: Response) => {
     serverState.onboardingCompleted = true;
+    persistStateNamespace(store, 'security_flags', {
+      networkIsolated: serverState.networkIsolated,
+      killSwitchActive: serverState.killSwitchActive,
+      vaultLocked: serverState.vaultLocked,
+      piiShieldEnabled: serverState.piiShieldEnabled,
+      quarantinedAgents: serverState.quarantinedAgents,
+      onboardingCompleted: serverState.onboardingCompleted,
+      brainAutoDistill: serverState.brainAutoDistill,
+    });
     res.json({ completed: true });
   });
 
@@ -208,9 +219,12 @@ export function createSystemRouter(deps: SystemRouterDeps): Router {
 
   router.post('/system/inference-feedback', requireAuth, (req: Request, res: Response) => {
     const id = String(req.body?.inference_id || '');
-    const rating = Number(req.body?.rating || 5);
+    const rating = Math.min(5, Math.max(1, Number(req.body?.rating || 5)));
     const rec = serverState.telemetryRecords.find((r) => r.id === id);
-    if (rec) rec.feedback_rating = rating;
+    if (rec) {
+      rec.feedback_rating = rating;
+      persistStateNamespace(store, 'telemetry_records', serverState.telemetryRecords.slice(0, 500));
+    }
     res.json({ status: 'recorded' });
   });
 
@@ -223,7 +237,7 @@ export function createSystemRouter(deps: SystemRouterDeps): Router {
     res.json({ total: list.length, logs: list });
   });
 
-  router.post('/system/server-logs/clear', requireAuth, (_req: Request, res: Response) => {
+  router.post('/system/server-logs/clear', requireAuth, requireRole('admin'), (_req: Request, res: Response) => {
     serverState.serverLogs.length = 0;
     res.json({ status: 'cleared' });
   });
@@ -239,7 +253,7 @@ export function createSystemRouter(deps: SystemRouterDeps): Router {
     req.on('close', () => clearInterval(keepalive));
   });
 
-  router.post('/system/backup', requireAuth, (_req: Request, res: Response) => {
+  router.post('/system/backup', requireAuth, requireRole('admin', 'developer'), (_req: Request, res: Response) => {
     try {
       const backup = store.createSqliteBackup();
       serverState.serverLogs.unshift({
@@ -255,17 +269,37 @@ export function createSystemRouter(deps: SystemRouterDeps): Router {
     }
   });
 
-  router.post('/system/kill-switch', requireAuth, (req: Request, res: Response) => {
+  router.post('/system/kill-switch', requireAuth, requireRole('admin'), (req: Request, res: Response) => {
     const target = String(req.body?.target || 'global');
     if (target === 'global') {
       serverState.killSwitchActive = !serverState.killSwitchActive;
+      persistStateNamespace(store, 'security_flags', {
+        networkIsolated: serverState.networkIsolated,
+        killSwitchActive: serverState.killSwitchActive,
+        vaultLocked: serverState.vaultLocked,
+        piiShieldEnabled: serverState.piiShieldEnabled,
+        quarantinedAgents: serverState.quarantinedAgents,
+        onboardingCompleted: serverState.onboardingCompleted,
+        brainAutoDistill: serverState.brainAutoDistill,
+      });
     }
     res.json({ status: serverState.killSwitchActive ? 'triggered' : 'reset', global_killed: serverState.killSwitchActive });
   });
 
   router.get('/system/webhooks', requireAuth, (_req: Request, res: Response) => res.json(serverState.webhooksConfig));
   router.post('/system/webhooks', requireAuth, (req: Request, res: Response) => {
+    const urlFields = ['discord_url', 'slack_url', 'custom_url', 'webhook_url'] as const;
+    for (const field of urlFields) {
+      if (typeof req.body?.[field] === 'string' && req.body[field].trim()) {
+        const check = validateSafeExternalUrl(req.body[field]);
+        if (!check.valid) {
+          res.status(400).json({ detail: check.reason || 'URL de webhook inválida.' });
+          return;
+        }
+      }
+    }
     serverState.webhooksConfig = { ...serverState.webhooksConfig, ...req.body };
+    persistStateNamespace(store, 'webhooks_config', serverState.webhooksConfig);
     res.json(serverState.webhooksConfig);
   });
   router.post('/system/webhooks/test', requireAuth, (_req: Request, res: Response) => {
@@ -315,6 +349,7 @@ export function createSystemRouter(deps: SystemRouterDeps): Router {
   router.get('/hardware/performance-mode', requireAuth, (_req: Request, res: Response) => res.json(serverState.performanceModeState));
   router.post('/hardware/performance-mode', requireAuth, (req: Request, res: Response) => {
     serverState.performanceModeState = { ...serverState.performanceModeState, ...req.body };
+    persistStateNamespace(store, 'performance_mode', serverState.performanceModeState);
     res.json(serverState.performanceModeState);
   });
 
@@ -328,6 +363,7 @@ export function createSystemRouter(deps: SystemRouterDeps): Router {
     }
     const action = req.body?.action === 'approve' ? 'approved' : 'rejected';
     item.status = action;
+    persistStateNamespace(store, 'approvals', serverState.approvals);
     res.json({ status: action, id: item.id });
   });
 

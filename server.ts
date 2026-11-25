@@ -26,6 +26,7 @@ import {
   nowIso,
   recordAgentVersion,
   createFreshPairingSession,
+  hydrateServerStateFromSqlite,
   SessionRecord,
 } from './server/serverState.ts';
 import {
@@ -67,25 +68,28 @@ export function buildApiRouter(options?: { store?: LocalSqliteBrainStore }) {
     });
   };
 
+  // Hidrata estado persistido do SQLite WAL antes de montar os roteadores
+  hydrateServerStateFromSqlite(localBrainStore);
+
   localBrainStore.seedPairedDevicesIfEmpty(serverState.pairedDevicesList);
   serverState.pairedDevicesList = localBrainStore.listPairedDevices();
   syncRuntimeToSqlite();
 
   // ==================== MÓDULOS DE ROTAS DOMAIN-DRIVEN ====================
-  api.use(createAuthRouter());
+  api.use(createAuthRouter({ store: localBrainStore }));
   api.use(createSystemRouter({ store: localBrainStore }));
   api.use(createChatRouter({ store: localBrainStore }));
   api.use(createPacksRouter({ store: localBrainStore }));
   api.use(createAgentsRouter({ store: localBrainStore }));
   api.use(createModelsRouter({ store: localBrainStore }));
-  api.use(createWorkspaceRouter());
-  api.use(createSkillsRouter());
-  api.use(createKnowledgeRouter());
-  api.use(createIntegrationsRouter());
-  api.use(createWorkflowsRouter());
-  api.use(createSecurityRouter());
+  api.use(createWorkspaceRouter({ store: localBrainStore }));
+  api.use(createSkillsRouter({ store: localBrainStore }));
+  api.use(createKnowledgeRouter({ store: localBrainStore }));
+  api.use(createIntegrationsRouter({ store: localBrainStore }));
+  api.use(createWorkflowsRouter({ store: localBrainStore }));
+  api.use(createSecurityRouter({ store: localBrainStore }));
   api.use(createVoiceCompanionRouter({ store: localBrainStore }));
-  api.use(createStudiosRouter());
+  api.use(createStudiosRouter({ store: localBrainStore }));
   api.use(createMediaRouter());
 
   // Roteador dedicado do Segundo Cérebro (Brain)
@@ -194,9 +198,13 @@ export function buildApiRouter(options?: { store?: LocalSqliteBrainStore }) {
     })
   );
 
-  // Fallback para endpoints não mapeados para retornar JSON limpo à interface
-  api.use(requireAuth, (_req, res) => {
-    res.json({ status: 'ok', items: [] });
+  // Retorna 404 estruturado para qualquer endpoint de API não mapeado
+  api.use(requireAuth, (req, res) => {
+    res.status(404).json({
+      error: 'Not Found',
+      detail: `Endpoint de API não encontrado: ${req.method} ${req.originalUrl}`,
+      status: 404,
+    });
   });
 
   return api;

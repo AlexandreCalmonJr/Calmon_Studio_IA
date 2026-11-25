@@ -265,13 +265,18 @@ export const OpenBotChatHeader: React.FC<OpenBotChatHeaderProps> = ({
         <div ref={dropdownRef} style={{ position: 'relative' }}>
           <button
             type="button"
+            data-testid="chat-header-model-btn"
             onClick={() => setModelDropdownOpen((prev) => !prev)}
             className="openbot-model-pill"
             title="Trocar modelo de inteligência artificial"
           >
             <Cpu size={13} color="var(--accent-light)" />
             <span style={{ fontWeight: 500, maxWidth: '170px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {activeModelObj ? activeModelObj.label : selectedModel}
+              {selectedModel === 'auto'
+                ? 'Automático (Agente)'
+                : activeModelObj
+                  ? activeModelObj.label
+                  : selectedModel}
             </span>
             <ChevronDown size={12} color="var(--text-muted)" />
           </button>
@@ -311,6 +316,31 @@ export const OpenBotChatHeader: React.FC<OpenBotChatHeaderProps> = ({
                   {modelList.length} ativos
                 </span>
               </div>
+
+              <button
+                type="button"
+                data-testid="chat-header-model-auto"
+                onClick={() => {
+                  onSelectModel('auto');
+                  setModelDropdownOpen(false);
+                }}
+                className={`btn btn-ghost btn-sm btn-block btn-between ${selectedModel === 'auto' ? 'is-active' : ''}`}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                  <Sparkles size={14} color={selectedModel === 'auto' ? 'var(--accent-light)' : 'var(--text-muted)'} style={{ flexShrink: 0 }} />
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
+                    <span style={{ fontWeight: selectedModel === 'auto' ? 600 : 500, fontSize: '0.78rem' }}>
+                      Automático (Agente)
+                    </span>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                      Usa o modelo configurado em cada agente
+                    </span>
+                  </div>
+                </div>
+                {selectedModel === 'auto' && <Check size={14} color="var(--accent-light)" />}
+              </button>
+
+              <div style={{ height: '1px', backgroundColor: 'var(--border-subtle)', margin: '3px 0' }} />
 
               {modelList.map((m) => {
                 const isSelected = selectedModel === m.id;

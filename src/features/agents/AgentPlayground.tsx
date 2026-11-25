@@ -19,6 +19,7 @@ import {
   Wrench,
   CheckCircle2,
   Square,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface AgentPlaygroundProps {
@@ -33,6 +34,11 @@ interface TimelineItem {
   sender: 'user' | 'agent' | 'tool' | 'contract';
   text?: string;
   modelUsed?: string;
+  requestedModel?: string;
+  fallbackOccurred?: boolean;
+  routingNote?: string;
+  skillsUsed?: Array<{ id: string; name: string; domain?: string }>;
+  executionMode?: string;
   toolName?: string;
   toolArguments?: Record<string, any>;
   toolSuccess?: boolean;
@@ -130,6 +136,14 @@ export const AgentPlayground: React.FC<AgentPlaygroundProps> = ({
     abortControllerRef.current = abortCtrl;
 
     let accumulatedText = '';
+    let latestMeta: {
+      requestedModel?: string;
+      modelUsed?: string;
+      fallbackOccurred?: boolean;
+      routingNote?: string;
+      skillsUsed?: Array<{ id: string; name: string; domain?: string }>;
+      executionMode?: string;
+    } = {};
 
     try {
       await runAutonomousAgentStream(
@@ -141,10 +155,30 @@ export const AgentPlayground: React.FC<AgentPlaygroundProps> = ({
           mode,
         },
         (event: AutonomousAgentEvent) => {
-          if (event.type === 'thinking') {
-            setCurrentToolStatus(`Iteração ${event.iteration}: Avaliando próximo passo...`);
+          if (event.type === 'start') {
+            if (event.requested_model) latestMeta.requestedModel = String(event.requested_model);
+            if (Array.isArray(event.skills_used)) latestMeta.skillsUsed = event.skills_used;
+            setCurrentToolStatus(
+              `Preparando ${agent.proper_name || agent.name}${event.requested_model ? ` (${event.requested_model})` : ''}...`
+            );
+          } else if (event.type === 'thinking') {
+            const iterLabel = typeof event.iteration === 'number' ? `Iteração ${event.iteration}` : 'Raciocínio';
+            setCurrentToolStatus(
+              (typeof event.message === 'string' && event.message.trim()) ||
+                `${iterLabel}: Avaliando próximo passo...`
+            );
           } else if (event.type === 'assistant') {
-            accumulatedText = (event.content as string) || '';
+            if (typeof event.content === 'string') {
+              accumulatedText = event.content;
+            } else if (typeof event.chunk === 'string') {
+              accumulatedText += event.chunk;
+            }
+            if (event.requested_model) latestMeta.requestedModel = String(event.requested_model);
+            if (event.model_used || event.model) latestMeta.modelUsed = String(event.model_used || event.model);
+            if (typeof event.fallback_occurred === 'boolean') latestMeta.fallbackOccurred = event.fallback_occurred;
+            if (typeof event.routing_note === 'string') latestMeta.routingNote = event.routing_note;
+            if (Array.isArray(event.skills_used)) latestMeta.skillsUsed = event.skills_used;
+            if (event.execution_mode) latestMeta.executionMode = String(event.execution_mode);
             setCurrentAssistantText(accumulatedText);
           } else if (event.type === 'tool_call') {
             setCurrentToolStatus(`Executando ferramenta: ${getToolLabel(event.name)}...`);
@@ -177,12 +211,27 @@ export const AgentPlayground: React.FC<AgentPlaygroundProps> = ({
             };
             setMessages((prev) => [...prev, contractItem]);
           } else if (event.type === 'final') {
-            if (accumulatedText) {
+            const finalText = (typeof event.summary === 'string' && event.summary.trim())
+              ? event.summary
+              : accumulatedText;
+            if (finalText) {
               const finalAssistantItem: TimelineItem = {
                 id: `ast-${Date.now()}`,
                 sender: 'agent',
-                text: accumulatedText,
-                modelUsed: (event.model as string) || agent.preferred_model,
+                text: finalText,
+                modelUsed:
+                  (event.model_used as string) ||
+                  (event.model as string) ||
+                  latestMeta.modelUsed ||
+                  agent.preferred_model,
+                requestedModel: (event.requested_model as string) || latestMeta.requestedModel,
+                fallbackOccurred:
+                  typeof event.fallback_occurred === 'boolean'
+                    ? event.fallback_occurred
+                    : latestMeta.fallbackOccurred,
+                routingNote: (event.routing_note as string) || latestMeta.routingNote,
+                skillsUsed: Array.isArray(event.skills_used) ? event.skills_used : latestMeta.skillsUsed,
+                executionMode: (event.execution_mode as string) || latestMeta.executionMode,
                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
               };
               setMessages((prev) => [...prev, finalAssistantItem]);
@@ -554,18 +603,95 @@ export const AgentPlayground: React.FC<AgentPlaygroundProps> = ({
               }
 
               return (
-                <div key={item.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                <div
+                  key={item.id}
+                  data-testid="playground-agent-reply"
+                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '6px' }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
                     <Bot size={12} color="var(--accent-color)" />
-                    <span style={{ color: 'var(--accent-color)', fontWeight: 600 }}>{agent.name}</span>
+                    <span style={{ color: 'var(--accent-color)', fontWeight: 600 }}>
+                      {agent.proper_name ? `${agent.proper_name} · ${agent.name}` : agent.name}
+                    </span>
+                    {item.executionMode && (
+                      <span
+                        style={{
+                          fontWeight: 700,
+                          color: item.executionMode === 'LOCAL' ? '#4ade80' : '#60a5fa',
+                        }}
+                      >
+                        {item.executionMode}
+                      </span>
+                    )}
                     {item.modelUsed && (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontFamily: 'monospace' }}>
+                      <span
+                        data-testid="playground-model-used"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontFamily: 'monospace' }}
+                      >
                         <Cpu size={10} />
                         {getModelLabel(item.modelUsed)}
                       </span>
                     )}
+                    {item.skillsUsed && item.skillsUsed.length > 0 && (
+                      <span
+                        data-testid="playground-skills-used"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: 'var(--accent-light)' }}
+                        title={item.skillsUsed.map((s) => s.name).join(', ')}
+                      >
+                        <Wrench size={10} />
+                        {item.skillsUsed.map((s) => s.name).join(' · ')}
+                      </span>
+                    )}
                     <span>• {item.timestamp}</span>
                   </div>
+
+                  {(item.fallbackOccurred || item.routingNote) && (
+                    <div
+                      data-testid="playground-fallback-notice"
+                      role="status"
+                      style={{
+                        maxWidth: '88%',
+                        padding: '9px 13px',
+                        borderRadius: '8px',
+                        backgroundColor: item.fallbackOccurred
+                          ? 'var(--warning-soft, rgba(245, 158, 11, 0.14))'
+                          : 'var(--accent-soft, rgba(59, 130, 246, 0.10))',
+                        border: item.fallbackOccurred
+                          ? '1px solid rgba(217, 119, 6, 0.45)'
+                          : '1px solid rgba(37, 99, 235, 0.30)',
+                        borderLeft: item.fallbackOccurred
+                          ? '3px solid #d97706'
+                          : '3px solid #2563eb',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.77rem',
+                        lineHeight: 1.5,
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: '8px',
+                      }}
+                    >
+                      <AlertTriangle
+                        size={14}
+                        color={item.fallbackOccurred ? '#d97706' : '#2563eb'}
+                        style={{ flexShrink: 0, marginTop: '2px' }}
+                      />
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <strong style={{ color: 'var(--text-primary)' }}>
+                          {item.fallbackOccurred ? 'Fallback de modelo aplicado' : 'Nota de roteamento'}
+                        </strong>
+                        {item.requestedModel &&
+                          item.modelUsed &&
+                          item.requestedModel !== item.modelUsed &&
+                          (!item.routingNote || !item.routingNote.includes('Solicitado:')) && (
+                            <span style={{ color: 'var(--text-primary)' }}>
+                              Solicitado: <code>{item.requestedModel}</code> → Respondido por: <code>{item.modelUsed}</code>
+                            </span>
+                          )}
+                        <span style={{ color: 'var(--text-secondary)' }}>{item.routingNote}</span>
+                      </div>
+                    </div>
+                  )}
+
                   <div
                     style={{
                       maxWidth: '88%',

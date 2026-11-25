@@ -171,20 +171,29 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   }, [availableModels]);
 
   useEffect(() => {
-    if (modelOptions.length === 0) return;
     const targetId =
       selectedModelId !== undefined
         ? selectedModelId
         : localStorage.getItem(getAccountStorageKey('jarvis_selected_model'));
 
-    let found = modelOptions.find((item) => item.id === targetId);
-    if (!found && !selectedModelId && modelOptions.length > 0) {
-      found =
-        modelOptions.find(
-          (item) => item.id.toLowerCase().includes('qwen') || item.id.toLowerCase().includes('llama')
-        ) || modelOptions[0];
+    if (!targetId || targetId === 'auto') {
+      setSelectedModel(null);
+      return;
     }
-    setSelectedModel(found || null);
+
+    const found = modelOptions.find((item) => item.id === targetId);
+    if (found) {
+      setSelectedModel(found);
+    } else {
+      setSelectedModel({
+        id: targetId,
+        name: targetId,
+        label: targetId,
+        provider: targetId.toLowerCase().includes('gemini') ? 'Gemini' : 'Modelo personalizado',
+        effort: 'Selecionado',
+        isCloud: targetId.toLowerCase().includes('gemini') || targetId.toLowerCase().includes('gpt') || targetId.toLowerCase().includes('claude'),
+      });
+    }
   }, [selectedModelId, modelOptions]);
 
   useEffect(() => {
@@ -298,7 +307,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     }
 
     setTrigger(null);
-    onSubmit(payload, modelOverride ?? selectedModel?.id);
+    onSubmit(payload, modelOverride ?? (selectedModel ? selectedModel.id : 'auto'));
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -795,10 +804,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 title="Alternar modelo de IA ativo"
               >
                 <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
-                  {selectedModel?.label || 'Automático (Maestro)'}
+                  {selectedModel?.label || 'Automático (Agente)'}
                 </span>
                 <span className="hide-mobile" style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>
-                  {selectedModel?.effort || 'Seleção inteligente'}
+                  {selectedModel?.effort || 'Modelo do agente'}
                 </span>
                 <ChevronDown size={12} color="var(--text-muted)" />
               </button>
@@ -820,7 +829,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                     <span className="tabular-nums">{modelOptions.length + 1} opções</span>
                   </div>
 
-                  {/* Opção Automático (Maestro) */}
+                  {/* Opção Automático (Agente) */}
                   <button
                     type="button"
                     onClick={() => {
@@ -839,10 +848,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                       <Sparkles size={14} color="var(--accent-light)" style={{ flexShrink: 0 }} />
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
                         <span style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-primary)' }}>
-                          Automático (Maestro)
+                          Automático (Agente)
                         </span>
                         <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                          Roteamento dinâmico · Recomendado
+                          Usa o modelo configurado em cada agente
                         </span>
                       </div>
                     </div>

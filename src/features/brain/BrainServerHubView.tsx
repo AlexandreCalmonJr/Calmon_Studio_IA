@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   ArrowRightLeft,
+  ArrowUpCircle,
+  ArrowUpRight,
   BookOpen,
   Check,
   CheckCircle2,
@@ -16,6 +18,7 @@ import {
   HardDrive,
   Layers,
   Loader2,
+  Package,
   Plug,
   Plus,
   Radio,
@@ -56,19 +59,31 @@ import {
   type BrainInfoResponse,
   type BrainSchemaResponse,
 } from '../../services/api/brainServer';
+import {
+  fetchPackageUpdatesStatus,
+  PACK_UPDATES_CHANGED_EVENT,
+  type VersionCheckReport,
+} from '../../services/api/packs';
 
 import { BrainMemoryPanel } from './BrainMemoryPanel';
 import { BrainPythonLanesPanel } from './BrainPythonLanesPanel';
 import { BrainMcpPanel } from './BrainMcpPanel';
+import { BrainUpdatesPanel } from './BrainUpdatesPanel';
 
 type BrainHubTab =
   | 'multi_brain'
+  | 'updates'
   | 'memory_hybrid'
   | 'python_lanes'
   | 'mcp_gateway'
   | 'dual_mode'
   | 'files'
   | 'api_map';
+
+interface BrainServerHubViewProps {
+  onNavigate?: (tab: string) => void;
+  canManagePacks?: boolean;
+}
 
 const MODE_BADGE_MAP: Record<BrainMode, { label: string; color: string; bg: string }> = {
   local_sqlite: {
@@ -95,7 +110,10 @@ const METHOD_COLORS: Record<string, { color: string; bg: string }> = {
   DELETE: { color: '#fca5a5', bg: 'rgba(239, 68, 68, 0.16)' },
 };
 
-export const BrainServerHubView: React.FC = () => {
+export const BrainServerHubView: React.FC<BrainServerHubViewProps> = ({
+  onNavigate,
+  canManagePacks = false,
+}) => {
   const { assistantName } = useAssistantIdentity();
   const [activeTab, setActiveTab] = useState<BrainHubTab>('multi_brain');
 
@@ -105,6 +123,10 @@ export const BrainServerHubView: React.FC = () => {
   const [activeProfileId, setActiveProfileId] = useState<string>('brain_local_primary');
   const [loadingBrains, setLoadingBrains] = useState<boolean>(true);
   const [busyProfileId, setBusyProfileId] = useState<string | null>(null);
+
+  // Verificação de Versões (Pacotes Modulares & Agentes)
+  const [updatesReport, setUpdatesReport] = useState<VersionCheckReport | null>(null);
+  const [checkingUpdates, setCheckingUpdates] = useState<boolean>(true);
 
   // Formulário Novo Cérebro
   const [newName, setNewName] = useState<string>('');
@@ -136,27 +158,57 @@ export const BrainServerHubView: React.FC = () => {
   // Filtro da Aba Mapa da API
   const [apiSearch, setApiSearch] = useState<string>('');
 
+  const loadUpdatesStatus = async (silent = false) => {
+    setCheckingUpdates(true);
+    try {
+      const report = await fetchPackageUpdatesStatus();
+      setUpdatesReport(report);
+    } catch (err: any) {
+      if (!silent) {
+        notify(err?.message || 'Não foi possível verificar versões de pacotes e agentes.', 'error');
+      }
+    } finally {
+      setCheckingUpdates(false);
+    }
+  };
+
   const loadAllBrainState = async () => {
     setLoadingBrains(true);
     try {
-      const [info, profs, schema] = await Promise.all([
+      const [info, profs, schema, updates] = await Promise.all([
         fetchBrainInfoApi(),
         fetchBrainProfilesApi(),
         fetchBrainSchemaApi().catch(() => null),
+        fetchPackageUpdatesStatus().catch(() => null),
       ]);
       setBrainInfo(info);
       setProfiles(profs.profiles);
       setActiveProfileId(profs.activeProfileId);
       if (schema) setSchemaInfo(schema);
+      if (updates) setUpdatesReport(updates);
     } catch (err: any) {
       notify(err?.message || 'Não foi possível carregar os Cérebros conectados.', 'error');
     } finally {
       setLoadingBrains(false);
+      setCheckingUpdates(false);
     }
   };
 
   useEffect(() => {
     void loadAllBrainState();
+  }, []);
+
+  useEffect(() => {
+    const onUpdatesChanged = (event: Event) => {
+      const custom = event as CustomEvent<VersionCheckReport>;
+      if (custom.detail?.summary) {
+        setUpdatesReport(custom.detail);
+      } else {
+        void loadUpdatesStatus(true);
+      }
+    };
+    window.addEventListener(PACK_UPDATES_CHANGED_EVENT, onUpdatesChanged);
+    return () => window.removeEventListener(PACK_UPDATES_CHANGED_EVENT, onUpdatesChanged);
   }, []);
 
   useEffect(() => {
@@ -371,8 +423,8 @@ export const BrainServerHubView: React.FC = () => {
           justifyContent: 'space-between',
           gap: '18px',
           background:
-            'radial-gradient(circle at top left, rgba(249, 115, 22, 0.14), rgba(15, 19, 28, 0.94) 60%)',
-          borderColor: 'rgba(249, 115, 22, 0.28)',
+            'linear-gradient(135deg, rgba(249, 115, 22, 0.11) 0%, var(--bg-secondary) 55%)',
+          borderColor: 'rgba(249, 115, 22, 0.3)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px', flex: '1 1 460px', minWidth: 0 }}>
@@ -401,6 +453,65 @@ export const BrainServerHubView: React.FC = () => {
               <strong>Worker Python 3.11 ao vivo</strong>, filas seriais por sessão, <strong>Gateway MCP nativo</strong> e{' '}
               <strong>Serviço Go (Gateway + Crawler)</strong> no pacote Docker/VPS.
             </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px', marginTop: '12px' }}>
+              <button
+                type="button"
+                onClick={() => setActiveTab('updates')}
+                data-testid="brain-updates-badge"
+                aria-label="Status de atualizações de pacotes e agentes"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '7px',
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  border:
+                    (updatesReport?.summary.total_updates_available ?? 0) > 0
+                      ? '1px solid #d97706'
+                      : '1px solid #16a34a',
+                  backgroundColor:
+                    (updatesReport?.summary.total_updates_available ?? 0) > 0
+                      ? '#fef3c7'
+                      : '#dcfce7',
+                  color:
+                    (updatesReport?.summary.total_updates_available ?? 0) > 0
+                      ? '#92400e'
+                      : '#166534',
+                }}
+              >
+                <ArrowUpCircle
+                  size={15}
+                  color={
+                    (updatesReport?.summary.total_updates_available ?? 0) > 0 ? '#b45309' : '#15803d'
+                  }
+                />
+                <span>
+                  {checkingUpdates && !updatesReport
+                    ? 'Verificando versões...'
+                    : (updatesReport?.summary.total_updates_available ?? 0) > 0
+                      ? `${updatesReport!.summary.total_updates_available} atualização(ões) disponível(is) (${updatesReport!.summary.outdated_packages} pacote · ${updatesReport!.summary.outdated_agents} agente)`
+                      : 'Pacotes e agentes atualizados'}
+                </span>
+              </button>
+
+              {canManagePacks &&
+                onNavigate &&
+                (updatesReport?.summary.total_updates_available ?? 0) > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('pack_studio')}
+                    data-testid="brain-hero-pack-studio-btn"
+                    className="btn btn-secondary btn-sm"
+                  >
+                    <Package size={13} />
+                    <span>Aplicar no Estúdio de Pacotes</span>
+                    <ArrowUpRight size={13} />
+                  </button>
+                )}
+            </div>
           </div>
         </div>
 
@@ -423,13 +534,19 @@ export const BrainServerHubView: React.FC = () => {
       {/* Tabs */}
       <div role="tablist" aria-label="Seções de Cérebros e Servidor" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
         {[
-          { id: 'multi_brain' as const, label: `Meus Cérebros (${profiles.length})`, icon: ArrowRightLeft },
-          { id: 'memory_hybrid' as const, label: 'Memória & Markdown', icon: BookOpen },
-          { id: 'python_lanes' as const, label: 'Worker Python & Filas', icon: Cpu },
-          { id: 'mcp_gateway' as const, label: 'Gateway MCP', icon: Plug },
-          { id: 'dual_mode' as const, label: 'Local vs. Docker Poliglota', icon: Layers },
-          { id: 'files' as const, label: `Arquivos do Servidor (${serverFiles.length})`, icon: Code2 },
-          { id: 'api_map' as const, label: 'Mapa da API (/api/v1) & Banco', icon: Database },
+          { id: 'multi_brain' as const, label: `Meus Cérebros (${profiles.length})`, icon: ArrowRightLeft, badgeCount: 0 },
+          {
+            id: 'updates' as const,
+            label: 'Versões & Updates',
+            icon: ArrowUpCircle,
+            badgeCount: updatesReport?.summary.total_updates_available ?? 0,
+          },
+          { id: 'memory_hybrid' as const, label: 'Memória & Markdown', icon: BookOpen, badgeCount: 0 },
+          { id: 'python_lanes' as const, label: 'Worker Python & Filas', icon: Cpu, badgeCount: 0 },
+          { id: 'mcp_gateway' as const, label: 'Gateway MCP', icon: Plug, badgeCount: 0 },
+          { id: 'dual_mode' as const, label: 'Local vs. Docker Poliglota', icon: Layers, badgeCount: 0 },
+          { id: 'files' as const, label: `Arquivos do Servidor (${serverFiles.length})`, icon: Code2, badgeCount: 0 },
+          { id: 'api_map' as const, label: 'Mapa da API (/api/v1) & Banco', icon: Database, badgeCount: 0 },
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -444,10 +561,37 @@ export const BrainServerHubView: React.FC = () => {
             >
               <Icon size={14} />
               <span>{tab.label}</span>
+              {tab.badgeCount > 0 && (
+                <span
+                  data-testid="brain-updates-tab-badge"
+                  style={{
+                    fontSize: '0.68rem',
+                    fontWeight: 800,
+                    padding: '1px 6px',
+                    borderRadius: '999px',
+                    backgroundColor: isActive ? 'rgba(255,255,255,0.22)' : '#d97706',
+                    color: '#ffffff',
+                    marginLeft: '2px',
+                  }}
+                >
+                  {tab.badgeCount}
+                </span>
+              )}
             </button>
           );
         })}
       </div>
+
+      {/* ABA DE VERIFICAÇÃO DE VERSÕES E UPDATES */}
+      {activeTab === 'updates' && (
+        <BrainUpdatesPanel
+          report={updatesReport}
+          loading={checkingUpdates}
+          canManagePacks={canManagePacks}
+          onRefresh={() => void loadUpdatesStatus(false)}
+          onOpenPackStudio={onNavigate ? () => onNavigate('pack_studio') : undefined}
+        />
+      )}
 
       {/* NOVAS ABAS POLIGLOTAS: MEMÓRIA MARKDOWN/HÍBRIDA, WORKER PYTHON/FILAS & GATEWAY MCP */}
       {activeTab === 'memory_hybrid' && (

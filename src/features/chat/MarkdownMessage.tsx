@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Copy, Check, Terminal, GitCompare } from 'lucide-react';
 import { formatFriendlyText, sanitizeUserFacingText } from '../../types';
+import { parseMarkdownBlocks, splitCodeFenceSegments } from './markdownParser';
 
 interface MarkdownMessageProps {
   content: string;
@@ -27,135 +28,62 @@ export function safeHref(raw: string): string | null {
 }
 
 export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ content }) => {
-  // Parser de blocos (código, cabeçalhos, listas, parágrafos)
+  // Parser de blocos (código fechado ou em streaming, tabelas GFM, citações, cabeçalhos, listas, parágrafos)
   const renderFormattedText = (text: string) => {
-    // Divide o conteúdo preservando blocos de código com cercas ```
-    const codeBlockRegex = /```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g;
-    const parts: React.ReactNode[] = [];
-    let lastIndex = 0;
-    let match: RegExpExecArray | null;
-
-    while ((match = codeBlockRegex.exec(text)) !== null) {
-      const matchIndex = match.index;
-      // Texto antes do bloco de código
-      if (matchIndex > lastIndex) {
-        const textBefore = text.substring(lastIndex, matchIndex);
-        parts.push(renderTextSections(textBefore, `text-${lastIndex}`));
+    const segments = splitCodeFenceSegments(text);
+    return segments.map((segment, idx) => {
+      if (segment.type === 'code') {
+        return (
+          <CodeBlockItem
+            key={`code-${idx}`}
+            language={segment.language || 'plaintext'}
+            code={segment.content}
+            isStreaming={segment.isStreaming}
+          />
+        );
       }
-
-      // Bloco de código
-      const lang = match[1] || 'plaintext';
-      const code = match[2];
-      parts.push(
-        <CodeBlockItem
-          key={`code-${matchIndex}`}
-          language={lang}
-          code={code}
-        />
+      return (
+        <React.Fragment key={`text-${idx}`}>
+          {renderTextSections(segment.content, `seg-${idx}`)}
+        </React.Fragment>
       );
-
-      lastIndex = matchIndex + match[0].length;
-    }
-
-    if (lastIndex < text.length) {
-      parts.push(renderTextSections(text.substring(lastIndex), `text-${lastIndex}`));
-    }
-
-    return parts;
+    });
   };
 
-  // Renderiza seções de texto normais (cabeçalhos, listas, parágrafos)
+  // Renderiza seções de texto normais (tabelas, citações, cabeçalhos, listas, parágrafos)
   const renderTextSections = (rawText: string, keyPrefix: string) => {
-    const lines = rawText.split('\n');
-    const nodes: React.ReactNode[] = [];
-    let currentList: { type: 'ul' | 'ol'; items: React.ReactNode[] } | null = null;
+    const blocks = parseMarkdownBlocks(rawText);
+    return blocks.map((block, idx) => {
+      const key = `${keyPrefix}-${block.type}-${idx}`;
 
-    const flushList = (idx: number) => {
-      if (currentList) {
-        if (currentList.type === 'ul') {
-          nodes.push(
-            <ul
-              key={`${keyPrefix}-list-${idx}`}
-              style={{
-                margin: '8px 0 12px 20px',
-                paddingLeft: '6px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '6px',
-              }}
-            >
-              {currentList.items.map((it, i) => (
-                <li key={i} style={{ lineHeight: '1.5' }}>
-                  {it}
-                </li>
-              ))}
-            </ul>
-          );
-        } else {
-          nodes.push(
-            <ol
-              key={`${keyPrefix}-list-${idx}`}
-              style={{
-                margin: '8px 0 12px 22px',
-                paddingLeft: '6px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '6px',
-              }}
-            >
-              {currentList.items.map((it, i) => (
-                <li key={i} style={{ lineHeight: '1.5' }}>
-                  {it}
-                </li>
-              ))}
-            </ol>
-          );
-        }
-        currentList = null;
-      }
-    };
-
-    lines.forEach((line, lineIdx) => {
-      const trimmed = line.trim();
-
-      // Se for um bloco JSON ou erro serializado, converte para card visual limpo
-      if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-        try {
-          const parsed = JSON.parse(trimmed);
-          flushList(lineIdx);
-          if (parsed.detail) {
-            nodes.push(
-              <div
-                key={`${keyPrefix}-alert-${lineIdx}`}
-                style={{
-                  padding: '10px 14px',
-                  borderRadius: '8px',
-                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                  border: '1px solid rgba(239, 68, 68, 0.3)',
-                  color: '#fca5a5',
-                  fontSize: '0.86rem',
-                  margin: '8px 0',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                }}
-              >
-                <span>ℹ️ <strong>Status do Sistema:</strong> {parsed.detail}</span>
-              </div>
-            );
-            return;
-          }
-        } catch {
-          // Mantém fluxo normal
-        }
+      if (block.type === 'alert') {
+        return (
+          <div
+            key={key}
+            style={{
+              padding: '10px 14px',
+              borderRadius: '8px',
+              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              color: '#fca5a5',
+              fontSize: '0.86rem',
+              margin: '8px 0',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+            }}
+          >
+            <span>
+              <strong>Status do Sistema:</strong> {block.detail}
+            </span>
+          </div>
+        );
       }
 
-      // Divisores horizontais
-      if (trimmed === '---' || trimmed === '***') {
-        flushList(lineIdx);
-        nodes.push(
+      if (block.type === 'hr') {
+        return (
           <hr
-            key={`${keyPrefix}-hr-${lineIdx}`}
+            key={key}
             style={{
               border: 'none',
               borderTop: '1px solid rgba(255, 255, 255, 0.08)',
@@ -163,62 +91,138 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ con
             }}
           />
         );
-        return;
       }
 
-      // Cabeçalhos (###, ##, #)
-      if (trimmed.startsWith('### ')) {
-        flushList(lineIdx);
-        const titleText = trimmed.replace('### ', '');
-        nodes.push(
-          <div
-            key={`${keyPrefix}-h3-${lineIdx}`}
-            className="claude-serif-title"
+      if (block.type === 'blockquote') {
+        return (
+          <blockquote
+            key={key}
             style={{
-              marginTop: '16px',
-              marginBottom: '8px',
-              paddingBottom: '4px',
-              fontSize: '1.05rem',
-              fontWeight: 600,
-              color: 'var(--text-primary)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
+              margin: '10px 0 12px',
+              padding: '8px 14px',
+              borderLeft: '3px solid var(--accent-color)',
+              backgroundColor: 'var(--bg-secondary)',
+              borderRadius: '0 8px 8px 0',
+              color: 'var(--text-secondary)',
+              fontSize: '0.88rem',
+              lineHeight: 1.55,
             }}
           >
-            {renderInlineMarkdown(titleText)}
+            {block.lines.map((qLine, qIdx) => (
+              <div key={qIdx}>{qLine ? renderInlineMarkdown(qLine) : <br />}</div>
+            ))}
+          </blockquote>
+        );
+      }
+
+      if (block.type === 'table') {
+        return (
+          <div
+            key={key}
+            style={{
+              margin: '12px 0 16px',
+              overflowX: 'auto',
+              borderRadius: '10px',
+              border: '1px solid var(--border-color)',
+              backgroundColor: 'var(--bg-secondary)',
+            }}
+          >
+            <table
+              style={{
+                width: '100%',
+                borderCollapse: 'collapse',
+                fontSize: '0.84rem',
+                textAlign: 'left',
+              }}
+            >
+              <thead>
+                <tr style={{ backgroundColor: 'var(--bg-tertiary)', borderBottom: '1px solid var(--border-color)' }}>
+                  {block.headers.map((header, hIdx) => (
+                    <th
+                      key={hIdx}
+                      style={{
+                        padding: '9px 12px',
+                        fontWeight: 600,
+                        color: 'var(--text-primary)',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {renderInlineMarkdown(header)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {block.rows.map((row, rIdx) => (
+                  <tr
+                    key={rIdx}
+                    style={{
+                      borderTop: rIdx > 0 ? '1px solid var(--border-subtle)' : undefined,
+                    }}
+                  >
+                    {row.map((cell, cIdx) => (
+                      <td
+                        key={cIdx}
+                        style={{
+                          padding: '8px 12px',
+                          color: 'var(--text-secondary)',
+                          verticalAlign: 'top',
+                          lineHeight: 1.45,
+                        }}
+                      >
+                        {renderInlineMarkdown(cell)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         );
-        return;
       }
 
-      if (trimmed.startsWith('## ')) {
-        flushList(lineIdx);
-        const titleText = trimmed.replace('## ', '');
-        nodes.push(
-          <h3
-            key={`${keyPrefix}-h2-${lineIdx}`}
-            className="claude-serif-title"
-            style={{
-              marginTop: '18px',
-              marginBottom: '8px',
-              fontSize: '1.2rem',
-              fontWeight: 500,
-              color: 'var(--text-primary)',
-            }}
-          >
-            {renderInlineMarkdown(titleText)}
-          </h3>
-        );
-        return;
-      }
-
-      if (trimmed.startsWith('# ')) {
-        flushList(lineIdx);
-        const titleText = trimmed.replace('# ', '');
-        nodes.push(
+      if (block.type === 'heading') {
+        if (block.level === 3) {
+          return (
+            <div
+              key={key}
+              className="claude-serif-title"
+              style={{
+                marginTop: '16px',
+                marginBottom: '8px',
+                paddingBottom: '4px',
+                fontSize: '1.05rem',
+                fontWeight: 600,
+                color: 'var(--text-primary)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              {renderInlineMarkdown(block.text)}
+            </div>
+          );
+        }
+        if (block.level === 2) {
+          return (
+            <h3
+              key={key}
+              className="claude-serif-title"
+              style={{
+                marginTop: '18px',
+                marginBottom: '8px',
+                fontSize: '1.2rem',
+                fontWeight: 500,
+                color: 'var(--text-primary)',
+              }}
+            >
+              {renderInlineMarkdown(block.text)}
+            </h3>
+          );
+        }
+        return (
           <h2
-            key={`${keyPrefix}-h1-${lineIdx}`}
+            key={key}
             className="claude-serif-title"
             style={{
               marginTop: '20px',
@@ -228,56 +232,67 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ con
               color: 'var(--text-primary)',
             }}
           >
-            {renderInlineMarkdown(titleText)}
+            {renderInlineMarkdown(block.text)}
           </h2>
         );
-        return;
       }
 
-      // Listas de marcadores (- ou *)
-      if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-        const itemContent = trimmed.substring(2);
-        if (!currentList || currentList.type !== 'ul') {
-          flushList(lineIdx);
-          currentList = { type: 'ul', items: [] };
-        }
-        currentList.items.push(renderInlineMarkdown(itemContent));
-        return;
-      }
-
-      // Listas ordenadas (1., 2., etc)
-      const orderedMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
-      if (orderedMatch) {
-        const itemContent = orderedMatch[2];
-        if (!currentList || currentList.type !== 'ol') {
-          flushList(lineIdx);
-          currentList = { type: 'ol', items: [] };
-        }
-        currentList.items.push(renderInlineMarkdown(itemContent));
-        return;
-      }
-
-      // Parágrafo normal
-      flushList(lineIdx);
-      if (trimmed.length > 0) {
-        nodes.push(
-          <p
-            key={`${keyPrefix}-p-${lineIdx}`}
+      if (block.type === 'ul') {
+        return (
+          <ul
+            key={key}
             style={{
-              marginBottom: '8px',
-              lineHeight: '1.6',
-              fontSize: '0.9rem',
-              color: 'var(--text-primary)',
+              margin: '8px 0 12px 20px',
+              paddingLeft: '6px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px',
             }}
           >
-            {renderInlineMarkdown(trimmed)}
-          </p>
+            {block.items.map((it, i) => (
+              <li key={i} style={{ lineHeight: '1.5' }}>
+                {renderInlineMarkdown(it)}
+              </li>
+            ))}
+          </ul>
         );
       }
-    });
 
-    flushList(lines.length);
-    return nodes;
+      if (block.type === 'ol') {
+        return (
+          <ol
+            key={key}
+            style={{
+              margin: '8px 0 12px 22px',
+              paddingLeft: '6px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px',
+            }}
+          >
+            {block.items.map((it, i) => (
+              <li key={i} style={{ lineHeight: '1.5' }}>
+                {renderInlineMarkdown(it)}
+              </li>
+            ))}
+          </ol>
+        );
+      }
+
+      return (
+        <p
+          key={key}
+          style={{
+            marginBottom: '8px',
+            lineHeight: '1.6',
+            fontSize: '0.9rem',
+            color: 'var(--text-primary)',
+          }}
+        >
+          {renderInlineMarkdown(block.text)}
+        </p>
+      );
+    });
   };
 
   // Parser inline: transforma **negrito**, *itálico*, `código` em elementos reais HTML
@@ -377,7 +392,7 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ con
 });
 
 // Componente para blocos de código com botão de cópia e realce
-const CodeBlockItem: React.FC<{ language: string; code: string }> = React.memo(({ language, code }) => {
+const CodeBlockItem: React.FC<{ language: string; code: string; isStreaming?: boolean }> = React.memo(({ language, code, isStreaming }) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
@@ -415,6 +430,11 @@ const CodeBlockItem: React.FC<{ language: string; code: string }> = React.memo((
           <span style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--text-secondary)', letterSpacing: '0.04em' }}>
             {language.toUpperCase() || 'CÓDIGO'}
           </span>
+          {isStreaming && (
+            <span style={{ fontSize: '0.68rem', color: 'var(--accent-light)', opacity: 0.9 }}>
+              (gerando...)
+            </span>
+          )}
         </div>
 
         <button

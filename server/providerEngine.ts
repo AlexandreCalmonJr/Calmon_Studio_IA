@@ -664,6 +664,7 @@ export async function runExternalProviderChat(input: {
   credential: ResolvedExternalCredential;
   systemInstruction: string;
   prompt: string;
+  history?: Array<{ role: 'user' | 'assistant'; content: string }>;
   requestedModel?: string;
   timeoutMs?: number;
 }): Promise<{
@@ -684,6 +685,11 @@ export async function runExternalProviderChat(input: {
   const start = Date.now();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), input.timeoutMs || 45000);
+  const historyTurns = Array.isArray(input.history)
+    ? input.history
+        .filter((h) => h && (h.role === 'user' || h.role === 'assistant') && String(h.content || '').trim())
+        .map((h) => ({ role: h.role, content: String(h.content) }))
+    : [];
 
   try {
     if (meta.protocol === 'anthropic') {
@@ -701,7 +707,7 @@ export async function runExternalProviderChat(input: {
           model: modelUsed,
           max_tokens: 2048,
           system: input.systemInstruction,
-          messages: [{ role: 'user', content: input.prompt }],
+          messages: [...historyTurns, { role: 'user', content: input.prompt }],
         }),
       });
 
@@ -753,6 +759,7 @@ export async function runExternalProviderChat(input: {
         model: modelUsed,
         messages: [
           { role: 'system', content: input.systemInstruction },
+          ...historyTurns,
           { role: 'user', content: input.prompt },
         ],
       }),

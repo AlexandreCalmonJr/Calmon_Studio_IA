@@ -3,6 +3,7 @@ import { ApprovalRequestItem, getAgentLabel, getToolLabel } from '../../types';
 import { decideApproval } from '../../api';
 import { ShieldAlert, Check, X, FileDiff, RefreshCw } from 'lucide-react';
 import { API_BASE } from '../../services/api/client';
+import { apiFetch } from '../../services/sessionTransport';
 import { PageHeader } from '../../shared/layout/PageHeader';
 
 interface ApprovalCenterProps {
@@ -24,7 +25,7 @@ export const ApprovalCenter: React.FC<ApprovalCenterProps> = ({
 
   React.useEffect(() => {
     let cancelled = false;
-    fetch(`${API_BASE}/auth/me`, { credentials: 'include' })
+    apiFetch(`${API_BASE}/auth/me`)
       .then(async (response) => (response.ok ? response.json() : null))
       .then((principal) => {
         if (!cancelled) {

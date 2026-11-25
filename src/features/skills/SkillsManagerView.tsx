@@ -33,6 +33,7 @@ import { ConfirmDialog } from '../../shared/common/ConfirmDialog';
 import { Modal } from '../../shared/common/Modal';
 import { PageHeader } from '../../shared/layout/PageHeader';
 import { API_BASE } from '../../services/api/client';
+import { apiFetch } from '../../services/sessionTransport';
 import { AGENT_TEMPLATE_LIBRARY } from '../../services/agentTemplates';
 import { AgentTemplateStoreGrid } from '../agents/AgentTemplateStoreGrid';
 import {
@@ -252,7 +253,7 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${API_BASE}/auth/me`, { credentials: 'include' })
+    apiFetch(`${API_BASE}/auth/me`)
       .then(async (response) => (response.ok ? response.json() : null))
       .then((principal) => {
         if (cancelled) return;

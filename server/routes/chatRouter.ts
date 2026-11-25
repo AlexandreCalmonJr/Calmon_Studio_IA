@@ -10,8 +10,13 @@ import {
   broadcastRealtimeEvent,
   UserAccount,
   userProfiles,
+  persistStateNamespace,
 } from '../serverState.ts';
 import { runHybridInference } from '../hybridAiEngine.ts';
+import {
+  buildAgentRuntimeContext,
+  type AgentRouteEntry,
+} from '../agentRuntime.ts';
 import { planMultiAgentExecution } from '../../src/services/multiOrchestrator.ts';
 import {
   searchBrainMemories,
@@ -32,6 +37,14 @@ export interface ChatRouterDeps {
 export function createChatRouter(deps: ChatRouterDeps): Router {
   const router = express.Router();
   const { store } = deps;
+
+  const findAgentRoute = (role: string): AgentRouteEntry | null =>
+    (serverState.agentRoutes.find((r) => String(r.agent_role || '') === role) as AgentRouteEntry | undefined) || null;
+
+  const findWorkspaceProject = (projectId?: string) => {
+    if (!projectId) return null;
+    return serverState.workspaceProjects.find((p) => p.id === projectId) || null;
+  };
 
   // --- CHAT & TASKS ---
   router.get('/chat/sessions', requireAuth, (_req: Request, res: Response) => {
@@ -57,6 +70,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
 
   router.delete('/chat/sessions/:id', requireAuth, (req: Request, res: Response) => {
     serverState.chatSessions.delete(req.params.id);
+    persistStateNamespace(store, 'chat_sessions', Array.from(serverState.chatSessions.entries()));
     res.json({ deleted: true });
   });
 
@@ -88,16 +102,51 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
     const activeAgent = detectInvokedAgent(prompt, sessionId);
     const activeHw = getActiveHardwareProfile();
     const taskId = `tsk_${Date.now()}`;
-
     const ownerUserId = user?.username || 'admin';
-    const targetModelName = requestedModel || activeAgent.preferred_model;
+
+    const existingSession = serverState.chatSessions.get(sessionId);
+    const agentCore = store.getAgentCore(ownerUserId, activeAgent.role, {
+      name: activeAgent.name,
+      proper_name: activeAgent.proper_name,
+      handle: activeAgent.handle,
+      mission: activeAgent.mission,
+      preferred_model: activeAgent.preferred_model,
+    });
+    const relevantBrain = searchBrainMemories(serverState.brainMemories, prompt, {
+      username: ownerUserId,
+      limit: 3,
+    });
+    const allowedContextPacks = serverState.contextSets.filter((cs) =>
+      canAgentAccessResource(cs.allowed_agents, activeAgent.role)
+    );
+    const workspaceProject = findWorkspaceProject(projectId);
+    const projectMemories = projectId ? serverState.projectMemories.get(projectId) || [] : [];
+
+    const runtimeCtx = buildAgentRuntimeContext({
+      agent: activeAgent,
+      agentCore,
+      skillsList: serverState.skillsList,
+      agentMemories: serverState.agentMemories.get(activeAgent.role) || [],
+      brainMemories: relevantBrain,
+      contextSets: allowedContextPacks,
+      workspaceProject,
+      projectMemories,
+      historyMessages: existingSession?.messages || [],
+      agentRoute: findAgentRoute(activeAgent.role),
+      explicitChatOverride: requestedModel,
+      systemDefaultModel: serverState.hybridConfig.default_model,
+    });
+
+    const targetModelName = runtimeCtx.resolvedModel.requestedModel;
     const resolvedExternalCred = resolveExternalCredentialForRequest(req, store, ownerUserId, targetModelName);
 
     try {
       const result = await runHybridInference({
         prompt,
-        systemInstruction: activeAgent.system_prompt,
+        systemInstruction: runtimeCtx.systemInstruction,
+        history: runtimeCtx.history,
         requestedModel: targetModelName,
+        fallbackModel: runtimeCtx.resolvedModel.fallbackModel,
         routingPolicy: activeAgent.routing_policy,
         ollamaBaseUrl: activeHw.ollama_url,
         ollamaConnected: serverState.providerConnectivity.ollama_connected,
@@ -132,7 +181,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
           session_id: sessionId,
           title: prompt.slice(0, 48) || 'Nova conversa',
           first_prompt: prompt,
-          first_intent: 'general_assistance',
+          first_intent: activeAgent.category || 'general_assistance',
           last_activity: nowIso(),
           messages: [],
           tasks: [],
@@ -153,7 +202,10 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
         classified_intent: activeAgent.category || 'general_assistance',
         plan_steps: [
           `Especialista selecionado: ${activeAgent.proper_name} (${activeAgent.name})`,
-          `Motor utilizado: ${result.executionMode} · ${result.modelUsed}`,
+          runtimeCtx.skillsUsed.length > 0
+            ? `Habilidades aplicadas: ${runtimeCtx.skillsUsed.map((s) => s.name).join(', ')}`
+            : 'Execução com persona e núcleo do agente',
+          `Motor utilizado: ${result.executionMode} · ${result.modelUsed}${result.fallbackOccurred ? ' (fallback)' : ''}`,
           result.sources.length ? `${result.sources.length} fonte(s) web consultadas` : 'Síntese final concluída',
         ],
         selected_agents: [activeAgent.role],
@@ -163,7 +215,11 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
         final_summary: result.text,
         execution_mode: result.executionMode,
         provider: result.provider,
+        requested_model: result.requestedModel,
         model_used: result.modelUsed,
+        model_source: runtimeCtx.resolvedModel.source,
+        fallback_occurred: result.fallbackOccurred,
+        skills_used: runtimeCtx.skillsUsed,
         latency_ms: result.latencyMs,
         reasoning: result.reasoning,
         routing_note: result.routingNote,
@@ -179,7 +235,11 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
         error: null,
       };
       session.tasks.push(taskResponse);
-      serverState.tasksList.unshift({ ...taskResponse, status: 'completed', created_at: nowIso() });
+      const storedTask = { ...taskResponse, status: 'completed', created_at: nowIso() };
+      serverState.tasksList.unshift(storedTask);
+      store.upsertTaskRecord(storedTask);
+      persistStateNamespace(store, 'chat_sessions', Array.from(serverState.chatSessions.entries()));
+      persistStateNamespace(store, 'telemetry_records', serverState.telemetryRecords.slice(0, 500));
       res.json(taskResponse);
     } catch (err: any) {
       res.status(502).json({
@@ -200,6 +260,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
     const activeAgent = detectInvokedAgent(prompt, sessionId);
     const activeHw = getActiveHardwareProfile();
     const taskId = `tsk_${Date.now()}`;
+    const ownerUserId = user?.username || 'admin';
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -207,13 +268,22 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
     res.flushHeaders?.();
 
     const sendEvent = (payload: Record<string, unknown>) => {
-      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      }
     };
 
     const orchestrationPlan = planMultiAgentExecution(prompt, serverState.agentsList, assistantName);
-    const primaryRole = orchestrationPlan.invoked_agents[0]?.role || activeAgent.role;
+    // Se a conversa é dedicada a um agente (agent_<role>) e o usuário não mencionou outro especialista explicitamente, mantém o especialista da sessão
+    const isDedicatedAgentSession = sessionId.startsWith('agent_') || sessionId.startsWith('agent-');
+    const primaryRole =
+      isDedicatedAgentSession && orchestrationPlan.mode === 'single'
+        ? activeAgent.role
+        : orchestrationPlan.invoked_agents[0]?.role || activeAgent.role;
     const primaryAgent = serverState.agentsList.find((a) => a.role === primaryRole) || activeAgent;
-    const selectedRoles = orchestrationPlan.invoked_agents.map((a) => a.role);
+    const selectedRoles = Array.from(
+      new Set([primaryAgent.role, ...orchestrationPlan.invoked_agents.map((a) => a.role)])
+    );
 
     const agentMeta = {
       role: primaryAgent.role,
@@ -222,6 +292,39 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
       handle: primaryAgent.handle,
       mascot: primaryAgent.mascot,
     };
+
+    const existingSession = serverState.chatSessions.get(sessionId);
+    const primaryCore = store.getAgentCore(ownerUserId, primaryAgent.role, {
+      name: primaryAgent.name,
+      proper_name: primaryAgent.proper_name,
+      handle: primaryAgent.handle,
+      mission: primaryAgent.mission,
+      preferred_model: primaryAgent.preferred_model,
+    });
+    const relevantBrain = searchBrainMemories(serverState.brainMemories, prompt, {
+      username: ownerUserId,
+      limit: 3,
+    });
+    const allowedContextPacks = serverState.contextSets.filter((cs) =>
+      canAgentAccessResource(cs.allowed_agents, primaryAgent.role)
+    );
+    const workspaceProject = findWorkspaceProject(projectId);
+    const projectMemories = projectId ? serverState.projectMemories.get(projectId) || [] : [];
+
+    const primaryCtxPreview = buildAgentRuntimeContext({
+      agent: primaryAgent,
+      agentCore: primaryCore,
+      skillsList: serverState.skillsList,
+      agentMemories: serverState.agentMemories.get(primaryAgent.role) || [],
+      brainMemories: relevantBrain,
+      contextSets: allowedContextPacks,
+      workspaceProject,
+      projectMemories,
+      historyMessages: existingSession?.messages || [],
+      agentRoute: findAgentRoute(primaryAgent.role),
+      explicitChatOverride: requestedModel,
+      systemDefaultModel: serverState.hybridConfig.default_model,
+    });
 
     // Broadcast live movement to Isometric Office over WebSocket
     orchestrationPlan.invoked_agents.forEach((ag) => {
@@ -244,52 +347,165 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
       type: 'meta',
       session_id: sessionId,
       task_id: taskId,
-      model: requestedModel || primaryAgent.preferred_model,
+      model: primaryCtxPreview.resolvedModel.requestedModel,
+      requested_model: primaryCtxPreview.resolvedModel.requestedModel,
+      model_source: primaryCtxPreview.resolvedModel.source,
+      skills_used: primaryCtxPreview.skillsUsed,
       selected_agents: selectedRoles,
+      orchestration_mode: orchestrationPlan.mode,
       agent_meta: agentMeta,
     });
     sendEvent({
       type: 'status',
-      message: `${orchestrationPlan.summary} · executando...`,
+      message: `${orchestrationPlan.summary} · executando em ${primaryCtxPreview.resolvedModel.requestedModel}...`,
     });
 
     try {
-      const relevantBrain = searchBrainMemories(serverState.brainMemories, prompt, {
-        username: user?.username || 'admin',
-        limit: 3,
-      });
-      const allowedContextPacks = serverState.contextSets.filter((cs) =>
-        canAgentAccessResource(cs.allowed_agents, primaryAgent.role)
-      );
-      const contextNotes: string[] = [];
-      if (orchestrationPlan.invoked_agents.length > 1) {
-        contextNotes.push(
+      const agentOutputs: Array<{
+        agent_role: string;
+        agent_name: string;
+        objective: string;
+        summary: string;
+        requested_model: string;
+        model_used: string;
+        fallback_occurred: boolean;
+        skills_used: string[];
+      }> = [];
+
+      // Execução multiagente verdadeira para especialistas secundários (até 3 para latência saudável)
+      const secondarySpecs = orchestrationPlan.invoked_agents
+        .filter((ag) => ag.role !== primaryAgent.role)
+        .slice(0, 3);
+
+      const multiAgentNotes: string[] = [];
+      if (secondarySpecs.length > 0) {
+        multiAgentNotes.push(
           `Plano de Multi-Orquestração (${orchestrationPlan.mode}):\n` +
             orchestrationPlan.steps.map((s) => `- ${s}`).join('\n')
         );
-      }
-      if (relevantBrain.length > 0) {
-        contextNotes.push(
-          'Memórias relevantes do Segundo Cérebro:\n' +
-            relevantBrain.map((h) => `- [${h.memory.layer}] ${h.memory.title}: ${h.memory.content}`).join('\n')
-        );
-      }
-      if (allowedContextPacks.length > 0) {
-        contextNotes.push(
-          'Context Sets acoplados a este agente:\n' +
-            allowedContextPacks.slice(0, 2).map((cs) => `- ${cs.name}: ${cs.content.slice(0, 320)}`).join('\n')
-        );
-      }
-      const enrichedSystemPrompt = [primaryAgent.system_prompt, ...contextNotes].filter(Boolean).join('\n\n');
 
-      const streamOwnerUserId = user?.username || 'admin';
-      const streamTargetModel = requestedModel || primaryAgent.preferred_model;
-      const streamExternalCred = resolveExternalCredentialForRequest(req, store, streamOwnerUserId, streamTargetModel);
+        for (const spec of secondarySpecs) {
+          const specialist = serverState.agentsList.find((a) => a.role === spec.role);
+          if (!specialist) continue;
+
+          sendEvent({
+            type: 'status',
+            message: `Consultando especialista ${specialist.proper_name || specialist.name} (${spec.task})...`,
+          });
+
+          const specCore = store.getAgentCore(ownerUserId, specialist.role, {
+            name: specialist.name,
+            proper_name: specialist.proper_name,
+            handle: specialist.handle,
+            mission: specialist.mission,
+            preferred_model: specialist.preferred_model,
+          });
+          const specCtx = buildAgentRuntimeContext({
+            agent: specialist,
+            agentCore: specCore,
+            skillsList: serverState.skillsList,
+            agentMemories: serverState.agentMemories.get(specialist.role) || [],
+            brainMemories: relevantBrain,
+            contextSets: serverState.contextSets.filter((cs) =>
+              canAgentAccessResource(cs.allowed_agents, specialist.role)
+            ),
+            workspaceProject,
+            projectMemories,
+            historyMessages: existingSession?.messages || [],
+            agentRoute: findAgentRoute(specialist.role),
+            explicitChatOverride: requestedModel,
+            systemDefaultModel: serverState.hybridConfig.default_model,
+            extraNotes: [
+              `Você está contribuindo em colaboração multiagente (${orchestrationPlan.mode}) com seu parecer objetivo sobre: "${spec.task}". Entregue um parecer técnico conciso (máx. 6 linhas) sob sua ótica de especialista.`,
+            ],
+          });
+
+          const specExtCred = resolveExternalCredentialForRequest(
+            req,
+            store,
+            ownerUserId,
+            specCtx.resolvedModel.requestedModel
+          );
+
+          try {
+            const specRes = await runHybridInference({
+              prompt,
+              systemInstruction: specCtx.systemInstruction,
+              history: specCtx.history,
+              requestedModel: specCtx.resolvedModel.requestedModel,
+              fallbackModel: specCtx.resolvedModel.fallbackModel,
+              routingPolicy: specialist.routing_policy,
+              ollamaBaseUrl: activeHw.ollama_url,
+              ollamaConnected: serverState.providerConnectivity.ollama_connected,
+              geminiConnected: serverState.providerConnectivity.gemini_connected,
+              enableWebSearch: enableWebSearch ?? specialist.role === 'research_analyst',
+              assistantName,
+              agentName: specialist.name,
+              agentProperName: specialist.proper_name,
+              strictFocus: false,
+              externalProvider: specExtCred,
+            });
+
+            agentOutputs.push({
+              agent_role: specialist.role,
+              agent_name: specialist.proper_name || specialist.name,
+              objective: spec.task,
+              summary: specRes.text,
+              requested_model: specRes.requestedModel,
+              model_used: specRes.modelUsed,
+              fallback_occurred: specRes.fallbackOccurred,
+              skills_used: specCtx.skillsUsed.map((s) => s.name),
+            });
+
+            multiAgentNotes.push(
+              `Parecer real de ${specialist.proper_name} (${specialist.name} · modelo ${specRes.modelUsed}):\n${specRes.text.slice(0, 750)}`
+            );
+          } catch (specErr: any) {
+            agentOutputs.push({
+              agent_role: specialist.role,
+              agent_name: specialist.proper_name || specialist.name,
+              objective: spec.task,
+              summary: `Especialista indisponível neste turno: ${specErr instanceof Error ? specErr.message : 'erro de inferência'}`,
+              requested_model: specCtx.resolvedModel.requestedModel,
+              model_used: 'indisponível',
+              fallback_occurred: true,
+              skills_used: specCtx.skillsUsed.map((s) => s.name),
+            });
+          }
+        }
+
+        sendEvent({
+          type: 'status',
+          message: `${primaryAgent.proper_name || primaryAgent.name} sintetizando os pareceres da equipe...`,
+        });
+      }
+
+      const finalRuntimeCtx = buildAgentRuntimeContext({
+        agent: primaryAgent,
+        agentCore: primaryCore,
+        skillsList: serverState.skillsList,
+        agentMemories: serverState.agentMemories.get(primaryAgent.role) || [],
+        brainMemories: relevantBrain,
+        contextSets: allowedContextPacks,
+        workspaceProject,
+        projectMemories,
+        historyMessages: existingSession?.messages || [],
+        agentRoute: findAgentRoute(primaryAgent.role),
+        explicitChatOverride: requestedModel,
+        systemDefaultModel: serverState.hybridConfig.default_model,
+        extraNotes: multiAgentNotes,
+      });
+
+      const streamTargetModel = finalRuntimeCtx.resolvedModel.requestedModel;
+      const streamExternalCred = resolveExternalCredentialForRequest(req, store, ownerUserId, streamTargetModel);
+      let streamedAnyChunk = false;
 
       const result = await runHybridInference({
         prompt,
-        systemInstruction: enrichedSystemPrompt,
+        systemInstruction: finalRuntimeCtx.systemInstruction,
+        history: finalRuntimeCtx.history,
         requestedModel: streamTargetModel,
+        fallbackModel: finalRuntimeCtx.resolvedModel.fallbackModel,
         routingPolicy: primaryAgent.routing_policy,
         ollamaBaseUrl: activeHw.ollama_url,
         ollamaConnected: serverState.providerConnectivity.ollama_connected,
@@ -301,7 +517,30 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
         strictFocus: primaryAgent.strict_focus,
         strictTopic: primaryAgent.strict_topic,
         externalProvider: streamExternalCred,
+        onToken: (chunk: string) => {
+          if (!chunk) return;
+          streamedAnyChunk = true;
+          sendEvent({ type: 'token', chunk });
+        },
       });
+
+      if (!streamedAnyChunk && result.text) {
+        sendEvent({ type: 'token', chunk: result.text });
+      }
+
+      // Inclui o próprio agente principal em agent_outputs quando houve colaboração multiagente
+      if (agentOutputs.length > 0) {
+        agentOutputs.unshift({
+          agent_role: primaryAgent.role,
+          agent_name: primaryAgent.proper_name || primaryAgent.name,
+          objective: orchestrationPlan.invoked_agents[0]?.task || 'Síntese e coordenação principal',
+          summary: result.text.slice(0, 360),
+          requested_model: result.requestedModel,
+          model_used: result.modelUsed,
+          fallback_occurred: result.fallbackOccurred,
+          skills_used: finalRuntimeCtx.skillsUsed.map((s) => s.name),
+        });
+      }
 
       serverState.telemetryRecords.unshift({
         id: `inf_${Date.now().toString(36)}`,
@@ -332,22 +571,15 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
         }
       }
 
-      const words = result.text.split(/(\s+)/);
-      for (let i = 0; i < words.length; i += 6) {
-        const chunk = words.slice(i, i + 6).join('');
-        sendEvent({ type: 'token', chunk });
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-
       // Auto-destilação no Segundo Cérebro ("Tudo Vira Cérebro")
       if (serverState.brainAutoDistill && prompt.length >= 10 && result.text.length >= 30) {
         const distilled = distillConversationToMemory({
           prompt,
           answer: result.text,
-          ownerUserId: user?.username || 'admin',
+          ownerUserId,
           ownerName: user?.display_name || assistantName,
-          agentRole: activeAgent.role,
-          agentName: activeAgent.proper_name,
+          agentRole: primaryAgent.role,
+          agentName: primaryAgent.proper_name,
           sources: result.sources,
         });
         const newMem: BrainMemoryItem = {
@@ -366,7 +598,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
           session_id: sessionId,
           title: prompt.slice(0, 48) || 'Nova conversa',
           first_prompt: prompt,
-          first_intent: activeAgent.category || 'general_assistance',
+          first_intent: primaryAgent.category || 'general_assistance',
           last_activity: nowIso(),
           messages: [],
           tasks: [],
@@ -379,6 +611,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
         { id: session.messages.length + 2, session_id: sessionId, project_id: projectId, role: 'assistant', content: result.text, created_at: nowIso() },
       );
 
+      const allSkillsUsed = finalRuntimeCtx.skillsUsed;
       const taskData = {
         task_id: taskId,
         session_id: sessionId,
@@ -387,17 +620,26 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
         classified_intent: orchestrationPlan.mode === 'deep_research' ? 'deep_research' : primaryAgent.category || 'general_assistance',
         plan_steps: [
           ...orchestrationPlan.steps,
-          `Execução ${result.executionMode} via ${result.modelUsed} em ${result.latencyMs} ms`,
+          allSkillsUsed.length > 0
+            ? `Habilidades ativas injetadas: ${allSkillsUsed.map((s) => s.name).join(', ')}`
+            : 'Executado com persona e diretivas do especialista',
+          `Execução ${result.executionMode} via ${result.modelUsed}${result.fallbackOccurred ? ` (fallback de ${result.requestedModel})` : ''} em ${result.latencyMs} ms`,
           result.sources.length ? `Pesquisa Web: ${result.sources.length} fonte(s) verificadas` : 'Resposta validada',
         ],
         selected_agents: selectedRoles,
+        orchestration_mode: orchestrationPlan.mode,
+        agent_outputs: agentOutputs.length > 0 ? agentOutputs : undefined,
         policy_verified: true,
         policy_violations: [],
         approval_required: false,
         final_summary: result.text,
         execution_mode: result.executionMode,
         provider: result.provider,
+        requested_model: result.requestedModel,
         model_used: result.modelUsed,
+        model_source: finalRuntimeCtx.resolvedModel.source,
+        fallback_occurred: result.fallbackOccurred,
+        skills_used: allSkillsUsed,
         latency_ms: result.latencyMs,
         reasoning: result.reasoning,
         routing_note: result.routingNote,
@@ -408,7 +650,12 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
         error: null,
       };
       session.tasks.push(taskData);
-      serverState.tasksList.unshift({ ...taskData, status: 'completed', created_at: nowIso() });
+      const storedStreamTask = { ...taskData, status: 'completed', created_at: nowIso() };
+      serverState.tasksList.unshift(storedStreamTask);
+      store.upsertTaskRecord(storedStreamTask);
+      persistStateNamespace(store, 'chat_sessions', Array.from(serverState.chatSessions.entries()));
+      persistStateNamespace(store, 'telemetry_records', serverState.telemetryRecords.slice(0, 500));
+      persistStateNamespace(store, 'brain_memories', serverState.brainMemories.slice(0, 250));
 
       orchestrationPlan.invoked_agents.forEach((ag) => {
         broadcastRealtimeEvent('office_agent_event', {
@@ -428,7 +675,17 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
         sources: result.sources,
         execution_mode: result.executionMode,
         provider: result.provider,
+        requested_model: result.requestedModel,
         model_used: result.modelUsed,
+        model_source: finalRuntimeCtx.resolvedModel.source,
+        fallback_occurred: result.fallbackOccurred,
+        skills_used: allSkillsUsed,
+        agent_outputs: agentOutputs.length > 0 ? agentOutputs : undefined,
+        orchestration_mode: orchestrationPlan.mode,
+        plan_steps: taskData.plan_steps,
+        selected_agents: selectedRoles,
+        classified_intent: taskData.classified_intent,
+        artifact_payload: generatedArtifact || undefined,
         latency_ms: result.latencyMs,
         reasoning: result.reasoning,
         routing_note: result.routingNote,
@@ -463,15 +720,63 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
   );
 
   router.delete('/tasks/:id', requireAuth, (req: Request, res: Response) => {
+    const id = req.params.id;
+    const before = serverState.tasksList.length;
     serverState.tasksList = serverState.tasksList.filter(
-      (t) => t.task_id !== req.params.id && t.id !== req.params.id
+      (t) => t.task_id !== id && t.id !== id
     );
-    res.json({ deleted: true });
+    const dbDeleted = store.deleteTaskRecord(id);
+    res.json({ deleted: serverState.tasksList.length < before || dbDeleted });
   });
 
   router.post('/tasks/purge', requireAuth, (req: Request, res: Response) => {
-    const retention = Number(req.query.days_retention || 30);
-    res.json({ purged_count: 0, retention_days: retention });
+    const rawDays = Number(req.query.days_retention ?? req.body?.days_retention ?? 30);
+    const retention = Number.isFinite(rawDays) ? Math.max(0, Math.min(3650, rawDays)) : 30;
+    const cutoffMs = Date.now() - retention * 24 * 60 * 60 * 1000;
+    const before = serverState.tasksList.length;
+    serverState.tasksList = serverState.tasksList.filter((t) => {
+      if (retention === 0) return false;
+      const ts = Date.parse(String(t.created_at || ''));
+      return Number.isNaN(ts) || ts > cutoffMs;
+    });
+    const memPurged = before - serverState.tasksList.length;
+    const dbPurged = store.purgeOldTaskRecords(retention);
+    res.json({ purged_count: Math.max(memPurged, dbPurged), retention_days: retention });
+  });
+
+  router.post('/voice/transcribe', requireAuth, async (req: Request, res: Response) => {
+    const providedTranscript = String(req.body?.text || req.body?.transcript || '').trim();
+    if (providedTranscript) {
+      res.json({ text: providedTranscript, engine: 'client_bridge' });
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+    const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
+    await new Promise<void>((resolve, reject) => {
+      if (req.readableEnded) {
+        resolve();
+        return;
+      }
+      req.on('data', (chunk: Buffer) => {
+        totalBytes += chunk.length;
+        if (totalBytes <= MAX_AUDIO_BYTES) chunks.push(chunk);
+      });
+      req.on('end', () => resolve());
+      req.on('error', reject);
+    });
+
+    if (totalBytes === 0) {
+      res.status(400).json({ detail: 'Nenhum áudio recebido para transcrição.' });
+      return;
+    }
+
+    res.json({
+      text: '',
+      bytes_received: totalBytes,
+      detail: 'Áudio recebido pelo servidor. Use o reconhecimento nativo do navegador ou configure a chave Gemini para transcrição em nuvem.',
+    });
   });
 
   return router;

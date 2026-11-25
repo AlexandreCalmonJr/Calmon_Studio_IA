@@ -6,6 +6,7 @@ import {
   requirePackStudioRole,
   getOwnerUserId,
   recordAgentVersion,
+  persistStateNamespace,
   nowIso,
   AgentServerRecord,
 } from '../serverState.ts';
@@ -18,6 +19,13 @@ import {
   summarizeInstalledPacks,
   type ModulePackDefinition,
 } from '../../src/services/modulePackEngine.ts';
+import {
+  RECOMMENDED_AGENT_MODEL,
+  TARGET_AGENT_RUNTIME_VERSION,
+  buildVersionCheckReport,
+  isLegacyAgentModel,
+  resolvePackLatestRelease,
+} from '../../src/services/packageVersionEngine.ts';
 import { normalizeAgentRoleSlug } from '../../src/services/agentCoreEngine.ts';
 import type { LocalSqliteBrainStore } from '../brain/sqliteBrainStore.ts';
 
@@ -148,6 +156,124 @@ export function createPacksRouter(deps: PacksRouterDeps): Router {
     return installed;
   };
 
+  const buildVersionReportForUser = (ownerUserId: string) => {
+    const installedRecords = hydrateInstalledPackResourcesForUser(ownerUserId);
+    const customPacks = store.listCustomPacks();
+    const mergedCatalog = mergeCatalogWithCustomPacks(customPacks);
+    return buildVersionCheckReport({
+      catalog: mergedCatalog,
+      installedRecords,
+      agents: serverState.agentsList,
+    });
+  };
+
+  const applySingleAgentUpdate = (ownerUserId: string, roleInput: string) => {
+    const safeRole = normalizeAgentRoleSlug(roleInput);
+    const agent = serverState.agentsList.find(
+      (a) => a.role === safeRole || a.role === roleInput.trim()
+    );
+    if (!agent) {
+      return null;
+    }
+
+    const prevVersion = Number.isFinite(agent.version) && agent.version > 0 ? Math.floor(agent.version) : 1;
+    const legacyModel = isLegacyAgentModel(agent.preferred_model);
+    const nextVersion = Math.max(
+      TARGET_AGENT_RUNTIME_VERSION,
+      prevVersion + (legacyModel && prevVersion >= TARGET_AGENT_RUNTIME_VERSION ? 1 : 0)
+    );
+    const prevModel = agent.preferred_model;
+    const nextModel = legacyModel ? RECOMMENDED_AGENT_MODEL : agent.preferred_model;
+
+    agent.version = nextVersion;
+    agent.preferred_model = nextModel;
+    agent.updated_at = nowIso();
+
+    recordAgentVersion(
+      agent,
+      legacyModel
+        ? `Atualização Admin (v${prevVersion}.0.0 → v${nextVersion}.0.0) + modelo ${prevModel} → ${nextModel}`
+        : `Atualização Admin de runtime (v${prevVersion}.0.0 → v${nextVersion}.0.0)`
+    );
+
+    const existingCore = store.getAgentCore(ownerUserId, agent.role, {
+      name: agent.name,
+      proper_name: agent.proper_name,
+      handle: agent.handle,
+      mission: agent.mission,
+      preferred_model: nextModel,
+    });
+    if (isLegacyAgentModel(existingCore.primary_model) || existingCore.primary_model !== nextModel) {
+      store.upsertAgentCore(ownerUserId, agent.role, {
+        primary_model: nextModel,
+      });
+    }
+
+    store.appendAuditLog({
+      action: 'agent.updated',
+      actor: ownerUserId,
+      resource: agent.role,
+      detail: `Agente ${agent.proper_name} (${agent.role}) atualizado para v${nextVersion}.0.0 (${nextModel}).`,
+    });
+
+    return {
+      role: agent.role,
+      proper_name: agent.proper_name,
+      previous_version: `${prevVersion}.0.0`,
+      new_version: `${nextVersion}.0.0`,
+      model: nextModel,
+    };
+  };
+
+  const applySinglePackUpdate = (ownerUserId: string, packIdInput: string) => {
+    const cleanId = normalizePackSlug(packIdInput);
+    const customPacks = store.listCustomPacks();
+    const pack = getModulePackById(cleanId, customPacks);
+    if (!pack) {
+      return null;
+    }
+
+    const installed = store.listInstalledPacks(ownerUserId);
+    const currentRec = installed.find((r) => r.pack_id === pack.id);
+    const previousVersion = currentRec?.version || '0.0.0';
+    const release = resolvePackLatestRelease(pack);
+
+    store.installPackRecord(ownerUserId, pack.id, release.latest_version);
+    provisionPackResources(ownerUserId, pack);
+
+    // Atualiza agentes pertencentes ao pacote
+    const updatedBundledAgents: string[] = [];
+    for (const spec of pack.agents) {
+      const updatedAgent = applySingleAgentUpdate(ownerUserId, spec.role);
+      if (updatedAgent) {
+        updatedBundledAgents.push(updatedAgent.role);
+      }
+    }
+
+    // Atualiza versão das skills originadas pelo pacote
+    for (const skill of serverState.skillsList) {
+      if (skill.origin === `pack:${pack.id}`) {
+        skill.version = release.latest_version;
+        skill.updated_at = nowIso();
+      }
+    }
+
+    store.appendAuditLog({
+      action: 'module_pack.updated',
+      actor: ownerUserId,
+      resource: pack.id,
+      detail: `Pacote "${pack.name}" atualizado de v${previousVersion} para v${release.latest_version} via Estúdio de Pacotes.`,
+    });
+
+    return {
+      pack_id: pack.id,
+      name: pack.name,
+      previous_version: previousVersion,
+      new_version: release.latest_version,
+      updated_agents: updatedBundledAgents,
+    };
+  };
+
   const buildPacksResponsePayload = (ownerUserId: string) => {
     const installedRecords = hydrateInstalledPackResourcesForUser(ownerUserId);
     const customPacks = store.listCustomPacks();
@@ -159,6 +285,7 @@ export function createPacksRouter(deps: PacksRouterDeps): Router {
       return {
         ...pack,
         installed: Boolean(rec),
+        installed_version: rec?.version || null,
         installed_at: rec?.installed_at || null,
       };
     });
@@ -177,6 +304,11 @@ export function createPacksRouter(deps: PacksRouterDeps): Router {
     res.json(buildPacksResponsePayload(ownerUserId));
   });
 
+  router.get('/packs/updates', requireAuth, (req: Request, res: Response) => {
+    const ownerUserId = getOwnerUserId(req);
+    res.json(buildVersionReportForUser(ownerUserId));
+  });
+
   router.post('/packs/:packId/install', requireAuth, (req: Request, res: Response) => {
     const ownerUserId = getOwnerUserId(req);
     const packId = String(req.params.packId || '').trim();
@@ -189,6 +321,8 @@ export function createPacksRouter(deps: PacksRouterDeps): Router {
 
     store.installPackRecord(ownerUserId, pack.id, pack.version);
     const provisionedAgents = provisionPackResources(ownerUserId, pack);
+    persistStateNamespace(store, 'agents_list', serverState.agentsList);
+    persistStateNamespace(store, 'skills_list', serverState.skillsList);
     res.json({
       pack_id: pack.id,
       installed: true,
@@ -212,6 +346,7 @@ export function createPacksRouter(deps: PacksRouterDeps): Router {
     serverState.agentsList = serverState.agentsList.filter(
       (a) => a.role === 'jarvis_master' || a.template_id !== packTemplateTag
     );
+    persistStateNamespace(store, 'agents_list', serverState.agentsList);
 
     res.json({
       pack_id: pack.id,
@@ -220,7 +355,112 @@ export function createPacksRouter(deps: PacksRouterDeps): Router {
     });
   });
 
-  // --- ESTÚDIO DE PACOTES (DEV / ADMIN CRUD) ---
+  // --- ESTÚDIO DE PACOTES (DEV / ADMIN CRUD & UPDATES) ---
+  router.post(
+    '/admin/packs/updates/apply',
+    requireAuth,
+    requirePackStudioRole,
+    (req: Request, res: Response) => {
+      const ownerUserId = getOwnerUserId(req);
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const targetType = String(body.target_type || '').trim().toLowerCase();
+      const targetId = String(body.target_id || '').trim();
+
+      if (targetType !== 'pack' && targetType !== 'agent' && targetType !== 'all') {
+        res.status(400).json({
+          detail: 'Parâmetro target_type inválido. Utilize "pack", "agent" ou "all".',
+        });
+        return;
+      }
+
+      if (targetType !== 'all' && !targetId) {
+        res.status(400).json({
+          detail: 'Informe target_id para aplicar a atualização solicitada.',
+        });
+        return;
+      }
+
+      const updatedPacks: Array<{
+        pack_id: string;
+        name: string;
+        previous_version: string;
+        new_version: string;
+      }> = [];
+      const updatedAgents: Array<{
+        role: string;
+        proper_name: string;
+        previous_version: string;
+        new_version: string;
+        model: string;
+      }> = [];
+
+      if (targetType === 'pack') {
+        const applied = applySinglePackUpdate(ownerUserId, targetId);
+        if (!applied) {
+          res.status(404).json({ detail: 'Pacote não encontrado para atualização.' });
+          return;
+        }
+        updatedPacks.push({
+          pack_id: applied.pack_id,
+          name: applied.name,
+          previous_version: applied.previous_version,
+          new_version: applied.new_version,
+        });
+      } else if (targetType === 'agent') {
+        const applied = applySingleAgentUpdate(ownerUserId, targetId);
+        if (!applied) {
+          res.status(404).json({ detail: 'Agente não encontrado para atualização.' });
+          return;
+        }
+        updatedAgents.push(applied);
+      } else {
+        const currentReport = buildVersionReportForUser(ownerUserId);
+        for (const packItem of currentReport.packages) {
+          if (packItem.has_update) {
+            const applied = applySinglePackUpdate(ownerUserId, packItem.pack_id);
+            if (applied) {
+              updatedPacks.push({
+                pack_id: applied.pack_id,
+                name: applied.name,
+                previous_version: applied.previous_version,
+                new_version: applied.new_version,
+              });
+            }
+          }
+        }
+        const postPackReport = buildVersionReportForUser(ownerUserId);
+        for (const agentItem of postPackReport.agents) {
+          if (agentItem.has_update) {
+            const applied = applySingleAgentUpdate(ownerUserId, agentItem.role);
+            if (applied) {
+              updatedAgents.push(applied);
+            }
+          }
+        }
+      }
+
+      persistStateNamespace(store, 'agents_list', serverState.agentsList);
+      persistStateNamespace(store, 'skills_list', serverState.skillsList);
+
+      const report = buildVersionReportForUser(ownerUserId);
+      const summaryMessage =
+        targetType === 'pack' && updatedPacks[0]
+          ? `Pacote "${updatedPacks[0].name}" atualizado de v${updatedPacks[0].previous_version} para v${updatedPacks[0].new_version}.`
+          : targetType === 'agent' && updatedAgents[0]
+            ? `Agente ${updatedAgents[0].proper_name} atualizado para v${updatedAgents[0].new_version} (${updatedAgents[0].model}).`
+            : `Atualização concluída: ${updatedPacks.length} pacote(s) e ${updatedAgents.length} agente(s) sincronizados.`;
+
+      res.json({
+        status: 'updated',
+        message: summaryMessage,
+        updated_packs: updatedPacks,
+        updated_agents: updatedAgents,
+        report,
+        ...buildPacksResponsePayload(ownerUserId),
+      });
+    }
+  );
+
   router.get('/admin/packs', requireAuth, requirePackStudioRole, (_req: Request, res: Response) => {
     const customPacks = store.listCustomPacks();
     res.json({
@@ -287,6 +527,7 @@ export function createPacksRouter(deps: PacksRouterDeps): Router {
     serverState.agentsList = serverState.agentsList.filter(
       (a) => a.role === 'jarvis_master' || a.template_id !== packTemplateTag
     );
+    persistStateNamespace(store, 'agents_list', serverState.agentsList);
     res.json({
       deleted_pack_id: packId,
       ...buildPacksResponsePayload(ownerUserId),

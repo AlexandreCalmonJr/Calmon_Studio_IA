@@ -112,8 +112,8 @@ export const CreativeMediaStudioView: React.FC = () => {
       }
       setImages(mediaData.images || []);
       setVideos(mediaData.videos || []);
-    } catch {
-      // keep local presets usable
+    } catch (err: any) {
+      setSheetError(err?.message || 'Não foi possível sincronizar o histórico do Estúdio Criativo.');
     }
   };
 
@@ -121,12 +121,13 @@ export const CreativeMediaStudioView: React.FC = () => {
     void loadAll();
   }, []);
 
-  // Poll any running video jobs every 4 seconds
+  // Poll any running video jobs every 4 seconds (pausing when tab is hidden)
   useEffect(() => {
     const running = videos.filter((v) => v.status === 'running');
     if (running.length === 0) return;
 
     const timer = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       running.forEach((job) => {
         void pollStudioVideoApi(job.id)
           .then((updated) => {

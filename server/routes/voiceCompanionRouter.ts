@@ -4,6 +4,8 @@ import {
   serverState,
   userProfiles,
   requireAuth,
+  getSessionFromReq,
+  persistStateNamespace,
   nowIso,
   broadcastRealtimeEvent,
   getActiveHardwareProfile,
@@ -16,6 +18,7 @@ import {
   PushNotificationServerItem,
   CompanionDeviceServer,
 } from '../serverState.ts';
+import { validateSafeExternalUrl } from '../serverHardening.ts';
 import {
   buildContextualGreeting,
   detectWakeWord,
@@ -188,7 +191,15 @@ export function createVoiceCompanionRouter(deps?: { store?: LocalSqliteBrainStor
       serverState.pushBridgeConfig.telegram_bot_token = req.body.telegram_bot_token.trim().slice(0, 160);
     }
     if (typeof req.body?.webhook_url === 'string') {
-      serverState.pushBridgeConfig.webhook_url = req.body.webhook_url.trim().slice(0, 240);
+      const candidateUrl = req.body.webhook_url.trim().slice(0, 240);
+      if (candidateUrl) {
+        const urlCheck = validateSafeExternalUrl(candidateUrl);
+        if (!urlCheck.valid) {
+          res.status(400).json({ detail: `URL de webhook inválida: ${urlCheck.reason}` });
+          return;
+        }
+      }
+      serverState.pushBridgeConfig.webhook_url = candidateUrl;
     }
     if (req.body?.channels && typeof req.body.channels === 'object') {
       const keys: Array<keyof typeof serverState.pushBridgeConfig.channels> = [
@@ -203,6 +214,7 @@ export function createVoiceCompanionRouter(deps?: { store?: LocalSqliteBrainStor
         }
       }
     }
+    persistStateNamespace(deps?.store, 'push_bridge_config', serverState.pushBridgeConfig);
     res.json(getPushConfigPayload());
   });
 
@@ -254,7 +266,24 @@ export function createVoiceCompanionRouter(deps?: { store?: LocalSqliteBrainStor
   });
 
   router.post('/companion/heartbeat', (req: Request, res: Response) => {
-    const code = String(req.body?.pairing_code || '').trim().toUpperCase();
+    const code = String(req.body?.pairing_code || req.headers['x-jarvis-pairing-code'] || '').trim().toUpperCase();
+    const deviceToken = String(req.body?.device_token || req.headers['x-jarvis-device-token'] || '').trim();
+    const session = getSessionFromReq(req);
+    const hasValidPairingCode =
+      Boolean(code) &&
+      code === serverState.currentPairingCode &&
+      Date.now() <= Date.parse(serverState.pairingExpiresAt);
+    const hasValidPairedDeviceToken =
+      Boolean(deviceToken) &&
+      serverState.pairedDevicesList.some((d) => d.id === deviceToken || d.token_hint === deviceToken);
+
+    if (!session && !hasValidPairingCode && !hasValidPairedDeviceToken) {
+      res.status(401).json({
+        detail: 'Heartbeat não autorizado. Envie uma sessão válida, código de pareamento ativo ou credencial de dispositivo pareado.',
+      });
+      return;
+    }
+
     const deviceName = String(req.body?.device_name || 'Notebook Companion').trim();
     const existing = serverState.companionDevices.find((d) => d.name.toLowerCase() === deviceName.toLowerCase());
     if (existing) {
@@ -266,11 +295,11 @@ export function createVoiceCompanionRouter(deps?: { store?: LocalSqliteBrainStor
         existing.ollama_models = req.body.ollama_models.slice(0, 12).map(String);
       }
       existing.last_heartbeat = nowIso();
-    } else if (code === serverState.currentPairingCode) {
+    } else if (hasValidPairingCode || session) {
       serverState.companionDevices.unshift({
         id: `dev_${crypto.randomBytes(4).toString('hex')}`,
         name: deviceName,
-        owner: 'Pareado via QR',
+        owner: session ? session.username : 'Pareado via QR',
         platform: String(req.body?.platform || 'desktop'),
         status: 'online',
         cpu_percent: Number(req.body?.cpu_percent) || 12,

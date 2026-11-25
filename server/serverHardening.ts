@@ -1,4 +1,5 @@
 import type http from 'node:http';
+import path from 'node:path';
 import type { Request, Response, NextFunction } from 'express';
 
 export const SESSION_COOKIE = 'jarvis_session';
@@ -165,3 +166,77 @@ export function handleGlobalServerError(
 
   res.status(statusCode).json({ error: safeMessage || 'Internal Server Error' });
 }
+
+export function requireRole(
+  ...allowedRoles: Array<'admin' | 'developer' | 'auditor'>
+): (req: Request, res: Response, next: NextFunction) => void {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const session = (req as Request & { jarvisSession?: BaseSessionRecord }).jarvisSession;
+    if (!session) {
+      res.status(401).json({ detail: 'Sessão não autenticada.' });
+      return;
+    }
+    if (!allowedRoles.includes(session.role)) {
+      res.status(403).json({
+        detail: `Permissão insuficiente. Esta ação requer perfil: ${allowedRoles.join(' ou ')}.`,
+      });
+      return;
+    }
+    next();
+  };
+}
+
+export function validateSafeExternalUrl(rawUrl: string): {
+  valid: boolean;
+  normalized?: string;
+  reason?: string;
+} {
+  const trimmed = String(rawUrl || '').trim();
+  if (!trimmed) return { valid: true, normalized: '' };
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return { valid: false, reason: 'URL inválida. Informe um endereço completo iniciado por https://.' };
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    return { valid: false, reason: 'Apenas URLs HTTP/HTTPS são permitidas.' };
+  }
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '::1' ||
+    host === '0.0.0.0' ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    host === '169.254.169.254' ||
+    host.startsWith('169.254.') ||
+    host.startsWith('10.') ||
+    host.startsWith('192.168.') ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host) ||
+    /^fc[0-9a-f]{2}:/i.test(host) ||
+    /^fd[0-9a-f]{2}:/i.test(host) ||
+    /^fe80:/i.test(host)
+  ) {
+    return {
+      valid: false,
+      reason: 'Endereços locais ou redes internas privadas não são permitidos em webhooks externos.',
+    };
+  }
+  return { valid: true, normalized: parsed.toString() };
+}
+
+export function resolveSafeProjectFilePath(baseDir: string, relativePath: string): string {
+  const cleaned = String(relativePath || '').replace(/\\/g, '/').replace(/^\/+/, '').trim();
+  if (!cleaned || cleaned.includes('\0')) {
+    throw new Error('Caminho de arquivo inválido.');
+  }
+  const resolvedBase = path.resolve(baseDir);
+  const resolvedTarget = path.resolve(resolvedBase, cleaned);
+  if (resolvedTarget !== resolvedBase && !resolvedTarget.startsWith(resolvedBase + path.sep)) {
+    throw new Error('Caminho fora do diretório permitido do projeto.');
+  }
+  return resolvedTarget;
+}
+

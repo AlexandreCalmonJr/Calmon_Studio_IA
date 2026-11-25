@@ -4,6 +4,14 @@ import {
   estimateVramGbFromModelName,
   evaluateVramFit,
 } from '../src/services/hardwareAdvisor.ts';
+import {
+  EXTERNAL_PROVIDERS,
+  inferExternalProviderFromModel,
+  runExternalProviderChat,
+  type ExternalProviderId,
+  type ResolvedExternalCredential,
+} from './providerEngine.ts';
+import type { ChatHistoryTurn } from './agentRuntime.ts';
 
 export interface HybridSource {
   title: string;
@@ -13,7 +21,9 @@ export interface HybridSource {
 export interface HybridInferenceRequest {
   prompt: string;
   systemInstruction: string;
+  history?: ChatHistoryTurn[];
   requestedModel?: string;
+  fallbackModel?: string;
   routingPolicy?: 'auto_hybrid' | 'local_only' | 'online_only';
   ollamaBaseUrl?: string;
   ollamaConnected?: boolean;
@@ -24,6 +34,8 @@ export interface HybridInferenceRequest {
   agentProperName?: string;
   strictFocus?: boolean;
   strictTopic?: string;
+  externalProvider?: ResolvedExternalCredential | null;
+  onToken?: (chunk: string) => void;
 }
 
 export interface HybridInferenceResult {
@@ -31,8 +43,10 @@ export interface HybridInferenceResult {
   reasoning: string;
   sources: HybridSource[];
   executionMode: 'LOCAL' | 'ONLINE';
-  provider: 'ollama' | 'gemini';
+  provider: 'ollama' | 'gemini' | ExternalProviderId | string;
+  requestedModel: string;
   modelUsed: string;
+  fallbackOccurred: boolean;
   latencyMs: number;
   routingNote?: string;
 }
@@ -40,6 +54,60 @@ export interface HybridInferenceResult {
 const VALID_GEMINI_MODELS = new Set([
   'gemini-4-hydrogen',
   'gemini-3.1-flash-lite',
+  'gemini-4-neon',
+  'gemini-4-carbon',
+  'gemini-4-argon',
+]);
+
+const DEPRECATED_GEMINI_MODELS = new Set([
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
+  'gemini-pro',
+  'gemini-2.0-flash',
+  'gemini-2.0-pro',
+  'gemini-2.0-flash-thinking',
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
+]);
+
+function formatReadableApiError(err: unknown, fallbackLabel = 'falha na API'): string {
+  let raw = err instanceof Error ? err.message : String(err || fallbackLabel);
+  for (let depth = 0; depth < 3; depth++) {
+    const trimmed = raw.trim();
+    if (!trimmed.startsWith('{')) break;
+    try {
+      const parsed = JSON.parse(trimmed) as { error?: { message?: string; code?: number }; message?: string };
+      if (parsed?.error?.message) {
+        raw = parsed.error.message;
+        continue;
+      }
+      if (parsed?.message) {
+        raw = parsed.message;
+        continue;
+      }
+    } catch {
+      break;
+    }
+    break;
+  }
+  const singleLine = raw.replace(/\s+/g, ' ').trim();
+  if (/429|quota|RESOURCE_EXHAUSTED/i.test(singleLine)) {
+    return 'cota/limite temporário excedido (429)';
+  }
+  if (/404|NOT_FOUND|no longer available/i.test(singleLine)) {
+    return 'modelo indisponível para esta chave (404)';
+  }
+  if (/401|403|API_KEY_INVALID|permission/i.test(singleLine)) {
+    return 'credencial sem permissão ou inválida';
+  }
+  return singleLine.slice(0, 140) || fallbackLabel;
+}
+
+const GEMINI_4_MODELS = new Set([
+  'gemini-4-hydrogen',
+  'gemini-4-neon',
+  'gemini-4-carbon',
+  'gemini-4-argon',
 ]);
 
 let cachedAiClient: GoogleGenAI | null = null;
@@ -72,9 +140,38 @@ export function isGeminiModelId(model?: string): boolean {
 }
 
 export function resolveSafeGeminiModel(requested?: string): string {
-  const m = (requested || '').trim().toLowerCase();
-  if (VALID_GEMINI_MODELS.has(m)) return m;
-  return 'gemini-4-hydrogen';
+  const resolved = resolveGeminiModelChoice(requested);
+  return resolved.model;
+}
+
+export function resolveGeminiModelChoice(requested?: string): {
+  model: string;
+  remapped: boolean;
+  reason?: string;
+} {
+  const clean = (requested || '').trim().toLowerCase();
+  if (!clean || clean === 'auto' || clean === 'auto_hybrid' || clean === 'online' || clean === 'gemini') {
+    return { model: 'gemini-4-hydrogen', remapped: false };
+  }
+  if (VALID_GEMINI_MODELS.has(clean)) {
+    return { model: clean, remapped: false };
+  }
+  if (DEPRECATED_GEMINI_MODELS.has(clean)) {
+    return {
+      model: 'gemini-4-hydrogen',
+      remapped: true,
+      reason: `Modelo legado "${requested}" não é mais suportado → direcionado para gemini-4-hydrogen.`,
+    };
+  }
+  // Aceita identificadores completos versionados (ex.: gemini-2.5-flash-preview-12-2025, gemini-3.1-pro-preview)
+  if (/^gemini-[0-9]+(?:\.[0-9]+)?-[a-z0-9-]+$/i.test(clean)) {
+    return { model: clean, remapped: false };
+  }
+  return {
+    model: 'gemini-4-hydrogen',
+    remapped: true,
+    reason: `Modelo "${requested}" não reconhecido no catálogo Gemini → direcionado para gemini-4-hydrogen.`,
+  };
 }
 
 function shouldEnableWebSearch(prompt: string, explicit?: boolean): boolean {
@@ -85,35 +182,114 @@ function shouldEnableWebSearch(prompt: string, explicit?: boolean): boolean {
   );
 }
 
+export function buildGeminiContents(
+  history: ChatHistoryTurn[] | undefined,
+  prompt: string
+): Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> {
+  const turns: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
+  if (Array.isArray(history)) {
+    for (const h of history) {
+      const content = String(h?.content || '').trim();
+      if (!content) continue;
+      turns.push({
+        role: h.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: content }],
+      });
+    }
+  }
+  turns.push({
+    role: 'user',
+    parts: [{ text: prompt }],
+  });
+  return turns;
+}
+
 async function runOllamaChat(
   ollamaBaseUrl: string,
   model: string,
   systemInstruction: string,
-  prompt: string
+  prompt: string,
+  history?: ChatHistoryTurn[],
+  onToken?: (chunk: string) => void
 ): Promise<{ text: string; reasoning: string; latencyMs: number }> {
   const start = Date.now();
   const base = ollamaBaseUrl.replace(/\/+$/, '');
   const controller = new AbortController();
-  // Modelos locais (como 7B / 14B) podem levar até 120s para carregamento na memória e inferência completa
   const timeout = setTimeout(() => controller.abort(), 120000);
+  const messages = [
+    { role: 'system', content: systemInstruction },
+    ...(Array.isArray(history)
+      ? history
+          .filter((h) => h && (h.role === 'user' || h.role === 'assistant') && h.content.trim())
+          .map((h) => ({ role: h.role, content: h.content }))
+      : []),
+    { role: 'user', content: prompt },
+  ];
 
   try {
+    const useStream = Boolean(onToken);
     const response = await fetch(`${base}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
       body: JSON.stringify({
         model,
-        stream: false,
-        messages: [
-          { role: 'system', content: systemInstruction },
-          { role: 'user', content: prompt },
-        ],
+        stream: useStream,
+        messages,
       }),
     });
 
     if (!response.ok) {
       throw new Error(`Ollama respondeu com status HTTP ${response.status}`);
+    }
+
+    if (useStream && response.body) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+      let rawAccumulated = '';
+      let reasoningAccumulated = '';
+      let inThinkTag = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const parsed = JSON.parse(trimmed) as {
+              message?: { content?: string; thinking?: string };
+              response?: string;
+            };
+            if (parsed?.message?.thinking) {
+              reasoningAccumulated += parsed.message.thinking;
+            }
+            const piece = String(parsed?.message?.content || parsed?.response || '');
+            if (!piece) continue;
+            rawAccumulated += piece;
+            if (piece.includes('<think>')) inThinkTag = true;
+            if (!inThinkTag) {
+              onToken?.(piece);
+            }
+            if (piece.includes('</think>')) inThinkTag = false;
+          } catch {
+            // ignora linha parcial
+          }
+        }
+      }
+
+      const thinkMatch = rawAccumulated.match(/<think>([\s\S]*?)<\/think>/i);
+      const reasoning = (reasoningAccumulated || thinkMatch?.[1] || '').trim();
+      const text = rawAccumulated.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+      return {
+        text: text || 'Resposta vazia retornada pelo nó Ollama local.',
+        reasoning,
+        latencyMs: Date.now() - start,
+      };
     }
 
     const payload = (await response.json()) as {
@@ -187,7 +363,9 @@ async function runGeminiInference(
   model: string,
   systemInstruction: string,
   prompt: string,
-  enableWebSearch: boolean
+  enableWebSearch: boolean,
+  history?: ChatHistoryTurn[],
+  onToken?: (chunk: string) => void
 ): Promise<{ text: string; reasoning: string; sources: HybridSource[]; latencyMs: number }> {
   const ai = getGeminiClient();
   if (!ai) {
@@ -198,7 +376,7 @@ async function runGeminiInference(
 
   const start = Date.now();
   const useSearch = enableWebSearch;
-  const isGemini4 = model === 'gemini-4-hydrogen';
+  const isGemini4 = GEMINI_4_MODELS.has(model);
 
   const config: Record<string, any> = {
     systemInstruction,
@@ -215,9 +393,66 @@ async function runGeminiInference(
     };
   }
 
+  const contents = buildGeminiContents(history, prompt);
+
+  if (onToken) {
+    const stream = await ai.models.generateContentStream({
+      model,
+      contents,
+      config,
+    });
+
+    const thoughtParts: string[] = [];
+    const answerParts: string[] = [];
+    const sources: HybridSource[] = [];
+    const seenUrls = new Set<string>();
+
+    for await (const chunk of stream) {
+      const parts = chunk.candidates?.[0]?.content?.parts || [];
+      let emittedFromParts = false;
+      for (const part of parts as Array<{ text?: string; thought?: boolean }>) {
+        if (!part?.text) continue;
+        if (part.thought) {
+          thoughtParts.push(part.text);
+        } else {
+          answerParts.push(part.text);
+          onToken(part.text);
+          emittedFromParts = true;
+        }
+      }
+      if (!emittedFromParts && chunk.text) {
+        answerParts.push(chunk.text);
+        onToken(chunk.text);
+      }
+
+      const rawChunks = chunk.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+      for (const gc of rawChunks as Array<{ web?: { uri?: string; title?: string } }>) {
+        const uri = gc?.web?.uri;
+        if (!uri || seenUrls.has(uri)) continue;
+        seenUrls.add(uri);
+        sources.push({
+          title: gc?.web?.title || uri,
+          url: uri,
+        });
+      }
+    }
+
+    const text = answerParts.join('').trim();
+    const reasoning =
+      thoughtParts.join('').trim() ||
+      `Roteamento concluído em ${model}${useSearch ? ' com Google Search Grounding ativo' : ''}.`;
+
+    return {
+      text: text || 'O modelo concluiu sem conteúdo textual.',
+      reasoning,
+      sources,
+      latencyMs: Date.now() - start,
+    };
+  }
+
   const response = await ai.models.generateContent({
     model,
-    contents: prompt,
+    contents,
     config,
   });
 
@@ -275,73 +510,269 @@ export async function runHybridInference(req: HybridInferenceRequest): Promise<H
 
   const policy = req.routingPolicy || 'auto_hybrid';
   const requested = (req.requestedModel || '').trim();
-  const wantsLocal =
-    policy === 'local_only' ||
-    (policy === 'auto_hybrid' && requested && !isGeminiModelId(requested) && requested !== 'auto_hybrid');
+  const effectiveRequestedLabel = requested || 'gemini-4-hydrogen';
+  const inferredExternal = inferExternalProviderFromModel(requested);
 
   const ollamaUrl = req.ollamaBaseUrl || 'http://127.0.0.1:11434';
   const ollamaEnabled = req.ollamaConnected !== false;
   const geminiEnabled = req.geminiConnected !== false && isGeminiApiConfigured();
 
-  if (wantsLocal && ollamaEnabled) {
-    const localModel = requested && !isGeminiModelId(requested) && requested !== 'auto' ? requested : 'llama3.1:8b';
-    try {
-      const localResult = await runOllamaChat(ollamaUrl, localModel, fullSystemPrompt, req.prompt);
-      return {
-        text: localResult.text,
-        reasoning: localResult.reasoning || `Processado localmente via Ollama (${localModel}) em ${ollamaUrl}.`,
-        sources: [],
-        executionMode: 'LOCAL',
-        provider: 'ollama',
-        modelUsed: localModel,
-        latencyMs: localResult.latencyMs,
-      };
-    } catch (localErr: any) {
-      if (policy === 'local_only' || !geminiEnabled) {
-        const errorDetail =
-          localErr?.name === 'AbortError'
-            ? 'Tempo limite de resposta excedido (120s)'
-            : String(localErr?.message || 'sem resposta');
+  // 1. Provedores Externos (Anthropic, OpenAI, DeepSeek, Groq, OpenRouter, xAI, Custom)
+  const shouldUseExternal =
+    policy !== 'local_only' &&
+    Boolean(
+      inferredExternal ||
+        (req.externalProvider &&
+          requested &&
+          !isGeminiModelId(requested) &&
+          requested === req.externalProvider.model)
+    );
+
+  if (shouldUseExternal) {
+    if (req.externalProvider && (!inferredExternal || req.externalProvider.provider === inferredExternal)) {
+      try {
+        const extResult = await runExternalProviderChat({
+          credential: req.externalProvider,
+          systemInstruction: fullSystemPrompt,
+          prompt: req.prompt,
+          history: req.history,
+          requestedModel: requested || req.externalProvider.model,
+        });
+        if (req.onToken && extResult.text) {
+          req.onToken(extResult.text);
+        }
+        return {
+          text: extResult.text,
+          reasoning: extResult.reasoning,
+          sources: [],
+          executionMode: 'ONLINE',
+          provider: extResult.provider,
+          requestedModel: effectiveRequestedLabel,
+          modelUsed: extResult.modelUsed,
+          fallbackOccurred: false,
+          latencyMs: extResult.latencyMs,
+        };
+      } catch (extErr: any) {
+        const extReason = formatReadableApiError(extErr, 'falha na API externa');
+        if (!geminiEnabled) {
+          throw new Error(
+            `Falha no modelo externo solicitado (${effectiveRequestedLabel}): ${extReason}. Nenhum fallback online disponível.`
+          );
+        }
+        const fallbackGemini = resolveGeminiModelChoice(req.fallbackModel || 'gemini-4-hydrogen').model;
+        const useWeb = shouldEnableWebSearch(req.prompt, req.enableWebSearch);
+        const onlineResult = await runGeminiInference(
+          fallbackGemini,
+          fullSystemPrompt,
+          req.prompt,
+          useWeb,
+          req.history,
+          req.onToken
+        );
+        return {
+          text: onlineResult.text,
+          reasoning: onlineResult.reasoning,
+          sources: onlineResult.sources,
+          executionMode: 'ONLINE',
+          provider: 'gemini',
+          requestedModel: effectiveRequestedLabel,
+          modelUsed: fallbackGemini,
+          fallbackOccurred: true,
+          latencyMs: onlineResult.latencyMs,
+          routingNote: `Solicitado: ${effectiveRequestedLabel} (erro: ${extReason}) → Respondido por: ${fallbackGemini} (Gemini Online).`,
+        };
+      }
+    } else if (inferredExternal) {
+      const provName = EXTERNAL_PROVIDERS[inferredExternal]?.name || inferredExternal;
+      if (!geminiEnabled) {
         throw new Error(
-          `Não foi possível executar no modelo local (${localModel}) via Ollama em ${ollamaUrl}: ${errorDetail}.`
+          `Modelo solicitado (${effectiveRequestedLabel}) exige chave configurada para ${provName} na Central de Modelos.`
         );
       }
-      // Transparent hybrid failover to Gemini Online
-      const geminiModel = resolveSafeGeminiModel('gemini-4-hydrogen');
+      const fallbackGemini = resolveGeminiModelChoice(req.fallbackModel || 'gemini-4-hydrogen').model;
       const useWeb = shouldEnableWebSearch(req.prompt, req.enableWebSearch);
-      const onlineResult = await runGeminiInference(geminiModel, fullSystemPrompt, req.prompt, useWeb);
+      const onlineResult = await runGeminiInference(
+        fallbackGemini,
+        fullSystemPrompt,
+        req.prompt,
+        useWeb,
+        req.history,
+        req.onToken
+      );
       return {
         text: onlineResult.text,
         reasoning: onlineResult.reasoning,
         sources: onlineResult.sources,
         executionMode: 'ONLINE',
         provider: 'gemini',
-        modelUsed: geminiModel,
+        requestedModel: effectiveRequestedLabel,
+        modelUsed: fallbackGemini,
+        fallbackOccurred: true,
         latencyMs: onlineResult.latencyMs,
-        routingNote: `Ollama local (${ollamaUrl}) indisponível neste momento → roteado automaticamente para ${geminiModel} Online.`,
+        routingNote: `Solicitado: ${effectiveRequestedLabel} (${provName} sem chave configurada) → Respondido por: ${fallbackGemini} (Gemini Online).`,
       };
     }
   }
 
-  if (!geminiEnabled) {
-    if (wantsLocal && !ollamaEnabled) {
-      throw new Error(`O nó Ollama local está desativado na Central de Modelos. Ative-o para utilizar o modelo ${requested || 'local'}.`);
+  // 2. Modelos Locais (Ollama)
+  const wantsLocal =
+    policy === 'local_only' ||
+    (policy === 'auto_hybrid' &&
+      Boolean(requested) &&
+      !isGeminiModelId(requested) &&
+      requested !== 'auto' &&
+      requested !== 'auto_hybrid');
+
+  if (wantsLocal) {
+    const localModel =
+      requested && !isGeminiModelId(requested) && requested !== 'auto' && requested !== 'auto_hybrid'
+        ? requested
+        : 'llama3.1:8b';
+
+    if (ollamaEnabled) {
+      try {
+        const localResult = await runOllamaChat(
+          ollamaUrl,
+          localModel,
+          fullSystemPrompt,
+          req.prompt,
+          req.history,
+          req.onToken
+        );
+        return {
+          text: localResult.text,
+          reasoning: localResult.reasoning || `Processado localmente via Ollama (${localModel}) em ${ollamaUrl}.`,
+          sources: [],
+          executionMode: 'LOCAL',
+          provider: 'ollama',
+          requestedModel: localModel,
+          modelUsed: localModel,
+          fallbackOccurred: false,
+          latencyMs: localResult.latencyMs,
+        };
+      } catch (localErr: any) {
+        const errorDetail =
+          localErr?.name === 'AbortError'
+            ? 'Tempo limite de resposta excedido (120s)'
+            : String(localErr?.message || 'nó local inacessível');
+        if (policy === 'local_only' || !geminiEnabled) {
+          throw new Error(
+            `Não foi possível executar no modelo local (${localModel}) via Ollama em ${ollamaUrl}: ${errorDetail}.`
+          );
+        }
+        const fallbackGemini = resolveGeminiModelChoice(req.fallbackModel || 'gemini-4-hydrogen').model;
+        const useWeb = shouldEnableWebSearch(req.prompt, req.enableWebSearch);
+        const onlineResult = await runGeminiInference(
+          fallbackGemini,
+          fullSystemPrompt,
+          req.prompt,
+          useWeb,
+          req.history,
+          req.onToken
+        );
+        return {
+          text: onlineResult.text,
+          reasoning: onlineResult.reasoning,
+          sources: onlineResult.sources,
+          executionMode: 'ONLINE',
+          provider: 'gemini',
+          requestedModel: localModel,
+          modelUsed: fallbackGemini,
+          fallbackOccurred: true,
+          latencyMs: onlineResult.latencyMs,
+          routingNote: `Solicitado: ${localModel} (Ollama local em ${ollamaUrl} indisponível: ${errorDetail}) → Respondido por: ${fallbackGemini} (Gemini Online).`,
+        };
+      }
     }
-    throw new Error('GEMINI_API_KEY não configurada no servidor. Configure a chave no painel Settings > Secrets ou selecione um modelo local do Ollama.');
+
+    if (policy === 'local_only' || !geminiEnabled) {
+      throw new Error(
+        `O nó Ollama local está desativado na Central de Modelos. Ative-o para utilizar o modelo ${localModel}.`
+      );
+    }
+
+    const fallbackGemini = resolveGeminiModelChoice(req.fallbackModel || 'gemini-4-hydrogen').model;
+    const useWeb = shouldEnableWebSearch(req.prompt, req.enableWebSearch);
+    const onlineResult = await runGeminiInference(
+      fallbackGemini,
+      fullSystemPrompt,
+      req.prompt,
+      useWeb,
+      req.history,
+      req.onToken
+    );
+    return {
+      text: onlineResult.text,
+      reasoning: onlineResult.reasoning,
+      sources: onlineResult.sources,
+      executionMode: 'ONLINE',
+      provider: 'gemini',
+      requestedModel: localModel,
+      modelUsed: fallbackGemini,
+      fallbackOccurred: true,
+      latencyMs: onlineResult.latencyMs,
+      routingNote: `Solicitado: ${localModel} (Ollama local desativado) → Respondido por: ${fallbackGemini} (Gemini Online).`,
+    };
   }
 
-  const geminiModel = resolveSafeGeminiModel(requested);
+  // 3. Gemini Online
+  if (!geminiEnabled) {
+    throw new Error(
+      'GEMINI_API_KEY não configurada no servidor. Configure a chave no painel Settings > Secrets ou selecione um modelo local do Ollama.'
+    );
+  }
+
+  const choice = resolveGeminiModelChoice(requested);
   const useWeb = shouldEnableWebSearch(req.prompt, req.enableWebSearch);
-  const onlineResult = await runGeminiInference(geminiModel, fullSystemPrompt, req.prompt, useWeb);
-  return {
-    text: onlineResult.text,
-    reasoning: onlineResult.reasoning,
-    sources: onlineResult.sources,
-    executionMode: 'ONLINE',
-    provider: 'gemini',
-    modelUsed: geminiModel,
-    latencyMs: onlineResult.latencyMs,
-  };
+
+  try {
+    const onlineResult = await runGeminiInference(
+      choice.model,
+      fullSystemPrompt,
+      req.prompt,
+      useWeb,
+      req.history,
+      req.onToken
+    );
+    return {
+      text: onlineResult.text,
+      reasoning: onlineResult.reasoning,
+      sources: onlineResult.sources,
+      executionMode: 'ONLINE',
+      provider: 'gemini',
+      requestedModel: effectiveRequestedLabel,
+      modelUsed: choice.model,
+      fallbackOccurred: choice.remapped,
+      latencyMs: onlineResult.latencyMs,
+      routingNote: choice.remapped ? choice.reason : undefined,
+    };
+  } catch (primaryErr: any) {
+    const primaryReason = formatReadableApiError(primaryErr, 'erro na API Gemini');
+    const fallbackCandidate = resolveGeminiModelChoice(req.fallbackModel || 'gemini-4-hydrogen').model;
+    if (choice.model !== fallbackCandidate) {
+      const retryResult = await runGeminiInference(
+        fallbackCandidate,
+        fullSystemPrompt,
+        req.prompt,
+        useWeb,
+        req.history,
+        req.onToken
+      );
+      return {
+        text: retryResult.text,
+        reasoning: retryResult.reasoning,
+        sources: retryResult.sources,
+        executionMode: 'ONLINE',
+        provider: 'gemini',
+        requestedModel: effectiveRequestedLabel,
+        modelUsed: fallbackCandidate,
+        fallbackOccurred: true,
+        latencyMs: retryResult.latencyMs,
+        routingNote: `Solicitado: ${choice.model} (erro: ${primaryReason}) → Respondido por: ${fallbackCandidate} (Gemini Online).`,
+      };
+    }
+    throw primaryErr;
+  }
 }
 
 export interface CuratedHfModel {

@@ -10,6 +10,7 @@ import {
   Package,
   Plus,
   Save,
+  Server,
   Trash2,
   Wrench,
 } from 'lucide-react';
@@ -30,6 +31,7 @@ import {
   fetchAdminCustomPacks,
   saveAdminCustomPack,
 } from '../../services/api/packs';
+import { PackStudioUpdatesPanel } from './PackStudioUpdatesPanel';
 
 interface PackStudioAdminViewProps {
   onNavigate: (tab: string) => void;
@@ -59,7 +61,7 @@ const EMPTY_AGENT_ROW: AgentDraftRow = {
   handle: '',
   role: '',
   mission: '',
-  preferred_model: 'gemini-2.5-flash',
+  preferred_model: 'gemini-4-hydrogen',
   autonomy_level: 'ask_approval',
   skillsCsv: '',
 };
@@ -99,7 +101,7 @@ export const PackStudioAdminView: React.FC<PackStudioAdminViewProps> = ({ onNavi
       handle: '@kael',
       role: 'custom_specialist',
       mission: 'Executar tarefas técnicas especializadas com núcleo dedicado.',
-      preferred_model: 'gemini-2.5-flash',
+      preferred_model: 'gemini-4-hydrogen',
       autonomy_level: 'ask_approval',
       skillsCsv: 'Arquitetura Modular',
     },
@@ -160,7 +162,7 @@ export const PackStudioAdminView: React.FC<PackStudioAdminViewProps> = ({ onNavi
         handle: '@kael',
         role: 'custom_specialist',
         mission: 'Executar tarefas técnicas especializadas com núcleo dedicado.',
-        preferred_model: 'gemini-2.5-flash',
+        preferred_model: 'gemini-4-hydrogen',
         autonomy_level: 'ask_approval',
         skillsCsv: 'Arquitetura Modular',
       },
@@ -339,6 +341,14 @@ export const PackStudioAdminView: React.FC<PackStudioAdminViewProps> = ({ onNavi
           <button
             type="button"
             className="btn btn-secondary"
+            onClick={() => onNavigate('brain_server')}
+          >
+            <Server size={16} />
+            <span>Cérebros &amp; Servidor</span>
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
             onClick={() => onNavigate('store')}
           >
             <Package size={16} />
@@ -364,6 +374,17 @@ export const PackStudioAdminView: React.FC<PackStudioAdminViewProps> = ({ onNavi
           <span>{feedback}</span>
         </div>
       )}
+
+      <PackStudioUpdatesPanel
+        onUpdateApplied={(res) => {
+          setError(null);
+          setFeedback(res.message);
+          if (res.custom_packs) {
+            setCustomPacks(res.custom_packs);
+          }
+        }}
+        onError={(msg) => setError(msg)}
+      />
 
       <div className="jarvis-studio-layout">
         {/* Coluna Principal: Formulário Construtor */}

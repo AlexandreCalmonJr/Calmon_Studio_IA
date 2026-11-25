@@ -25,7 +25,7 @@ test('LocalSqliteBrainStore bootstraps WAL SQLite database on disk with all 12 c
     assert.equal(fs.existsSync(store1.dbPath), true);
 
     const tables = store1.getTableStats();
-    assert.equal(tables.length, 24);
+    assert.equal(tables.length, 28);
     assert.ok(tables.some((t) => t.table === 'brain_identity' && t.rows === 1));
     assert.ok(tables.some((t) => t.table === 'brain_profiles' && t.rows === 3));
     assert.ok(tables.some((t) => t.table === 'agent_workspaces' && t.rows === 1));
@@ -34,6 +34,10 @@ test('LocalSqliteBrainStore bootstraps WAL SQLite database on disk with all 12 c
     assert.ok(tables.some((t) => t.table === 'installed_packs'));
     assert.ok(tables.some((t) => t.table === 'agent_cores'));
     assert.ok(tables.some((t) => t.table === 'custom_packs'));
+    assert.ok(tables.some((t) => t.table === 'app_state_snapshots'));
+    assert.ok(tables.some((t) => t.table === 'app_tasks'));
+    assert.ok(tables.some((t) => t.table === 'coding_session_messages'));
+    assert.ok(tables.some((t) => t.table === 'agent_conversation_history'));
 
     const added = store1.addBrainProfile({
       name: 'Docker Escritório',

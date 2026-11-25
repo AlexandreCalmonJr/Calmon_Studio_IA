@@ -75,9 +75,9 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
   const [availableModels, setAvailableModels] = useState<FormattedChatModel[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     try {
-      return localStorage.getItem(getAccountStorageKey('jarvis_selected_model')) || 'gemini-4-hydrogen';
+      return localStorage.getItem(getAccountStorageKey('jarvis_selected_model')) || 'auto';
     } catch {
-      return 'gemini-4-hydrogen';
+      return 'auto';
     }
   });
   const [tabs, setTabs] = useState<ChatTabItem[]>([{ id: 'default', title: assistantName }]);
@@ -91,7 +91,7 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
     );
   }, [assistantName]);
 
-  // Sincroniza modelos disponíveis do backend
+  // Sincroniza modelos disponíveis do backend preservando modo Automático (Agente) ou escolha explícita
   useEffect(() => {
     let isMounted = true;
     fetchModels()
@@ -100,14 +100,10 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
         const list = parseChatModelOptions(data);
         setAvailableModels(list);
         const saved = localStorage.getItem(getAccountStorageKey('jarvis_selected_model'));
-        if (saved && list.some((m) => m.id === saved)) {
+        if (!saved || saved === 'auto') {
+          setSelectedModel('auto');
+        } else {
           setSelectedModel(saved);
-        } else if (list.length > 0) {
-          const def =
-            list.find((m) => m.id === 'gemini-4-hydrogen') ||
-            list.find((m) => m.id.toLowerCase().includes('gemini')) ||
-            list[0];
-          setSelectedModel(def.id);
         }
       })
       .catch((e) => console.warn('Falha ao listar modelos:', e));
@@ -116,12 +112,17 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
     };
   }, []);
 
-  const handleSelectModel = (modelId: string) => {
-    setSelectedModel(modelId);
+  const handleSelectModel = useCallback((modelId: string) => {
+    const normalized = (modelId || '').trim() || 'auto';
+    setSelectedModel(normalized);
     try {
-      localStorage.setItem(getAccountStorageKey('jarvis_selected_model'), modelId);
+      if (normalized === 'auto') {
+        localStorage.removeItem(getAccountStorageKey('jarvis_selected_model'));
+      } else {
+        localStorage.setItem(getAccountStorageKey('jarvis_selected_model'), normalized);
+      }
     } catch {}
-  };
+  }, []);
 
   // Sincroniza propriedade de projeto externo
   useEffect(() => {
@@ -162,7 +163,8 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
     activeProjectId,
     activeProject?.name || null,
     (art) => setActiveArtifact(art),
-    () => loadProjects()
+    () => loadProjects(),
+    handleSelectModel
   );
 
   const [myAgents, setMyAgents] = useState<AgentInfo[]>([]);
@@ -221,16 +223,37 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
       const details = await fetchChatSessionDetails(sid);
       if (details) {
         let reconstructed: ChatMessage[] = [];
+        const tasksList = Array.isArray(details.tasks) ? details.tasks : [];
         if (details.messages && details.messages.length > 0) {
-          reconstructed = details.messages.map((m: any) => ({
-            sender: m.role === 'user' ? 'user' : 'jarvis',
-            text: m.content || '',
-            timestamp: m.created_at
-              ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-              : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          }));
-        } else if (details.tasks && details.tasks.length > 0) {
-          details.tasks.forEach((t: any) => {
+          let assistantIdx = 0;
+          reconstructed = details.messages.map((m: any) => {
+            const isUser = m.role === 'user';
+            let matchedTaskData: any = undefined;
+            if (!isUser && tasksList.length > 0) {
+              const contentStr = String(m.content || '').trim();
+              const bySummary = tasksList.find(
+                (t: any) =>
+                  typeof (t?.state?.final_summary || t?.final_summary) === 'string' &&
+                  String(t?.state?.final_summary || t?.final_summary).trim() === contentStr
+              );
+              const fallbackByOrder = tasksList[assistantIdx];
+              const chosen = bySummary || fallbackByOrder;
+              if (chosen) {
+                matchedTaskData = chosen.state || chosen;
+              }
+              assistantIdx += 1;
+            }
+            return {
+              sender: isUser ? 'user' : 'jarvis',
+              text: m.content || '',
+              taskData: matchedTaskData,
+              timestamp: m.created_at
+                ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            };
+          });
+        } else if (tasksList.length > 0) {
+          tasksList.forEach((t: any) => {
             const time = t.created_at
               ? new Date(t.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
               : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -242,7 +265,7 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
               reconstructed.push({
                 sender: 'jarvis',
                 text: summary,
-                taskData: t.state,
+                taskData: t.state || t,
                 timestamp: time,
               });
             }
@@ -346,7 +369,11 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
       )
     );
 
-    submitStream(textToSend, modelOverride || selectedModel, {
+    const rawChosenModel = modelOverride ?? selectedModel;
+    const effectiveModelOverride =
+      rawChosenModel && rawChosenModel !== 'auto' ? rawChosenModel : undefined;
+
+    submitStream(textToSend, effectiveModelOverride, {
       enableWebSearch: webSearchEnabled,
       assistantName,
     });

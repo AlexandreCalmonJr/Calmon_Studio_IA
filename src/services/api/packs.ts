@@ -12,8 +12,9 @@ import type {
   ModulePackWithState,
 } from '../modulePackEngine';
 import type { ProjectArchitectureReport } from '../../../server/architectureAnalyzer';
+import type { VersionCheckReport } from '../packageVersionEngine';
 
-export type { ProjectArchitectureReport };
+export type { ProjectArchitectureReport, VersionCheckReport };
 
 export interface ModulePacksPayload {
   packs: ModulePackWithState[];
@@ -137,6 +138,57 @@ export async function fetchAgentCore(role: string): Promise<AgentCoreEnvelope> {
     res,
     'Falha ao carregar o núcleo individual do agente.'
   );
+}
+
+export interface ApplyPackageUpdateResponse extends ModulePacksPayload {
+  status: 'updated';
+  message: string;
+  updated_packs: Array<{
+    pack_id: string;
+    name: string;
+    previous_version: string;
+    new_version: string;
+  }>;
+  updated_agents: Array<{
+    role: string;
+    proper_name: string;
+    previous_version: string;
+    new_version: string;
+    model: string;
+  }>;
+  report: VersionCheckReport;
+}
+
+export const PACK_UPDATES_CHANGED_EVENT = 'jarvis:pack-updates-changed';
+
+export async function fetchPackageUpdatesStatus(): Promise<VersionCheckReport> {
+  const res = await apiFetch(`${API_BASE}/packs/updates`);
+  return handleApiResponse<VersionCheckReport>(
+    res,
+    'Falha ao verificar atualizações de pacotes e agentes.'
+  );
+}
+
+export async function applyAdminPackageUpdate(input: {
+  target_type: 'pack' | 'agent' | 'all';
+  target_id?: string;
+}): Promise<ApplyPackageUpdateResponse> {
+  const res = await apiFetch(`${API_BASE}/admin/packs/updates/apply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const data = await handleApiResponse<ApplyPackageUpdateResponse>(
+    res,
+    'Falha ao aplicar a atualização no Estúdio de Pacotes.'
+  );
+  broadcastPacksUpdated(data);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent<VersionCheckReport>(PACK_UPDATES_CHANGED_EVENT, { detail: data.report })
+    );
+  }
+  return data;
 }
 
 export async function saveAgentCore(
