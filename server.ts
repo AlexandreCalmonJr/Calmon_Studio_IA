@@ -16,6 +16,7 @@ import {
   type LocalSqliteBrainStore,
 } from './server/brain/sqliteBrainStore.ts';
 import { createBrainRouter } from './server/brain/brainRouter.ts';
+import { createHubInfraRegistry } from './server/infra/infraRegistry.ts';
 import {
   PORT,
   appendServerLog,
@@ -94,10 +95,12 @@ export function buildApiRouter(options?: { store?: LocalSqliteBrainStore }) {
   serverState.pairedDevicesList = localBrainStore.listPairedDevices();
   syncRuntimeToSqlite();
 
+  const infraRegistry = createHubInfraRegistry(localBrainStore);
+
   // ==================== MÓDULOS DE ROTAS DOMAIN-DRIVEN ====================
   api.use(createAuthRouter({ store: localBrainStore }));
   api.use(createSystemRouter({ store: localBrainStore }));
-  api.use(createChatRouter({ store: localBrainStore }));
+  api.use(createChatRouter({ store: localBrainStore, infra: infraRegistry }));
   api.use(createPacksRouter({ store: localBrainStore }));
   api.use(createAgentsRouter({ store: localBrainStore }));
   api.use(createModelsRouter({ store: localBrainStore }));
@@ -116,6 +119,7 @@ export function buildApiRouter(options?: { store?: LocalSqliteBrainStore }) {
     '/brain',
     createBrainRouter({
       store: localBrainStore,
+      infra: infraRegistry,
       requireAuth,
       isGeminiConfigured: isGeminiApiConfigured,
       getLiveCounts: () => ({

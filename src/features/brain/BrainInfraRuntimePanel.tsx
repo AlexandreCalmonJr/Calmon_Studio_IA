@@ -7,9 +7,11 @@ import {
   HardDrive,
   Layers,
   MessageSquare,
+  Pause,
   Play,
   Plus,
   RefreshCw,
+  Send,
   ShieldCheck,
   Terminal,
   Trash2,
@@ -22,13 +24,19 @@ import {
   fetchInfraDiagnosticsApi,
   fetchSandboxSessionsApi,
   fetchScheduledJobsApi,
+  migratePostgresSchemaApi,
   runScheduledJobNowApi,
   saveChannelBindingApi,
   saveScheduledJobApi,
+  testChannelOutboundApi,
+  tickSchedulerNowApi,
+  toggleSchedulerDaemonApi,
   type ChannelBindingItem,
+  type ChannelOutboundReadiness,
   type InfrastructureDiagnosticsResponse,
   type SandboxSessionItem,
   type ScheduledJobItem,
+  type SchedulerDaemonStatus,
 } from '../../services/api/brainServer';
 import { hubStore } from '../../services/hubStore';
 import { notify } from '../../shared/common/Toast';
@@ -37,9 +45,14 @@ export const BrainInfraRuntimePanel: React.FC = () => {
   const [diag, setDiag] = useState<InfrastructureDiagnosticsResponse | null>(null);
   const [sandboxSessions, setSandboxSessions] = useState<SandboxSessionItem[]>([]);
   const [jobs, setJobs] = useState<ScheduledJobItem[]>([]);
+  const [daemon, setDaemon] = useState<SchedulerDaemonStatus | null>(null);
+  const [tickingDaemon, setTickingDaemon] = useState<boolean>(false);
   const [bindings, setBindings] = useState<ChannelBindingItem[]>([]);
+  const [outboundReadiness, setOutboundReadiness] = useState<ChannelOutboundReadiness | null>(null);
+  const [testingBindingId, setTestingBindingId] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [probing, setProbing] = useState<boolean>(false);
+  const [migratingPg, setMigratingPg] = useState<boolean>(false);
   const [showPgDdl, setShowPgDdl] = useState<boolean>(false);
 
   // Sandbox quick test
@@ -75,7 +88,9 @@ export const BrainInfraRuntimePanel: React.FC = () => {
       setDiag(d);
       setSandboxSessions(sbx.sessions || []);
       setJobs(jList.jobs || []);
+      setDaemon(jList.daemon || d.scheduler_daemon || null);
       setBindings(cList.bindings || []);
+      setOutboundReadiness(cList.outbound || d.channel_outbound || null);
     } catch (err: any) {
       notify(err?.message || 'Falha ao carregar diagnósticos de infraestrutura.', 'error');
     } finally {
@@ -182,6 +197,72 @@ export const BrainInfraRuntimePanel: React.FC = () => {
     }
   };
 
+  const handleTickScheduler = async () => {
+    setTickingDaemon(true);
+    try {
+      const res = await tickSchedulerNowApi();
+      setDaemon(res.status);
+      if (res.executed.length > 0) {
+        const refreshed = await fetchScheduledJobsApi();
+        setJobs(refreshed.jobs || []);
+        notify(`${res.executed.length} rotina(s) vencida(s) executada(s) pelo motor 24/7.`, 'success');
+      } else {
+        notify(`Ciclo #${res.status.tick_count} concluído · nenhuma rotina vencida no momento.`, 'info');
+      }
+    } catch (err: any) {
+      notify(err?.message || 'Erro ao verificar fila do agendador.', 'error');
+    } finally {
+      setTickingDaemon(false);
+    }
+  };
+
+  const handleToggleDaemon = async () => {
+    const nextEnabled = !(daemon?.running ?? true);
+    try {
+      const res = await toggleSchedulerDaemonApi(nextEnabled);
+      setDaemon(res.daemon);
+      notify(
+        res.daemon.running
+          ? 'Motor 24/7 do agendador reativado.'
+          : 'Motor 24/7 pausado temporariamente.',
+        'info'
+      );
+    } catch (err: any) {
+      notify(err?.message || 'Erro ao alternar motor 24/7.', 'error');
+    }
+  };
+
+  const handleTestOutbound = async (bindingId: string) => {
+    setTestingBindingId(bindingId);
+    try {
+      const res = await testChannelOutboundApi(bindingId);
+      if (res.delivery.status === 'sent') {
+        notify(res.delivery.detail, 'success');
+      } else if (res.delivery.status === 'skipped_unconfigured') {
+        notify(res.delivery.detail, 'warning');
+      } else {
+        notify(res.delivery.detail, 'error');
+      }
+    } catch (err: any) {
+      notify(err?.message || 'Falha ao testar envio de saída.', 'error');
+    } finally {
+      setTestingBindingId(null);
+    }
+  };
+
+  const handleMigratePostgres = async () => {
+    setMigratingPg(true);
+    try {
+      const res = await migratePostgresSchemaApi();
+      notify(res.detail, res.ok ? 'success' : 'warning');
+      await loadAll(true);
+    } catch (err: any) {
+      notify(err?.message || 'Falha ao aplicar schema PostgreSQL + pgvector.', 'error');
+    } finally {
+      setMigratingPg(false);
+    }
+  };
+
   return (
     <div data-testid="brain-infra-panel" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       {/* Cabeçalho e Ação de Sondagem */}
@@ -247,46 +328,67 @@ export const BrainInfraRuntimePanel: React.FC = () => {
               {diag.database.engine_label}
             </div>
             <div className="tabular-nums" style={{ marginTop: '6px', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-              busy_timeout {diag.database.sqlite_busy_timeout_ms} ms · {diag.database.composite_indexes_count} índices compostos · {diag.database.recoverable_runs_count} retomável(is)
+              {diag.database.postgres_configured
+                ? `pgvector: ${diag.database.pgvector_ready ? 'ativo' : 'pendente'} · ${diag.database.postgres_reachable === true ? 'conectado' : diag.database.postgres_reachable === false ? 'inacessível' : 'não sondado'}`
+                : `busy_timeout ${diag.database.sqlite_busy_timeout_ms} ms · ${diag.database.composite_indexes_count} índices · ${diag.database.recoverable_runs_count} retomável(is)`}
             </div>
+            {diag.database.postgres_configured && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-xs"
+                style={{ marginTop: '8px' }}
+                disabled={migratingPg}
+                onClick={() => void handleMigratePostgres()}
+              >
+                <span>{migratingPg ? 'Aplicando DDL...' : 'Aplicar Schema pgvector'}</span>
+              </button>
+            )}
           </div>
 
           <div className="glass-panel" style={{ padding: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
               <Layers size={15} color="var(--accent-light)" />
-              <span>Fila Durável / Distribuída</span>
+              <span>Fila Durável / Redis RESP2</span>
             </div>
             <div style={{ marginTop: '6px', fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)' }}>
               {diag.queue.driver_label}
             </div>
             <div className="tabular-nums" style={{ marginTop: '6px', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-              {diag.queue.active_lanes} faixa(s) ativa(s) · {diag.queue.total_executed} job(s) · Redis: {diag.queue.redis_configured ? 'configurado' : 'opcional'}
+              {diag.queue.redis_configured
+                ? `Redis: ${diag.queue.redis_reachable === true ? `online (${diag.queue.redis_latency_ms ?? 1} ms)` : diag.queue.redis_reachable === false ? 'fallback SQLite' : 'configurado'} · ${diag.queue.distributed_locks_acquired ?? 0} lock(s)`
+                : `${diag.queue.active_lanes} faixa(s) ativa(s) · ${diag.queue.total_executed} job(s) · Redis RESP2 pronto via REDIS_URL`}
             </div>
           </div>
 
           <div className="glass-panel" style={{ padding: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
               <HardDrive size={15} color="var(--accent-light)" />
-              <span>Object Storage</span>
+              <span>Object Storage (SigV4)</span>
             </div>
             <div style={{ marginTop: '6px', fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)' }}>
               {diag.storage.mode_label}
             </div>
-            <div style={{ marginTop: '6px', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-              {diag.storage.bucket ? `Bucket: ${diag.storage.bucket}` : 'Confinado em .jarvis-brain/artifacts'} · Multi-réplica: {diag.storage.multi_replica_ready ? 'sim' : 'local'}
+            <div className="tabular-nums" style={{ marginTop: '6px', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+              {diag.storage.bucket
+                ? `Bucket: ${diag.storage.bucket} · SigV4: ${diag.storage.sigv4_enabled ? 'ativo' : 'pendente'} · ${diag.storage.remote_synced_count ?? 0} sync(s)`
+                : 'Confinado em .jarvis-brain/artifacts · S3/MinIO/GCS SigV4 pronto via .env'}
             </div>
           </div>
 
           <div className="glass-panel" style={{ padding: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
               <ShieldCheck size={15} color="var(--accent-light)" />
-              <span>Sandbox de Execução</span>
+              <span>Sandbox &amp; Container Docker</span>
             </div>
             <div style={{ marginTop: '6px', fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)' }}>
               {diag.sandbox.driver_label}
             </div>
             <div className="tabular-nums" style={{ marginTop: '6px', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-              Allowlist: {diag.sandbox.allowlisted_binaries.join(', ')} · Limite {diag.sandbox.max_timeout_ms} ms
+              {diag.sandbox.docker_available === true
+                ? `Docker Engine v${diag.sandbox.docker_version || 'ativo'} · imagem ${diag.sandbox.docker_image || 'node:22-alpine'}`
+                : diag.sandbox.docker_available === false
+                  ? `Host sem daemon Docker · modo local confinado (${diag.sandbox.allowlisted_binaries.length} binários)`
+                  : `Allowlist: ${diag.sandbox.allowlisted_binaries.join(', ')} · Docker ${diag.sandbox.docker_image || 'node:22-alpine'} pronto`}
             </div>
           </div>
         </div>
@@ -337,7 +439,9 @@ export const BrainInfraRuntimePanel: React.FC = () => {
                 {(diag?.mcp_runtime || []).map((entry) => (
                   <tr key={entry.server_id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                     <td style={{ padding: '8px 4px', fontWeight: 600, color: 'var(--text-primary)' }}>{entry.name}</td>
-                    <td style={{ padding: '8px 4px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{entry.transport}</td>
+                    <td style={{ padding: '8px 4px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
+                      {entry.transport} · {entry.protocol_version || 'JSON-RPC 2.0'}
+                    </td>
                     <td style={{ padding: '8px 4px', color: entry.runtime_state === 'online' ? 'var(--success-text)' : 'var(--warning-text)' }}>
                       {entry.runtime_state === 'online' ? 'Online' : entry.runtime_state}
                     </td>
@@ -421,10 +525,53 @@ export const BrainInfraRuntimePanel: React.FC = () => {
       {/* Agendador Persistente & Gateway de Canais 24/7 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '16px' }}>
         <div className="glass-panel" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-            <CalendarClock size={16} color="var(--accent-light)" />
-            <span>Agendador Persistente ({jobs.length})</span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+              <CalendarClock size={16} color="var(--accent-light)" />
+              <span>Agendador 24/7 ({jobs.length})</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <button
+                type="button"
+                data-testid="scheduler-tick-btn"
+                className="btn btn-secondary btn-xs"
+                disabled={tickingDaemon}
+                onClick={() => void handleTickScheduler()}
+              >
+                <RefreshCw size={12} className={tickingDaemon ? 'spin' : undefined} />
+                <span>{tickingDaemon ? 'Verificando...' : 'Verificar fila'}</span>
+              </button>
+              <button
+                type="button"
+                data-testid="scheduler-toggle-btn"
+                className="btn btn-ghost btn-xs"
+                onClick={() => void handleToggleDaemon()}
+                title={daemon?.running ? 'Pausar motor 24/7' : 'Ativar motor 24/7'}
+              >
+                {daemon?.running ? <Pause size={12} /> : <Play size={12} />}
+                <span>{daemon?.running ? 'Pausar' : 'Ativar'}</span>
+              </button>
+            </div>
           </div>
+          {daemon && (
+            <div
+              data-testid="scheduler-daemon-status"
+              className="tabular-nums"
+              style={{
+                fontSize: '0.73rem',
+                color: daemon.running ? 'var(--success-text)' : 'var(--warning-text)',
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '8px',
+              }}
+            >
+              <span>{daemon.running ? 'Motor 24/7 ativo' : 'Motor 24/7 pausado'}</span>
+              <span style={{ color: 'var(--text-muted)' }}>·</span>
+              <span style={{ color: 'var(--text-secondary)' }}>
+                ciclo a cada {Math.round(daemon.interval_ms / 1000)}s · {daemon.tick_count} verificação(ões) · {daemon.due_executed_count} disparo(s) automático(s)
+              </span>
+            </div>
+          )}
           <form onSubmit={(e) => void handleAddJob(e)} style={{ display: 'grid', gridTemplateColumns: '1fr 110px', gap: '8px' }}>
             <input
               type="text"
@@ -497,9 +644,23 @@ export const BrainInfraRuntimePanel: React.FC = () => {
         </div>
 
         <div className="glass-panel" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-            <MessageSquare size={16} color="var(--accent-light)" />
-            <span>Gateway de Canais 24/7 ({bindings.length})</span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+              <MessageSquare size={16} color="var(--accent-light)" />
+              <span>Gateway de Canais 24/7 ({bindings.length})</span>
+            </div>
+            {outboundReadiness && (
+              <span
+                data-testid="channel-outbound-summary"
+                style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}
+              >
+                Saída ativa:{' '}
+                {(['telegram', 'discord', 'slack', 'whatsapp'] as const)
+                  .filter((p) => outboundReadiness[p]?.configured)
+                  .map((p) => p.toUpperCase())
+                  .join(', ') || 'configure tokens no .env'}
+              </span>
+            )}
           </div>
           <form onSubmit={(e) => void handleAddBinding(e)} style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '8px' }}>
             <select
@@ -538,37 +699,53 @@ export const BrainInfraRuntimePanel: React.FC = () => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {bindings.length === 0 ? (
               <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                Nenhum canal conectado. Webhooks em <code>/api/v1/brain/channels/webhook/:provider</code> exigem segredo validado por ambiente.
+                Nenhum canal conectado. Webhooks em <code>/api/v1/brain/channels/webhook/:provider</code> exigem segredo validado por ambiente e despacham respostas de saída automaticamente.
               </div>
             ) : (
-              bindings.map((b) => (
-                <div
-                  key={b.id}
-                  style={{
-                    padding: '8px 10px',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border-subtle)',
-                    backgroundColor: 'var(--bg-surface)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '8px',
-                  }}
-                >
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <CheckCircle2 size={13} color="var(--success-text)" />
-                      <span>{b.provider.toUpperCase()} · {b.label}</span>
+              bindings.map((b) => {
+                const outboundOk = outboundReadiness?.[b.provider]?.configured ?? false;
+                return (
+                  <div
+                    key={b.id}
+                    style={{
+                      padding: '8px 10px',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-subtle)',
+                      backgroundColor: 'var(--bg-surface)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '8px',
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <CheckCircle2 size={13} color={outboundOk ? 'var(--success-text)' : 'var(--warning-text)'} />
+                        <span>{b.provider.toUpperCase()} · {b.label}</span>
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+                        {b.external_chat_id} · @{b.agent_role} · {outboundOk ? 'Saída ativa' : 'Token saída pendente'}
+                      </div>
                     </div>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
-                      {b.external_chat_id} · @{b.agent_role} · {b.webhook_secret_hint}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                      <button
+                        type="button"
+                        data-testid={`channel-test-reply-${b.id}`}
+                        className="btn btn-ghost btn-xs"
+                        disabled={testingBindingId === b.id}
+                        onClick={() => void handleTestOutbound(b.id)}
+                        title="Testar envio de resposta de saída"
+                      >
+                        <Send size={12} />
+                        <span>{testingBindingId === b.id ? '...' : 'Testar envio'}</span>
+                      </button>
+                      <button type="button" className="btn btn-danger-ghost btn-xs" onClick={() => void handleDeleteBinding(b.id)} title="Desconectar canal">
+                        <Trash2 size={12} />
+                      </button>
                     </div>
                   </div>
-                  <button type="button" className="btn btn-danger-ghost btn-xs" onClick={() => void handleDeleteBinding(b.id)} title="Desconectar canal">
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>

@@ -175,30 +175,52 @@ export class DurableRunEngine {
     };
   }
 
-  public resumeRunFromCheckpoint(
+  public async resumeRunFromCheckpoint(
     runId: string,
     userId: string,
-    fromStepIndex?: number
-  ): AgentRunDetail | null {
+    fromStepIndex?: number,
+    options?: {
+      executeContinuation?: (ctx: {
+        run: AgentRunModel;
+        resumeFromStep: number;
+        priorSteps: AgentRunStepModel[];
+      }) => Promise<{
+        output: string;
+        modelUsed?: string;
+        executionMode?: string;
+        error?: string;
+        artifact?: {
+          title: string;
+          filename: string;
+          kind: string;
+          content: string;
+          mimeType: string;
+        };
+      }>;
+    }
+  ): Promise<AgentRunDetail | null> {
     const existing = this.getRunDetail(runId, userId);
     if (!existing) return null;
 
-    const nextIndex = existing.steps.length;
+    let nextIndex = existing.steps.length;
     const resumeTarget =
       typeof fromStepIndex === 'number' && Number.isFinite(fromStepIndex)
         ? Math.max(0, Math.min(fromStepIndex, Math.max(0, existing.steps.length - 1)))
         : Math.max(0, existing.steps.length - 1);
     const targetStep = existing.steps[resumeTarget];
+    const priorSteps = existing.steps.slice(0, resumeTarget + 1);
 
-    const step = this.recordStep({
+    const planStep = this.recordStep({
       runId: existing.run.id,
-      stepIndex: nextIndex,
+      stepIndex: nextIndex++,
       kind: 'plan',
       title: `Retomado do checkpoint #${resumeTarget + 1}${targetStep ? ` (${targetStep.title})` : ''}`,
       status: 'completed',
       durationMs: 5,
       inputSummary: `Status anterior: ${existing.run.status}`,
-      outputSummary: 'Contexto restaurado a partir do snapshot persistido em banco; pronto para continuidade.',
+      outputSummary: options?.executeContinuation
+        ? 'Snapshot restaurado do banco; iniciando re-execução real a partir deste checkpoint.'
+        : 'Contexto restaurado a partir do snapshot persistido em banco; pronto para continuidade.',
       checkpointPayload: {
         resumed_from_step: resumeTarget,
         previous_status: existing.run.status,
@@ -206,23 +228,134 @@ export class DurableRunEngine {
       },
     });
 
-    const updated = this.store.updateAgentRun(existing.run.id, {
-      status: 'completed',
+    if (!options?.executeContinuation) {
+      const updated = this.store.updateAgentRun(existing.run.id, {
+        status: 'completed',
+        error_message: null,
+        final_summary:
+          existing.run.final_summary ||
+          `Execução retomada a partir do checkpoint #${resumeTarget + 1} (${targetStep?.title || 'início'}).`,
+        checkpoint: {
+          resumed_from_step: resumeTarget,
+          last_step_id: planStep.id,
+          resumed_at: new Date().toISOString(),
+        },
+        finished_at: new Date().toISOString(),
+      });
+      if (updated) {
+        this.emitter?.emit('run:completed', { run: updated });
+      }
+      return this.getRunDetail(existing.run.id, userId);
+    }
+
+    // Marca como running durante a re-execução real do agente
+    const runningRun = this.store.updateAgentRun(existing.run.id, {
+      status: 'running',
       error_message: null,
-      final_summary:
-        existing.run.final_summary ||
-        `Execução retomada a partir do checkpoint #${resumeTarget + 1} (${targetStep?.title || 'início'}).`,
       checkpoint: {
         resumed_from_step: resumeTarget,
-        last_step_id: step.id,
+        last_step_id: planStep.id,
+        stage: 'continuing_inference',
         resumed_at: new Date().toISOString(),
       },
-      finished_at: new Date().toISOString(),
     });
-
-    if (updated) {
-      this.emitter?.emit('run:completed', { run: updated });
+    if (runningRun) {
+      this.emitter?.emit('run:started', { run: runningRun });
     }
-    return this.getRunDetail(existing.run.id, userId);
+
+    const startedMs = Date.now();
+    try {
+      const result = await options.executeContinuation({
+        run: existing.run,
+        resumeFromStep: resumeTarget,
+        priorSteps,
+      });
+      const elapsed = Math.max(1, Date.now() - startedMs);
+
+      if (result.error) {
+        this.recordStep({
+          runId: existing.run.id,
+          stepIndex: nextIndex++,
+          kind: 'model',
+          title: 'Continuação interrompida (provedor indisponível)',
+          status: 'failed',
+          durationMs: elapsed,
+          inputSummary: `Retomada a partir do passo #${resumeTarget + 1}`,
+          outputSummary: result.error.slice(0, 320),
+        });
+        this.failRun(existing.run.id, result.error.slice(0, 500));
+        return this.getRunDetail(existing.run.id, userId);
+      }
+
+      const modelStep = this.recordStep({
+        runId: existing.run.id,
+        stepIndex: nextIndex++,
+        kind: 'model',
+        title: `Continuação executada (${result.modelUsed || existing.run.model_used || 'auto'})`,
+        status: 'completed',
+        durationMs: elapsed,
+        inputSummary: `Contexto de ${priorSteps.length} passo(s) restaurado(s)`,
+        outputSummary: result.output.slice(0, 360),
+        checkpointPayload: {
+          resumed_from_step: resumeTarget,
+          model_used: result.modelUsed || existing.run.model_used,
+        },
+      });
+
+      if (result.artifact) {
+        await this.saveArtifact({
+          runId: existing.run.id,
+          sessionId: existing.run.session_id,
+          userId,
+          title: result.artifact.title,
+          filename: result.artifact.filename,
+          kind: result.artifact.kind,
+          content: result.artifact.content,
+          mimeType: result.artifact.mimeType,
+        });
+      }
+
+      const responseStep = this.recordStep({
+        runId: existing.run.id,
+        stepIndex: nextIndex++,
+        kind: 'response',
+        title: 'Entrega da retomada persistida',
+        status: 'completed',
+        durationMs: 2,
+        outputSummary: result.output.slice(0, 320),
+      });
+
+      const completed = this.store.updateAgentRun(existing.run.id, {
+        status: 'completed',
+        model_used: result.modelUsed || existing.run.model_used,
+        execution_mode: result.executionMode || existing.run.execution_mode,
+        error_message: null,
+        final_summary: result.output.slice(0, 2000),
+        checkpoint: {
+          resumed_from_step: resumeTarget,
+          model_step_id: modelStep.id,
+          last_step_id: responseStep.id,
+          resumed_at: new Date().toISOString(),
+        },
+        finished_at: new Date().toISOString(),
+      });
+      if (completed) {
+        this.emitter?.emit('run:completed', { run: completed });
+      }
+      return this.getRunDetail(existing.run.id, userId);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Erro ao executar continuação do checkpoint.';
+      this.recordStep({
+        runId: existing.run.id,
+        stepIndex: nextIndex++,
+        kind: 'model',
+        title: 'Falha na continuação do checkpoint',
+        status: 'failed',
+        durationMs: Math.max(1, Date.now() - startedMs),
+        outputSummary: errMsg.slice(0, 320),
+      });
+      this.failRun(existing.run.id, errMsg.slice(0, 500));
+      return this.getRunDetail(existing.run.id, userId);
+    }
   }
 }

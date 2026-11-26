@@ -193,12 +193,15 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
     handleSelectModel
   );
 
-  // Carrega execuções duráveis (runs + checkpoints) persistidas para a sessão ativa
+  // Carrega execuções duráveis (runs + checkpoints) da sessão ativa com fallback para execuções recentes/retomáveis da conta
   const loadSessionRuns = useCallback(async (sid: string, preferredRunId?: string) => {
-    if (!sid || sid.startsWith('new_')) return;
     setLoadingRuns(true);
     try {
-      const data = await fetchAgentRuns(sid, 20);
+      const hasConcreteSession = Boolean(sid && !sid.startsWith('new_'));
+      let data = await fetchAgentRuns(hasConcreteSession ? sid : undefined, 20);
+      if (hasConcreteSession && (!data.runs || data.runs.length === 0)) {
+        data = await fetchAgentRuns(undefined, 20);
+      }
       setSessionRuns(data.runs || []);
       setRecoverableRunsCount(data.recoverable_count || 0);
       const targetId = preferredRunId || data.runs?.[0]?.id;
@@ -216,7 +219,7 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
   }, []);
 
   useEffect(() => {
-    if (sessionId && sessionId !== 'default') {
+    if (sessionId) {
       void loadSessionRuns(sessionId);
     }
   }, [sessionId, loadSessionRuns]);
@@ -245,7 +248,10 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
             ? prev.map((r) => (r.id === resumed.run.id ? resumed.run : r))
             : [resumed.run, ...prev];
         });
-        notify('Execução retomada a partir do checkpoint salvo.', 'success');
+        fetchAgentRuns(undefined, 1)
+          .then((meta) => setRecoverableRunsCount(meta.recoverable_count || 0))
+          .catch(() => {});
+        notify('Execução retomada com continuidade real a partir do checkpoint salvo.', 'success');
       } catch (err: any) {
         notify(err?.message || 'Não foi possível retomar do checkpoint.', 'error');
       } finally {
@@ -889,6 +895,14 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
           resuming={resumingRun}
           onSelectRun={(runId) => void handleSelectRun(runId)}
           onResumeCheckpoint={(runId, stepIdx) => void handleResumeCheckpoint(runId, stepIdx)}
+          onRunDetailUpdated={(detail) => {
+            setActiveRunDetail(detail);
+            setSessionRuns((prev) =>
+              prev.some((r) => r.id === detail.run.id)
+                ? prev.map((r) => (r.id === detail.run.id ? detail.run : r))
+                : [detail.run, ...prev]
+            );
+          }}
           onRefresh={() => void loadSessionRuns(sessionId, activeRunDetail?.run?.id)}
           onClose={() => setWorkspaceOpen(false)}
         />

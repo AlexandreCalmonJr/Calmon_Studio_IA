@@ -116,6 +116,44 @@ export function getRunArtifactDownloadUrl(runId: string, artifactId: string): st
   return `${API_BASE}/chat/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}/download`;
 }
 
+export interface AgentRunStatsResponse {
+  total_runs: number;
+  completed_runs: number;
+  failed_runs: number;
+  recoverable_runs: number;
+  sandbox_steps: number;
+  mcp_steps: number;
+  artifacts_count: number;
+  avg_step_ms: number;
+  sandbox_driver: string;
+  storage_driver: string;
+  queue_driver: string;
+}
+
+export async function fetchAgentRunStatsApi(): Promise<AgentRunStatsResponse> {
+  const res = await apiFetch(`${API_BASE}/chat/runs/stats`);
+  return handleApiResponse<AgentRunStatsResponse>(res, 'Falha ao carregar métricas de execução.');
+}
+
+export async function executeRunSandboxStepApi(
+  runId: string,
+  command: string,
+  args: string[]
+): Promise<{
+  allowed: boolean;
+  reason?: string;
+  session: any;
+  step: AgentRunStepRecord;
+  detail: AgentRunDetailResponse;
+}> {
+  const res = await apiFetch(`${API_BASE}/chat/runs/${encodeURIComponent(runId)}/sandbox`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command, args }),
+  });
+  return handleApiResponse(res, 'Falha ao executar comando no Sandbox vinculado à execução.');
+}
+
 export async function streamChatMessage(
   prompt: string,
   projectId?: string,

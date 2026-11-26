@@ -28,12 +28,14 @@ import { createArtifactStorageAdapter } from '../infra/storageAdapter.ts';
 import { createDurableQueueAdapter } from '../infra/queueAdapter.ts';
 import { createPluggableSandboxRunner } from '../infra/sandboxRunner.ts';
 import { createMcpRuntimeSupervisor } from '../infra/mcpSupervisor.ts';
+import type { HubInfraRegistry } from '../infra/infraRegistry.ts';
 import {
   ChannelGatewayService,
   isValidChannelProvider,
   PersistentSchedulerService,
   verifyChannelWebhookToken,
 } from '../infra/channelsAndScheduler.ts';
+import { runHybridInference } from '../hybridAiEngine.ts';
 
 export interface BrainRouterDeps {
   store: LocalSqliteBrainStore;
@@ -52,6 +54,7 @@ export interface BrainRouterDeps {
   onActiveBrainChanged?: (profile: { name: string; baseUrl: string }) => void;
   laneQueue?: SessionLaneQueue;
   pythonWorker?: PythonWorkerBridge;
+  infra?: HubInfraRegistry;
 }
 
 export function createBrainRouter(deps: BrainRouterDeps): Router {
@@ -62,13 +65,90 @@ export function createBrainRouter(deps: BrainRouterDeps): Router {
   const pythonWorker = deps.pythonWorker || createPythonWorkerBridge();
 
   // Adaptadores Plugáveis das Fases 3 & 4 (Zero-Setup Local → Escala Produção por Ambiente)
-  const dbAdapter = createHubRepositoryAdapter(store);
-  const storageAdapter = createArtifactStorageAdapter(store.dataDir);
-  const durableQueue = createDurableQueueAdapter(store);
-  const sandboxRunner = createPluggableSandboxRunner(store, store.dataDir);
-  const mcpSupervisor = createMcpRuntimeSupervisor(store);
-  const schedulerService = new PersistentSchedulerService(store);
-  const channelGateway = new ChannelGatewayService(store);
+  const dbAdapter = deps.infra?.dbAdapter || createHubRepositoryAdapter(store);
+  const storageAdapter = deps.infra?.storageAdapter || createArtifactStorageAdapter(store.dataDir);
+  const durableQueue = deps.infra?.durableQueue || createDurableQueueAdapter(store);
+  const sandboxRunner = deps.infra?.sandboxRunner || createPluggableSandboxRunner(store, store.dataDir);
+  const mcpSupervisor = deps.infra?.mcpSupervisor || createMcpRuntimeSupervisor(store);
+  const schedulerService = new PersistentSchedulerService(store, {
+    jobExecutor: async (job) => {
+      if (job.target_type === 'mcp_tool') {
+        const [maybeServerId, maybeTool] = job.target_ref.includes(':')
+          ? job.target_ref.split(':', 2)
+          : ['', job.target_ref];
+        const servers = store.listMcpServers().filter((s) => s.is_approved);
+        const targetServer = maybeServerId
+          ? servers.find((s) => s.id === maybeServerId)
+          : servers.find((s) => s.tools.some((t) => t.name === maybeTool));
+        if (!targetServer) {
+          return {
+            output: `Nenhum servidor MCP aprovado encontrado para a ferramenta "${job.target_ref}".`,
+            modelUsed: 'mcp_supervisor',
+            status: 'failed',
+          };
+        }
+        let parsedPayload: Record<string, unknown> = {};
+        try {
+          parsedPayload = JSON.parse(job.payload_json || '{}') as Record<string, unknown>;
+        } catch {
+          parsedPayload = {};
+        }
+        const res = await mcpSupervisor.invokeTool(targetServer, maybeTool, parsedPayload);
+        return { output: res.summary, modelUsed: `mcp:${targetServer.name}`, status: 'completed' };
+      }
+
+      if (deps.isGeminiConfigured()) {
+        try {
+          const inference = await runHybridInference({
+            prompt: job.target_ref,
+            systemInstruction: `Você é o Agendador Autônomo 24/7 do JARVIS AI Hub executando a rotina "${job.name}" (${job.cron_expr}). Responda de forma objetiva, acionável e em português.`,
+            geminiConnected: true,
+            routingPolicy: 'auto_hybrid',
+          });
+          return {
+            output: inference.text || `Rotina "${job.name}" concluída.`,
+            modelUsed: inference.modelUsed,
+            status: 'completed',
+          };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'provedor indisponível';
+          return {
+            output: `Rotina "${job.name}" executada com registro local (provedor indisponível: ${msg}).`,
+            modelUsed: 'scheduler_local_fallback',
+            status: 'completed',
+          };
+        }
+      }
+
+      return {
+        output: `Rotina "${job.name}" concluída em modo local (configure GEMINI_API_KEY ou Ollama para síntese IA automática).`,
+        modelUsed: 'scheduler_engine',
+        status: 'completed',
+      };
+    },
+  });
+  schedulerService.startDaemon(30_000);
+
+  const channelGateway = new ChannelGatewayService(store, {
+    agentExecutor: async ({ binding, senderName, text }) => {
+      if (deps.isGeminiConfigured()) {
+        const inference = await runHybridInference({
+          prompt: text,
+          systemInstruction: `Você é o especialista @${binding.agent_role} do JARVIS AI Hub respondendo a ${senderName} via ${binding.provider.toUpperCase()} no workspace "${binding.workspace_slug}". Seja claro, seguro e conciso em português.`,
+          geminiConnected: true,
+          routingPolicy: 'auto_hybrid',
+        });
+        return {
+          reply: inference.text,
+          modelUsed: inference.modelUsed,
+        };
+      }
+      return {
+        reply: `[JARVIS @${binding.agent_role}] Mensagem de ${senderName} registrada no workspace "${binding.workspace_slug}". Configure um provedor de IA para respostas automáticas completas.`,
+        modelUsed: 'channel_local_fallback',
+      };
+    },
+  });
 
   const getUserIdFromReq = (req: express.Request): string => {
     const user = (req as express.Request & { jarvisUser?: { username?: string } }).jarvisUser;
@@ -704,49 +784,14 @@ export function createBrainRouter(deps: BrainRouterDeps): Router {
         return;
       }
 
-      if (server.transport === 'http') {
-        const probe = await probeBrainHealth(server.endpoint, false);
-        const tools: McpToolDescriptor[] =
-          probe.status === 'online'
-            ? [
-                {
-                  name: 'remote.health_check',
-                  description: 'Verifica status remoto do servidor MCP compatível',
-                  requires_approval: false,
-                  input_hint: '{}',
-                },
-              ]
-            : server.tools;
-        const updated = store.updateMcpServerDiscovery(
-          id,
-          probe.status === 'online' ? 'online' : 'standby',
-          tools
-        );
-        res.json({
-          server: updated,
-          servers: store.listMcpServers(),
-          detail: probe.detail,
-        });
-        return;
-      }
-
-      // Transporte stdio customizado: registra catálogo seguro pronto para ativação local
-      const discovered: McpToolDescriptor[] =
-        server.tools.length > 0
-          ? server.tools
-          : [
-              {
-                name: 'stdio.ping',
-                description: 'Verifica disponibilidade do conector stdio registrado',
-                requires_approval: false,
-                input_hint: '{}',
-              },
-            ];
-      const updated = store.updateMcpServerDiscovery(id, 'standby', discovered);
+      const discovery = await mcpSupervisor.discoverTools(server);
+      const persistStatus = discovery.status === 'online' ? 'online' : 'standby';
+      const updated = store.updateMcpServerDiscovery(id, persistStatus, discovery.tools);
       res.json({
         server: updated,
         servers: store.listMcpServers(),
-        detail: `Catálogo MCP atualizado (${discovered.length} ferramenta(s) declaradas).`,
+        detail: discovery.detail,
+        protocol: 'JSON-RPC 2.0',
       });
     } catch (err: any) {
       res.status(400).json({ error: err?.message || 'Falha ao descobrir ferramentas do servidor MCP.' });
@@ -818,12 +863,20 @@ export function createBrainRouter(deps: BrainRouterDeps): Router {
         });
         output = result;
         summary = `Snapshot "${result.filename}" gerado (${(result.size_bytes / 1024).toFixed(1)} KB)`;
+      } else if (!server.is_builtin) {
+        const rpcRes = await mcpSupervisor.invokeTool(
+          server,
+          toolName,
+          argsObj as Record<string, unknown>
+        );
+        output = rpcRes.output;
+        summary = rpcRes.summary;
       } else {
         output = {
           server: server.name,
           tool: toolName,
           status: 'acknowledged',
-          note: 'Ferramenta registrada e auditada pelo Gateway MCP.',
+          note: 'Ferramenta nativa registrada e auditada pelo Gateway MCP.',
         };
         summary = `Ferramenta "${toolName}" despachada via ${server.transport.toUpperCase()}`;
       }
@@ -966,18 +1019,34 @@ export function createBrainRouter(deps: BrainRouterDeps): Router {
 
   router.get('/infra/diagnostics', requireAuth, async (req, res) => {
     const probe = req.query.probe === 'true';
-    const [database, mcpRuntime] = await Promise.all([
+    const [database, queue, storage, sandbox, mcpRuntime] = await Promise.all([
       dbAdapter.getDiagnostics(probe),
+      durableQueue.getDiagnosticsAsync(probe),
+      storageAdapter.getDiagnosticsAsync
+        ? storageAdapter.getDiagnosticsAsync(probe)
+        : Promise.resolve(storageAdapter.getDiagnostics()),
+      sandboxRunner.getDiagnosticsAsync(probe),
       mcpSupervisor.listSupervisedStatus(probe),
     ]);
     res.json({
       database,
-      queue: durableQueue.getDiagnostics(),
-      storage: storageAdapter.getDiagnostics(),
-      sandbox: sandboxRunner.getDiagnostics(),
+      queue,
+      storage,
+      sandbox,
       mcp_runtime: mcpRuntime,
+      scheduler_daemon: schedulerService.getDaemonStatus(),
+      channel_outbound: channelGateway.getOutboundReadiness(),
       pgvector_schema_ddl: dbAdapter.getPgVectorSchemaDdl(),
     });
+  });
+
+  router.post('/infra/postgres/migrate', requireAuth, async (_req, res) => {
+    try {
+      const result = await dbAdapter.ensureSchema();
+      res.status(result.ok ? 200 : 503).json(result);
+    } catch (err: any) {
+      res.status(500).json({ ok: false, detail: err?.message || 'Falha ao aplicar schema PostgreSQL.' });
+    }
   });
 
   router.get('/sandbox/sessions', requireAuth, (req, res) => {
@@ -1008,9 +1077,31 @@ export function createBrainRouter(deps: BrainRouterDeps): Router {
     res.json({ runtime });
   });
 
+  router.get('/scheduler/status', requireAuth, (_req, res) => {
+    res.json({ daemon: schedulerService.getDaemonStatus() });
+  });
+
+  router.post('/scheduler/tick', requireAuth, async (_req, res) => {
+    try {
+      const result = await schedulerService.tickDueJobs();
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Falha ao executar ciclo do agendador.' });
+    }
+  });
+
+  router.post('/scheduler/toggle', requireAuth, (req, res) => {
+    const enabled = req.body?.enabled !== false;
+    const daemon = enabled ? schedulerService.startDaemon(30_000) : schedulerService.stopDaemon();
+    res.json({ daemon });
+  });
+
   router.get('/scheduler/jobs', requireAuth, (req, res) => {
     const userId = getUserIdFromReq(req);
-    res.json({ jobs: schedulerService.listJobs(userId) });
+    res.json({
+      jobs: schedulerService.listJobs(userId),
+      daemon: schedulerService.getDaemonStatus(),
+    });
   });
 
   router.post('/scheduler/jobs', requireAuth, (req, res) => {
@@ -1032,10 +1123,10 @@ export function createBrainRouter(deps: BrainRouterDeps): Router {
     }
   });
 
-  router.post('/scheduler/jobs/:id/run', requireAuth, (req, res) => {
+  router.post('/scheduler/jobs/:id/run', requireAuth, async (req, res) => {
     try {
       const userId = getUserIdFromReq(req);
-      const result = schedulerService.triggerJobNow(String(req.params.id), userId);
+      const result = await schedulerService.triggerJobNow(String(req.params.id), userId);
       res.json(result);
     } catch (err: any) {
       res.status(404).json({ error: err?.message || 'Agendamento não encontrado.' });
@@ -1050,7 +1141,10 @@ export function createBrainRouter(deps: BrainRouterDeps): Router {
 
   router.get('/channels/bindings', requireAuth, (req, res) => {
     const userId = getUserIdFromReq(req);
-    res.json({ bindings: channelGateway.listBindings(userId) });
+    res.json({
+      bindings: channelGateway.listBindings(userId),
+      outbound: channelGateway.getOutboundReadiness(),
+    });
   });
 
   router.post('/channels/bindings', requireAuth, (req, res) => {
@@ -1072,13 +1166,24 @@ export function createBrainRouter(deps: BrainRouterDeps): Router {
     }
   });
 
+  router.post('/channels/bindings/:id/test-reply', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserIdFromReq(req);
+      const sampleText = typeof req.body?.text === 'string' ? req.body.text.slice(0, 500) : undefined;
+      const result = await channelGateway.testOutboundDelivery(String(req.params.id), userId, sampleText);
+      res.json(result);
+    } catch (err: any) {
+      res.status(404).json({ error: err?.message || 'Vínculo de canal não encontrado.' });
+    }
+  });
+
   router.delete('/channels/bindings/:id', requireAuth, (req, res) => {
     const userId = getUserIdFromReq(req);
     const deleted = channelGateway.deleteBinding(String(req.params.id), userId);
     res.json({ deleted });
   });
 
-  router.post('/channels/webhook/:provider', (req, res) => {
+  router.post('/channels/webhook/:provider', async (req, res) => {
     const providerRaw = String(req.params.provider || '').trim().toLowerCase();
     if (!isValidChannelProvider(providerRaw)) {
       res.status(400).json({ error: 'Canal inválido.' });
@@ -1091,13 +1196,18 @@ export function createBrainRouter(deps: BrainRouterDeps): Router {
       return;
     }
     try {
-      const routed = channelGateway.routeInboundMessage({
+      const routed = await channelGateway.routeInboundMessage({
         provider: providerRaw,
         externalChatId: String(req.body?.external_chat_id || req.body?.chat_id || ''),
         senderName: String(req.body?.sender_name || 'Externo').slice(0, 80),
         text: String(req.body?.text || '').slice(0, 4000),
       });
-      res.json({ status: 'routed', run_id: routed.runId, user_id: routed.binding.user_id });
+      res.json({
+        status: 'routed',
+        run_id: routed.runId,
+        user_id: routed.binding.user_id,
+        delivery: routed.delivery,
+      });
     } catch (err: any) {
       res.status(404).json({ error: err?.message || 'Vínculo não encontrado.' });
     }

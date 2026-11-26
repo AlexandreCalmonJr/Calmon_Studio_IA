@@ -630,6 +630,32 @@ export interface McpRuntimeEntry {
   tools_count: number;
   last_heartbeat_at: string | null;
   last_error: string | null;
+  protocol_version?: string;
+}
+
+export interface SchedulerDaemonStatus {
+  running: boolean;
+  interval_ms: number;
+  started_at: string | null;
+  last_tick_at: string | null;
+  tick_count: number;
+  due_executed_count: number;
+  in_flight_jobs: number;
+  last_error: string | null;
+}
+
+export interface ChannelOutboundReadiness {
+  telegram: { configured: boolean; env_vars: string[] };
+  discord: { configured: boolean; env_vars: string[] };
+  slack: { configured: boolean; env_vars: string[] };
+  whatsapp: { configured: boolean; env_vars: string[] };
+}
+
+export interface OutboundDeliveryResult {
+  provider: 'telegram' | 'discord' | 'slack' | 'whatsapp';
+  status: 'sent' | 'skipped_unconfigured' | 'failed';
+  http_status?: number;
+  detail: string;
 }
 
 export interface InfrastructureDiagnosticsResponse {
@@ -639,16 +665,24 @@ export interface InfrastructureDiagnosticsResponse {
     postgres_configured: boolean;
     postgres_host_masked: string | null;
     postgres_reachable: boolean | null;
+    postgres_version?: string | null;
     pgvector_ready: boolean;
+    schema_initialized?: boolean;
     sqlite_journal_mode: string;
     sqlite_busy_timeout_ms: number;
     composite_indexes_count: number;
     recoverable_runs_count: number;
+    last_error?: string | null;
   };
   queue: {
     driver: 'sqlite_durable' | 'redis_distributed';
     driver_label: string;
     redis_configured: boolean;
+    redis_host_masked?: string | null;
+    redis_reachable?: boolean | null;
+    redis_latency_ms?: number | null;
+    distributed_locks_acquired?: number;
+    fallback_count?: number;
     active_lanes: number;
     pending_jobs: number;
     total_executed: number;
@@ -659,8 +693,12 @@ export interface InfrastructureDiagnosticsResponse {
     configured_provider: string;
     bucket: string | null;
     endpoint: string | null;
+    region?: string | null;
     base_dir: string | null;
     multi_replica_ready: boolean;
+    remote_reachable?: boolean | null;
+    remote_synced_count?: number;
+    sigv4_enabled?: boolean;
     status: 'ready' | 'configured_standby';
   };
   sandbox: {
@@ -669,9 +707,15 @@ export interface InfrastructureDiagnosticsResponse {
     allowlisted_binaries: string[];
     max_timeout_ms: number;
     container_mode_enabled: boolean;
+    docker_image?: string;
+    docker_available?: boolean | null;
+    docker_version?: string | null;
+    isolation_flags?: string[];
     workspace_root: string;
   };
   mcp_runtime: McpRuntimeEntry[];
+  scheduler_daemon?: SchedulerDaemonStatus;
+  channel_outbound?: ChannelOutboundReadiness;
   pgvector_schema_ddl: string;
 }
 
@@ -729,6 +773,19 @@ export async function fetchInfraDiagnosticsApi(probe = false): Promise<Infrastru
   return data;
 }
 
+export async function migratePostgresSchemaApi(): Promise<{
+  ok: boolean;
+  detail: string;
+  pgvector_ready: boolean;
+}> {
+  const res = await apiFetch(`${API_BASE}/brain/infra/postgres/migrate`, { method: 'POST' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok && typeof data.ok !== 'boolean') {
+    throw new Error(data.detail || data.error || 'Falha ao aplicar schema PostgreSQL.');
+  }
+  return data;
+}
+
 export async function fetchSandboxSessionsApi(): Promise<{
   diagnostics: InfrastructureDiagnosticsResponse['sandbox'];
   sessions: SandboxSessionItem[];
@@ -773,10 +830,36 @@ export async function fetchMcpRuntimeApi(probe = false): Promise<{ runtime: McpR
   return data;
 }
 
-export async function fetchScheduledJobsApi(): Promise<{ jobs: ScheduledJobItem[] }> {
+export async function fetchScheduledJobsApi(): Promise<{
+  jobs: ScheduledJobItem[];
+  daemon?: SchedulerDaemonStatus;
+}> {
   const res = await apiFetch(`${API_BASE}/brain/scheduler/jobs`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Falha ao listar rotinas agendadas.');
+  return data;
+}
+
+export async function tickSchedulerNowApi(): Promise<{
+  status: SchedulerDaemonStatus;
+  executed: Array<{ job: ScheduledJobItem; runId: string; outputSummary: string; status: string }>;
+}> {
+  const res = await apiFetch(`${API_BASE}/brain/scheduler/tick`, { method: 'POST' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Falha ao verificar fila do agendador 24/7.');
+  return data;
+}
+
+export async function toggleSchedulerDaemonApi(enabled: boolean): Promise<{
+  daemon: SchedulerDaemonStatus;
+}> {
+  const res = await apiFetch(`${API_BASE}/brain/scheduler/toggle`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Falha ao alternar daemon do agendador 24/7.');
   return data;
 }
 
@@ -799,7 +882,11 @@ export async function saveScheduledJobApi(input: {
   return data;
 }
 
-export async function runScheduledJobNowApi(id: string): Promise<{ job: ScheduledJobItem; runId: string }> {
+export async function runScheduledJobNowApi(id: string): Promise<{
+  job: ScheduledJobItem;
+  runId: string;
+  outputSummary?: string;
+}> {
   const res = await apiFetch(`${API_BASE}/brain/scheduler/jobs/${encodeURIComponent(id)}/run`, {
     method: 'POST',
   });
@@ -817,7 +904,10 @@ export async function deleteScheduledJobApi(id: string): Promise<{ deleted: bool
   return data;
 }
 
-export async function fetchChannelBindingsApi(): Promise<{ bindings: ChannelBindingItem[] }> {
+export async function fetchChannelBindingsApi(): Promise<{
+  bindings: ChannelBindingItem[];
+  outbound?: ChannelOutboundReadiness;
+}> {
   const res = await apiFetch(`${API_BASE}/brain/channels/bindings`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Falha ao listar canais conectados.');
@@ -840,6 +930,20 @@ export async function saveChannelBindingApi(input: {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Não foi possível conectar o canal.');
+  return data;
+}
+
+export async function testChannelOutboundApi(
+  id: string,
+  text?: string
+): Promise<{ binding: ChannelBindingItem; delivery: OutboundDeliveryResult }> {
+  const res = await apiFetch(`${API_BASE}/brain/channels/bindings/${encodeURIComponent(id)}/test-reply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(text ? { text } : {}),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Falha ao testar envio de saída no canal.');
   return data;
 }
 

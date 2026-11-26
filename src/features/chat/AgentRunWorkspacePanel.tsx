@@ -1,7 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Activity,
   AlertTriangle,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Copy,
   Cpu,
@@ -17,14 +20,25 @@ import {
   X,
 } from 'lucide-react';
 import {
+  executeRunSandboxStepApi,
+  fetchAgentRunStatsApi,
   getRunArtifactDownloadUrl,
   type AgentRunDetailResponse,
   type AgentRunRecord,
+  type AgentRunStatsResponse,
 } from '../../services/api/chat';
 import { execSandboxCommandApi, type SandboxSessionItem } from '../../services/api/brainServer';
 import { notify } from '../../shared/common/Toast';
 
 type WorkspaceTab = 'steps' | 'files' | 'context';
+
+const QUICK_SANDBOX_COMMANDS = [
+  { label: 'node -v', cmd: 'node -v' },
+  { label: 'python3', cmd: 'python3 --version' },
+  { label: 'ls -la', cmd: 'ls -la' },
+  { label: 'pwd', cmd: 'pwd' },
+  { label: 'git status', cmd: 'git status --short' },
+];
 
 interface AgentRunWorkspacePanelProps {
   runs: AgentRunRecord[];
@@ -33,6 +47,7 @@ interface AgentRunWorkspacePanelProps {
   resuming?: boolean;
   onSelectRun: (runId: string) => void;
   onResumeCheckpoint: (runId: string, fromStepIndex?: number) => void;
+  onRunDetailUpdated?: (detail: AgentRunDetailResponse) => void;
   onRefresh: () => void;
   onClose: () => void;
 }
@@ -67,6 +82,7 @@ export const AgentRunWorkspacePanel: React.FC<AgentRunWorkspacePanelProps> = ({
   resuming = false,
   onSelectRun,
   onResumeCheckpoint,
+  onRunDetailUpdated,
   onRefresh,
   onClose,
 }) => {
@@ -76,10 +92,21 @@ export const AgentRunWorkspacePanel: React.FC<AgentRunWorkspacePanelProps> = ({
   const [sandboxCmd, setSandboxCmd] = useState<string>('node -v');
   const [sandboxRunning, setSandboxRunning] = useState<boolean>(false);
   const [sandboxOutput, setSandboxOutput] = useState<SandboxSessionItem | null>(null);
+  const [stats, setStats] = useState<AgentRunStatsResponse | null>(null);
 
   const run = activeDetail?.run || null;
   const steps = activeDetail?.steps || [];
   const artifacts = activeDetail?.artifacts || [];
+
+  const reloadStats = () => {
+    fetchAgentRunStatsApi()
+      .then((data) => setStats(data))
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    reloadStats();
+  }, [run?.id, steps.length]);
 
   const inspectedStep = useMemo(() => {
     if (steps.length === 0) return null;
@@ -88,6 +115,21 @@ export const AgentRunWorkspacePanel: React.FC<AgentRunWorkspacePanelProps> = ({
     }
     return steps[steps.length - 1];
   }, [steps, selectedStepIdx]);
+
+  const inspectedPos = useMemo(() => {
+    if (!inspectedStep || steps.length === 0) return -1;
+    return steps.findIndex((s) => s.id === inspectedStep.id);
+  }, [steps, inspectedStep]);
+
+  const inspectedPayload = useMemo(() => {
+    if (!inspectedStep?.checkpoint_payload_json) return null;
+    try {
+      const parsed = JSON.parse(inspectedStep.checkpoint_payload_json);
+      return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
+  }, [inspectedStep]);
 
   const inspectedArtifact = useMemo(() => {
     if (artifacts.length === 0) return null;
@@ -102,16 +144,33 @@ export const AgentRunWorkspacePanel: React.FC<AgentRunWorkspacePanelProps> = ({
     [steps]
   );
 
-  const handleRunSandbox = async () => {
-    const tokens = sandboxCmd.trim().split(/\s+/).filter(Boolean);
+  const handleRunSandbox = async (overrideCmd?: string) => {
+    const raw = (overrideCmd ?? sandboxCmd).trim();
+    if (overrideCmd) setSandboxCmd(overrideCmd);
+    const tokens = raw.split(/\s+/).filter(Boolean);
     if (tokens.length === 0) return;
     setSandboxRunning(true);
     try {
       const [command, ...args] = tokens;
-      const res = await execSandboxCommandApi(command, args, { run_id: run?.id ?? null });
-      setSandboxOutput(res.session);
-      if (!res.allowed) {
-        notify(res.reason || 'Comando bloqueado pela allowlist do Sandbox.', 'warning');
+      if (run?.id) {
+        const res = await executeRunSandboxStepApi(run.id, command, args);
+        setSandboxOutput(res.session);
+        if (res.detail && onRunDetailUpdated) {
+          onRunDetailUpdated(res.detail);
+          setSelectedStepIdx(res.step.step_index);
+        }
+        reloadStats();
+        if (!res.allowed) {
+          notify(res.reason || 'Comando bloqueado pela allowlist do Sandbox.', 'warning');
+        } else {
+          notify(`Comando "${raw}" gravado como passo #${res.step.step_index + 1} na linha do tempo.`, 'success');
+        }
+      } else {
+        const res = await execSandboxCommandApi(command, args, { run_id: null });
+        setSandboxOutput(res.session);
+        if (!res.allowed) {
+          notify(res.reason || 'Comando bloqueado pela allowlist do Sandbox.', 'warning');
+        }
       }
     } catch (err: any) {
       notify(err?.message || 'Erro ao executar comando no Sandbox.', 'error');
@@ -216,6 +275,35 @@ export const AgentRunWorkspacePanel: React.FC<AgentRunWorkspacePanelProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Faixa compacta de observabilidade durável */}
+      {stats && (
+        <div
+          data-testid="workspace-observability-strip"
+          className="tabular-nums"
+          style={{
+            padding: '7px 14px',
+            borderBottom: '1px solid var(--border-subtle)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '8px',
+            fontSize: '0.71rem',
+            color: 'var(--text-muted)',
+            backgroundColor: 'var(--bg-tertiary)',
+          }}
+        >
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+            <Activity size={12} color="var(--accent-light)" />
+            <span>
+              {stats.total_runs} exec. · {stats.sandbox_steps + stats.mcp_steps} ferr. · {stats.artifacts_count} arq.
+            </span>
+          </span>
+          <span style={{ fontFamily: 'var(--font-mono)' }}>
+            {stats.avg_step_ms} ms/etapa
+          </span>
+        </div>
+      )}
 
       {/* Seletor de execuções da sessão (Replay histórico) */}
       {runs.length > 0 && (
@@ -331,6 +419,69 @@ export const AgentRunWorkspacePanel: React.FC<AgentRunWorkspacePanelProps> = ({
           </div>
         ) : tab === 'steps' ? (
           <>
+            {/* Controle de Replay Passo a Passo */}
+            {steps.length > 1 && inspectedPos >= 0 && (
+              <div
+                data-testid="workspace-replay-scrubber"
+                style={{
+                  padding: '8px 10px',
+                  borderRadius: '10px',
+                  border: '1px solid var(--border-subtle)',
+                  backgroundColor: 'var(--bg-surface)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                  <span className="tabular-nums" style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                    Replay · Etapa {inspectedPos + 1} de {steps.length}
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <button
+                      type="button"
+                      data-testid="workspace-replay-prev"
+                      className="btn btn-ghost btn-xs"
+                      disabled={inspectedPos <= 0}
+                      onClick={() => setSelectedStepIdx(steps[inspectedPos - 1].step_index)}
+                      aria-label="Etapa anterior no replay"
+                    >
+                      <ChevronLeft size={13} />
+                      <span>Anterior</span>
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="workspace-replay-next"
+                      className="btn btn-ghost btn-xs"
+                      disabled={inspectedPos >= steps.length - 1}
+                      onClick={() => setSelectedStepIdx(steps[inspectedPos + 1].step_index)}
+                      aria-label="Próxima etapa no replay"
+                    >
+                      <span>Próximo</span>
+                      <ChevronRight size={13} />
+                    </button>
+                  </div>
+                </div>
+                <div
+                  style={{
+                    height: '4px',
+                    borderRadius: '999px',
+                    backgroundColor: 'var(--border-subtle)',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${Math.round(((inspectedPos + 1) / steps.length) * 100)}%`,
+                      height: '100%',
+                      backgroundColor: 'var(--accent-primary)',
+                      transition: 'width 160ms ease',
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
             {/* Lista de Passos / Checkpoints */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               {steps.map((step) => {
@@ -447,8 +598,8 @@ export const AgentRunWorkspacePanel: React.FC<AgentRunWorkspacePanelProps> = ({
                     disabled={resuming}
                     onClick={() => onResumeCheckpoint(run.id, inspectedStep.step_index)}
                   >
-                    <RotateCcw size={12} />
-                    <span>{resuming ? 'Retomando...' : 'Retomar deste checkpoint'}</span>
+                    {resuming ? <Loader2 size={12} className="spin" /> : <RotateCcw size={12} />}
+                    <span>{resuming ? 'Executando retomada...' : 'Retomar deste checkpoint'}</span>
                   </button>
                 </div>
 
@@ -460,6 +611,60 @@ export const AgentRunWorkspacePanel: React.FC<AgentRunWorkspacePanelProps> = ({
                 {inspectedStep.output_summary && (
                   <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
                     <strong style={{ color: 'var(--text-primary)' }}>Resultado:</strong> {inspectedStep.output_summary}
+                  </div>
+                )}
+                {(inspectedStep.kind === 'sandbox' || inspectedStep.kind === 'mcp') && inspectedPayload && (
+                  <pre
+                    data-testid="workspace-tool-output"
+                    style={{
+                      margin: 0,
+                      padding: '8px 10px',
+                      borderRadius: '8px',
+                      fontSize: '0.71rem',
+                      lineHeight: 1.45,
+                      fontFamily: 'var(--font-mono)',
+                      backgroundColor: 'var(--code-bg, var(--bg-input))',
+                      color:
+                        inspectedStep.status === 'completed'
+                          ? 'var(--code-text, var(--text-primary))'
+                          : 'var(--danger-text)',
+                      maxHeight: '150px',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                    }}
+                  >
+                    {inspectedStep.kind === 'sandbox'
+                      ? `[${String(inspectedPayload.driver || 'sandbox')} · exit ${inspectedPayload.exit_code ?? 'bloqueado'}]\n${String(
+                          inspectedPayload.stdout_excerpt ||
+                            inspectedPayload.stderr_excerpt ||
+                            inspectedStep.output_summary ||
+                            '(sem saída)'
+                        )}`
+                      : `[MCP · ${String(inspectedPayload.server_name || 'servidor')} → ${String(
+                          inspectedPayload.tool_name || 'tool'
+                        )}]\n${String(
+                          inspectedPayload.output_excerpt ||
+                            inspectedPayload.error ||
+                            inspectedStep.output_summary ||
+                            '(sem saída)'
+                        )}`}
+                  </pre>
+                )}
+                {run.final_summary && (
+                  <div
+                    data-testid="workspace-final-summary"
+                    style={{
+                      marginTop: '2px',
+                      paddingTop: '8px',
+                      borderTop: '1px solid var(--border-subtle)',
+                      fontSize: '0.73rem',
+                      color: 'var(--text-secondary)',
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    <strong style={{ color: 'var(--text-primary)' }}>Síntese atual ({run.model_used || 'auto'}):</strong>{' '}
+                    {run.final_summary.slice(0, 320)}
                   </div>
                 )}
               </div>
@@ -621,9 +826,33 @@ export const AgentRunWorkspacePanel: React.FC<AgentRunWorkspacePanelProps> = ({
                 gap: '8px',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.76rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                <Terminal size={13} color="var(--accent-light)" />
-                <span>Sandbox Confinado (Allowlist)</span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', fontSize: '0.76rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <Terminal size={13} color="var(--accent-light)" />
+                  <span>Sandbox Confinado (Allowlist)</span>
+                </span>
+                <span style={{ fontSize: '0.68rem', fontWeight: 500, color: 'var(--text-muted)' }}>
+                  {stats?.sandbox_driver === 'docker_ephemeral' ? 'Docker Efêmero' : 'Local Confinado'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+                {QUICK_SANDBOX_COMMANDS.map((q) => (
+                  <button
+                    key={q.cmd}
+                    type="button"
+                    className="btn btn-ghost btn-xs"
+                    disabled={sandboxRunning}
+                    onClick={() => void handleRunSandbox(q.cmd)}
+                    style={{
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: '0.69rem',
+                      padding: '3px 7px',
+                      border: '1px solid var(--border-subtle)',
+                    }}
+                  >
+                    {q.label}
+                  </button>
+                ))}
               </div>
               <div style={{ display: 'flex', gap: '6px' }}>
                 <input
@@ -649,6 +878,7 @@ export const AgentRunWorkspacePanel: React.FC<AgentRunWorkspacePanelProps> = ({
                 />
                 <button
                   type="button"
+                  data-testid="workspace-sandbox-run-btn"
                   className="btn btn-primary btn-xs"
                   disabled={sandboxRunning}
                   onClick={() => void handleRunSandbox()}
@@ -657,8 +887,13 @@ export const AgentRunWorkspacePanel: React.FC<AgentRunWorkspacePanelProps> = ({
                   <span>{sandboxRunning ? '...' : 'Rodar'}</span>
                 </button>
               </div>
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                Dica: no chat, use <code style={{ fontFamily: 'var(--font-mono)' }}>/sandbox node -v</code> ou{' '}
+                <code style={{ fontFamily: 'var(--font-mono)' }}>/mcp ferramenta</code> para acionar ferramentas ao vivo na linha do tempo.
+              </div>
               {sandboxOutput && (
                 <pre
+                  data-testid="workspace-sandbox-terminal-output"
                   style={{
                     margin: 0,
                     padding: '8px 10px',
@@ -672,7 +907,7 @@ export const AgentRunWorkspacePanel: React.FC<AgentRunWorkspacePanelProps> = ({
                     whiteSpace: 'pre-wrap',
                   }}
                 >
-                  {`$ ${sandboxOutput.command} (${sandboxOutput.status} · ${sandboxOutput.duration_ms} ms)\n${sandboxOutput.stdout_excerpt || sandboxOutput.stderr_excerpt || '(sem saída)'}`}
+                  {`$ ${sandboxOutput.command} (${sandboxOutput.driver} · ${sandboxOutput.status} · ${sandboxOutput.duration_ms} ms)\n${sandboxOutput.stdout_excerpt || sandboxOutput.stderr_excerpt || '(sem saída)'}`}
                 </pre>
               )}
             </div>

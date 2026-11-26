@@ -31,16 +31,22 @@ import {
 import type { LocalSqliteBrainStore } from '../brain/sqliteBrainStore.ts';
 import { serverRateLimit, RATE_LIMITS, getClientIp } from '../rateLimiter.ts';
 import { DurableRunEngine } from '../durableRunEngine.ts';
-import { createArtifactStorageAdapter } from '../infra/storageAdapter.ts';
+import { createHubInfraRegistry, type HubInfraRegistry } from '../infra/infraRegistry.ts';
+import {
+  computeRunObservabilityStats,
+  executeAutonomousToolLoop,
+} from '../agentToolLoop.ts';
 
 export interface ChatRouterDeps {
   store: LocalSqliteBrainStore;
+  infra?: HubInfraRegistry;
 }
 
 export function createChatRouter(deps: ChatRouterDeps): Router {
   const router = express.Router();
   const { store } = deps;
-  const storageAdapter = createArtifactStorageAdapter(store.dataDir);
+  const infra = deps.infra || createHubInfraRegistry(store);
+  const storageAdapter = infra.storageAdapter;
   const durableRuns = new DurableRunEngine({
     store,
     storage: storageAdapter,
@@ -494,6 +500,32 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
         .slice(0, 3);
 
       const multiAgentNotes: string[] = [];
+
+      // Prioridade 3: Loop autônomo de ferramentas (Sandbox + MCP aprovados) com streaming vivo de passos e log
+      const toolLoop = await executeAutonomousToolLoop({
+        prompt,
+        runId: durableRun.id,
+        sessionId,
+        userId: ownerUserId,
+        startStepIndex: stepCursor,
+        store,
+        durableRuns,
+        sandboxRunner: infra.sandboxRunner,
+        mcpSupervisor: infra.mcpSupervisor,
+        onStep: (step) => sendEvent({ type: 'run_step', run_id: durableRun.id, step }),
+        onArtifact: (artifact) => sendEvent({ type: 'run_artifact', run_id: durableRun.id, artifact }),
+      });
+      if (toolLoop.executedCount > 0) {
+        stepCursor += toolLoop.steps.length;
+        if (toolLoop.evidencePromptBlock) {
+          multiAgentNotes.push(toolLoop.evidencePromptBlock);
+        }
+        sendEvent({
+          type: 'status',
+          message: `${toolLoop.executedCount} ferramenta(s) executada(s) em Sandbox/MCP · sintetizando resposta...`,
+        });
+      }
+
       if (secondarySpecs.length > 0) {
         multiAgentNotes.push(
           `Plano de Multi-Orquestração (${orchestrationPlan.mode}):\n` +
@@ -807,6 +839,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
         classified_intent: orchestrationPlan.mode === 'deep_research' ? 'deep_research' : primaryAgent.category || 'general_assistance',
         plan_steps: [
           ...orchestrationPlan.steps,
+          ...toolLoop.summaryLines,
           allSkillsUsed.length > 0
             ? `Habilidades ativas injetadas: ${allSkillsUsed.map((s) => s.name).join(', ')}`
             : 'Executado com persona e diretivas do especialista',
@@ -941,6 +974,18 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
     });
   });
 
+  router.get('/chat/runs/stats', requireAuth, (req: Request, res: Response) => {
+    const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
+    const ownerUserId = user?.username || 'admin';
+    const stats = computeRunObservabilityStats(store, ownerUserId);
+    res.json({
+      ...stats,
+      sandbox_driver: infra.sandboxRunner.driver,
+      storage_driver: infra.storageAdapter.driver,
+      queue_driver: infra.durableQueue.driver,
+    });
+  });
+
   router.get('/chat/runs/:runId', requireAuth, (req: Request, res: Response) => {
     const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
     const ownerUserId = user?.username || 'admin';
@@ -952,12 +997,139 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
     res.json(detail);
   });
 
-  router.post('/chat/runs/:runId/resume', requireAuth, (req: Request, res: Response) => {
+  router.post('/chat/runs/:runId/sandbox', requireAuth, async (req: Request, res: Response) => {
+    const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
+    const ownerUserId = user?.username || 'admin';
+    const existing = durableRuns.getRunDetail(req.params.runId, ownerUserId);
+    if (!existing) {
+      res.status(404).json({ detail: 'Execução não encontrada ou sem permissão de acesso.' });
+      return;
+    }
+    const command = String(req.body?.command || '').trim();
+    const args = Array.isArray(req.body?.args) ? req.body.args.map((a: unknown) => String(a)) : [];
+    if (!command) {
+      res.status(400).json({ detail: 'Informe um comando permitido para executar no Sandbox.' });
+      return;
+    }
+    const execRes = await infra.sandboxRunner.execute({
+      userId: ownerUserId,
+      runId: existing.run.id,
+      command,
+      args,
+    });
+    const displayCmd = [command, ...args].join(' ').trim();
+    const outputText = (
+      execRes.session.stdout_excerpt ||
+      execRes.session.stderr_excerpt ||
+      execRes.reason ||
+      '(sem saída)'
+    ).trim();
+    const step = durableRuns.recordStep({
+      runId: existing.run.id,
+      stepIndex: existing.steps.length,
+      kind: 'sandbox',
+      title: `Sandbox · ${displayCmd.slice(0, 48)}`,
+      status: execRes.allowed && execRes.session.status === 'completed' ? 'completed' : 'failed',
+      durationMs: execRes.session.duration_ms,
+      inputSummary: `Terminal do Workspace (${execRes.session.driver})`,
+      outputSummary: outputText.slice(0, 360),
+      checkpointPayload: {
+        tool_kind: 'sandbox',
+        driver: execRes.session.driver,
+        command: displayCmd,
+        allowed: execRes.allowed,
+        exit_code: execRes.session.exit_code,
+        stdout_excerpt: execRes.session.stdout_excerpt.slice(0, 1800),
+        stderr_excerpt: execRes.session.stderr_excerpt.slice(0, 900),
+        sandbox_session_id: execRes.session.id,
+      },
+    });
+    const detail = durableRuns.getRunDetail(existing.run.id, ownerUserId);
+    res.json({
+      allowed: execRes.allowed,
+      reason: execRes.reason,
+      session: execRes.session,
+      step,
+      detail,
+    });
+  });
+
+  router.post('/chat/runs/:runId/resume', requireAuth, async (req: Request, res: Response) => {
     const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
     const ownerUserId = user?.username || 'admin';
     const fromStepIndex =
       typeof req.body?.from_step_index === 'number' ? req.body.from_step_index : undefined;
-    const detail = durableRuns.resumeRunFromCheckpoint(req.params.runId, ownerUserId, fromStepIndex);
+
+    const detail = await durableRuns.resumeRunFromCheckpoint(
+      req.params.runId,
+      ownerUserId,
+      fromStepIndex,
+      {
+        executeContinuation: async ({ run, resumeFromStep, priorSteps }) => {
+          const priorContext = priorSteps
+            .map(
+              (s) =>
+                `#${s.step_index + 1} [${s.kind}] ${s.title}: ${s.output_summary || s.input_summary || s.status}`
+            )
+            .join('\n');
+          const continuationPrompt = [
+            `Retomada de execução durável a partir do checkpoint #${resumeFromStep + 1}.`,
+            `Solicitação original: ${run.prompt}`,
+            priorContext ? `Passos já concluídos:\n${priorContext}` : '',
+            'Continue e conclua a entrega de forma clara e objetiva em português.',
+          ]
+            .filter(Boolean)
+            .join('\n\n');
+
+          const requestedModel = run.model_used || serverState.defaultOnlineModel || 'gemini-4-hydrogen';
+          const externalProvider = resolveExternalCredentialForRequest(
+            req,
+            store,
+            ownerUserId,
+            requestedModel
+          );
+          const geminiReady = Boolean((process.env.GEMINI_API_KEY || '').trim());
+
+          const ollamaConnected = Boolean(serverState.providerConnectivity?.ollama_connected);
+          const ollamaBaseUrl = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
+
+          if (!geminiReady && !externalProvider && !ollamaConnected) {
+            return {
+              output: `Checkpoint #${resumeFromStep + 1} restaurado para "${run.prompt.slice(0, 100)}". Contexto íntegro (${priorSteps.length} passo(s) preservados); configure GEMINI_API_KEY, Ollama ou um provedor externo para re-executar a inferência IA.`,
+              modelUsed: 'checkpoint_local_replay',
+              executionMode: 'LOCAL',
+            };
+          }
+
+          try {
+            const inference = await runHybridInference({
+              prompt: continuationPrompt,
+              systemInstruction: `Você é ${run.agent_name} (@${run.agent_role}) retomando uma execução interrompida a partir de um checkpoint persistido no banco do JARVIS AI Hub.`,
+              requestedModel,
+              routingPolicy: serverState.aiRoutingPolicy,
+              ollamaBaseUrl,
+              ollamaConnected,
+              geminiConnected: geminiReady,
+              externalProvider,
+              agentName: run.agent_name,
+            });
+            return {
+              output: inference.text || 'Retomada concluída.',
+              modelUsed: inference.modelUsed,
+              executionMode: inference.executionMode,
+            };
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : 'provedor indisponível';
+            return {
+              output: `Checkpoint #${resumeFromStep + 1} restaurado (${priorSteps.length} passo(s) preservados). A chamada ao provedor de IA não pôde ser concluída agora (${msg}).`,
+              modelUsed: 'checkpoint_local_fallback',
+              executionMode: 'LOCAL',
+            };
+          }
+        },
+      }
+    );
+
     if (!detail) {
       res.status(404).json({ detail: 'Execução não encontrada para retomada.' });
       return;
