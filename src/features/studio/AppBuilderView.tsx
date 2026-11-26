@@ -20,6 +20,7 @@ import {
   CheckCircle2,
   Terminal,
 } from 'lucide-react';
+import { PageHeader } from '../../shared/layout/PageHeader';
 import {
   APP_BUILDER_PRESETS,
   AppPresetId,
@@ -298,118 +299,41 @@ export const AppBuilderView: React.FC = () => {
   }, [activeApp]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingBottom: '36px' }}>
-      {/* Cabeçalho Principal + Seletor de Plataforma */}
-      <section
-        className="jarvis-settings-card"
-        style={{
-          padding: '22px 24px',
-          display: 'flex',
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '18px',
-          background:
-            'linear-gradient(135deg, rgba(249, 115, 22, 0.08) 0%, rgba(15, 19, 28, 0.96) 55%, rgba(15, 19, 28, 1) 100%)',
-          borderColor: 'rgba(249, 115, 22, 0.24)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', flex: '1 1 420px', maxWidth: '640px' }}>
-          <div
-            style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '12px',
-              background: 'linear-gradient(135deg, #f97316 0%, #c2410c 100%)',
-              color: '#ffffff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-              boxShadow: '0 8px 20px rgba(249, 115, 22, 0.28)',
-            }}
-          >
-            <AppWindow size={22} />
-          </div>
-          <div>
-            <h1
-              style={{
-                margin: 0,
-                fontSize: '1.28rem',
-                fontWeight: 700,
-                color: 'var(--text-primary)',
-                letterSpacing: '-0.02em',
-              }}
-            >
-              Construtor de Apps — Android &amp; Windows
-            </h1>
-            <p
-              style={{
-                margin: '6px 0 0',
-                fontSize: '0.88rem',
-                color: 'var(--text-secondary)',
-                lineHeight: 1.5,
-              }}
-            >
-              Escolha um modelo pronto ou descreva seu aplicativo em português. Teste ao vivo na prévia
-              interativa e baixe o projeto completo em <strong>.zip</strong> pronto para gerar{' '}
-              <strong>.apk (Android)</strong> e <strong>.exe (Windows)</strong>.
-            </p>
-          </div>
-        </div>
+    <div className="jarvis-settings-container is-wide" style={{ paddingBottom: '36px' }}>
+      <PageHeader
+        icon={<AppWindow size={18} />}
+        title="Construtor de Apps — Android & Windows"
+        subtitle="Escolha um modelo pronto ou descreva seu aplicativo em português. Teste ao vivo na prévia interativa e baixe o projeto completo em .zip pronto para gerar .apk (Android) e .exe (Windows)."
+      />
 
-        {/* Seletor de Plataforma Alvo */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flexShrink: 0 }}>
-          <span
-            style={{
-              fontSize: '0.72rem',
-              fontWeight: 600,
-              color: 'var(--text-muted)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-            }}
-          >
-            Plataforma de saída
-          </span>
-          <div
-            role="group"
-            aria-label="Selecionar plataforma do aplicativo"
-            style={{
-              display: 'inline-flex',
-              padding: '4px',
-              borderRadius: '10px',
-              backgroundColor: 'var(--bg-primary)',
-              border: '1px solid var(--border-color)',
-              gap: '4px',
-            }}
-          >
-            {(
-              [
-                { id: 'both', label: 'Android + Windows', icon: Layers },
-                { id: 'android', label: 'Android (.apk)', icon: Smartphone },
-                { id: 'windows', label: 'Windows (.exe)', icon: Monitor },
-              ] as const
-            ).map((opt) => {
-              const Icon = opt.icon;
-              const active = targetPlatform === opt.id;
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => setTargetPlatform(opt.id)}
-                  aria-pressed={active}
-                  className={active ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'}
-                  style={{ gap: '6px', whiteSpace: 'nowrap' }}
-                >
-                  <Icon size={14} />
-                  <span>{opt.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </section>
+      <div
+        role="group"
+        aria-label="Selecionar plataforma do aplicativo"
+        className="jarvis-settings-tabs"
+      >
+        {(
+          [
+            { id: 'both', label: 'Android + Windows', icon: Layers },
+            { id: 'android', label: 'Android (.apk)', icon: Smartphone },
+            { id: 'windows', label: 'Windows (.exe)', icon: Monitor },
+          ] as const
+        ).map((opt) => {
+          const Icon = opt.icon;
+          const active = targetPlatform === opt.id;
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => setTargetPlatform(opt.id)}
+              aria-pressed={active}
+              className={`jarvis-settings-tab-btn ${active ? 'is-active' : ''}`}
+            >
+              <Icon size={14} />
+              <span>{opt.label}</span>
+            </button>
+          );
+        })}
+      </div>
 
       {/* Modelos Prontos (1 Clique) */}
       <section style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>

@@ -32,6 +32,7 @@ import {
   saveAdminCustomPack,
 } from '../../services/api/packs';
 import { PackStudioUpdatesPanel } from './PackStudioUpdatesPanel';
+import { PageHeader } from '../../shared/layout/PageHeader';
 
 interface PackStudioAdminViewProps {
   onNavigate: (tab: string) => void;
@@ -319,48 +320,42 @@ export const PackStudioAdminView: React.FC<PackStudioAdminViewProps> = ({ onNavi
   };
 
   return (
-    <div className="jarvis-studio-page">
-      <header className="jarvis-arch-header">
-        <div className="jarvis-arch-header-copy">
-          <div className="jarvis-kicker-text">
-            <span>Estúdio Dev & Admin</span>
-            <span aria-hidden="true"> · </span>
-            <span>Construtor de Pacotes Modulares</span>
-            <span aria-hidden="true"> · </span>
-            <span className="mono tabular-nums">{customPacks.length} publicado(s)</span>
+    <div className="jarvis-settings-container is-wide" style={{ paddingBottom: '36px' }}>
+      <PageHeader
+        icon={<Package size={18} />}
+        title="Estúdio de Pacotes & Módulos"
+        subtitle="Monte pacotes completos sob medida combinando telas da navegação lateral, agentes especialistas com núcleo próprio, habilidades, presets MCP e trilhas de estudo. Tudo publicado aqui aparece imediatamente na Loja de Pacotes."
+        meta={[
+          <span key="published-count" className="jarvis-tabular" style={{ fontFamily: 'var(--font-mono)' }}>
+            {customPacks.length} publicado(s)
+          </span>,
+        ]}
+        actions={
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => onNavigate('brain_server')}
+            >
+              <Server size={14} />
+              <span>Cérebros &amp; Servidor</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => onNavigate('store')}
+            >
+              <Package size={14} />
+              <span>Ver na Loja de Pacotes</span>
+              <ArrowUpRight size={14} />
+            </button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={resetForm}>
+              <Plus size={14} />
+              <span>Novo Pacote</span>
+            </button>
           </div>
-          <h1 className="jarvis-arch-title">Estúdio de Pacotes & Módulos</h1>
-          <p className="jarvis-arch-subtitle">
-            Monte pacotes completos sob medida combinando telas da navegação lateral, agentes
-            especialistas com núcleo próprio, habilidades, presets MCP e trilhas de estudo. Tudo
-            publicado aqui aparece imediatamente na Loja de Pacotes.
-          </p>
-        </div>
-
-        <div className="jarvis-arch-header-actions">
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => onNavigate('brain_server')}
-          >
-            <Server size={16} />
-            <span>Cérebros &amp; Servidor</span>
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => onNavigate('store')}
-          >
-            <Package size={16} />
-            <span>Ver na Loja de Pacotes</span>
-            <ArrowUpRight size={15} />
-          </button>
-          <button type="button" className="btn btn-ghost" onClick={resetForm}>
-            <Plus size={16} />
-            <span>Novo Pacote</span>
-          </button>
-        </div>
-      </header>
+        }
+      />
 
       {error && (
         <div className="jarvis-inline-alert is-error" role="alert">

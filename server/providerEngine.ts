@@ -391,6 +391,7 @@ export interface ResolvedExternalCredential {
 
 export function getEnvProviderCredential(provider: ExternalProviderId): ResolvedExternalCredential | null {
   const meta = EXTERNAL_PROVIDERS[provider];
+  if (!meta) return null;
   const apiKey = (process.env[meta.envVar] || '').trim();
   if (!apiKey) return null;
 

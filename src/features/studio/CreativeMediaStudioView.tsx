@@ -17,6 +17,7 @@ import {
   Table2,
   Layers,
 } from 'lucide-react';
+import { PageHeader } from '../../shared/layout/PageHeader';
 import {
   SPREADSHEET_PRESETS,
   SpreadsheetPresetInfo,
@@ -346,98 +347,49 @@ export const CreativeMediaStudioView: React.FC = () => {
   const currentSheet = activeSheetDoc?.sheets[activeSheetIdx] || activeSheetDoc?.sheets[0] || null;
 
   return (
-    <section
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '20px',
-        paddingBottom: '28px',
-      }}
-    >
-      {/* Header do Estúdio */}
-      <div className="jarvis-studio-hero">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}>
-          <div
-            style={{
-              width: '46px',
-              height: '46px',
-              borderRadius: '14px',
-              background: 'var(--btn-primary-bg)',
-              color: '#ffffff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-              boxShadow: '0 6px 16px -4px var(--accent-glow)',
-            }}
-          >
-            <Wand2 size={22} />
-          </div>
-          <div style={{ minWidth: 0 }}>
-            <h1
-              style={{
-                margin: 0,
-                fontSize: '1.3rem',
-                fontWeight: 700,
-                color: 'var(--text-primary)',
-                letterSpacing: '-0.02em',
-              }}
-            >
-              Estúdio Criativo — Planilhas, Imagens & Vídeos
-            </h1>
-            <p
-              style={{
-                margin: '4px 0 0',
-                fontSize: '0.86rem',
-                color: 'var(--text-secondary)',
-              }}
-            >
-              Gere planilhas Excel reais (.xlsx) com fórmulas automáticas via Iris, crie ou edite imagens com Kauan e produza vídeos curtos com Enzo.
-            </p>
-          </div>
-        </div>
+    <section className="jarvis-settings-container is-wide" style={{ paddingBottom: '28px' }}>
+      <PageHeader
+        icon={<Wand2 size={18} />}
+        title="Estúdio Criativo — Planilhas, Imagens & Vídeos"
+        subtitle="Gere planilhas Excel reais (.xlsx) com fórmulas automáticas via Iris, crie ou edite imagens com Kauan e produza vídeos curtos com Enzo."
+      />
 
-        {/* Seletor de 3 Abas Principais */}
-        <div
-          role="tablist"
-          aria-label="Módulos do Estúdio Criativo"
-          className="jarvis-segmented"
-          style={{ flexWrap: 'wrap' }}
+      {/* Seletor de 3 Abas Principais */}
+      <div
+        role="tablist"
+        aria-label="Módulos do Estúdio Criativo"
+        className="jarvis-settings-tabs"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'spreadsheets'}
+          onClick={() => setActiveTab('spreadsheets')}
+          className={`jarvis-settings-tab-btn ${activeTab === 'spreadsheets' ? 'is-active' : ''}`}
         >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'spreadsheets'}
-            onClick={() => setActiveTab('spreadsheets')}
-            className={`jarvis-segmented-btn ${activeTab === 'spreadsheets' ? 'is-active' : ''}`}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-          >
-            <FileSpreadsheet size={15} />
-            <span>Planilhas ({spreadsheets.length})</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'images'}
-            onClick={() => setActiveTab('images')}
-            className={`jarvis-segmented-btn ${activeTab === 'images' ? 'is-active' : ''}`}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-          >
-            <ImageIcon size={15} />
-            <span>Imagens ({images.length})</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'videos'}
-            onClick={() => setActiveTab('videos')}
-            className={`jarvis-segmented-btn ${activeTab === 'videos' ? 'is-active' : ''}`}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-          >
-            <Film size={15} />
-            <span>Vídeos ({videos.length})</span>
-          </button>
-        </div>
+          <FileSpreadsheet size={14} />
+          <span>Planilhas ({spreadsheets.length})</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'images'}
+          onClick={() => setActiveTab('images')}
+          className={`jarvis-settings-tab-btn ${activeTab === 'images' ? 'is-active' : ''}`}
+        >
+          <ImageIcon size={14} />
+          <span>Imagens ({images.length})</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'videos'}
+          onClick={() => setActiveTab('videos')}
+          className={`jarvis-settings-tab-btn ${activeTab === 'videos' ? 'is-active' : ''}`}
+        >
+          <Film size={14} />
+          <span>Vídeos ({videos.length})</span>
+        </button>
       </div>
 
       {/* ================= ABA 1: PLANILHAS EXCEL (.XLSX / .CSV) ================= */}

@@ -104,6 +104,13 @@ export function resolveAgentTargetModel(input: {
       fallbackModel: fallbackCandidate,
     };
   }
+  if (input.agentCore?.primary_provider === 'ollama') {
+    return {
+      requestedModel: 'calmon-ia:latest',
+      source: 'agent_core',
+      fallbackModel: fallbackCandidate,
+    };
+  }
 
   const preferredModel = String(input.agentPreferredModel || '').trim();
   if (preferredModel && !isAutoModelSelection(preferredModel)) {

@@ -1525,6 +1525,7 @@ export const resolveExternalCredentialForRequest = (
   const inferredProvider = explicitProvider || inferExternalProviderFromModel(requestedModel);
 
   const resolveFromProvider = (prov: ExternalProviderId): ResolvedExternalCredential | null => {
+    if (!EXTERNAL_PROVIDERS[prov]) return null;
     const dbRec = store.getEncryptedProviderVaultRecord(ownerUserId, prov);
     if (dbRec && dbRec.is_active) {
       try {

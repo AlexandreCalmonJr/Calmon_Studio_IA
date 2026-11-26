@@ -11,7 +11,6 @@ import {
   Smartphone,
   Power,
   Layers,
-  Sparkles,
   Cpu,
   RefreshCw,
   Search,
@@ -101,14 +100,27 @@ const ArchitectureAgentView = lazy(() =>
 
 const EMBEDDED_SETTINGS_TABS = new Set([
   'providers',
-  'companion',
   'security',
-  'android_app',
-  'brain_server',
   'server_logs',
-  'usage',
   'architecture',
 ]);
+
+const WIDE_SETTINGS_TABS = new Set([
+  'providers',
+  'security',
+  'server_logs',
+  'architecture',
+  'server',
+]);
+
+function normalizeInitialSettingsTab(tab: string): string {
+  if (tab === 'companion') return 'voice';
+  if (tab === 'android_app') return 'mobile';
+  if (tab === 'brain_server') return 'server';
+  if (tab === 'usage') return 'server_logs';
+  if (tab === 'island' || tab === 'dock') return 'behavior';
+  return tab;
+}
 
 interface SettingsViewProps {
   initialSubTab?: string;
@@ -127,7 +139,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onAskArchitect,
   canManagePacks = false,
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<string>(initialSubTab);
+  const [activeSubTab, setActiveSubTab] = useState<string>(() => normalizeInitialSettingsTab(initialSubTab));
+  const [voiceSubMode, setVoiceSubMode] = useState<'voice' | 'companion'>(() =>
+    initialSubTab === 'companion' ? 'companion' : 'voice'
+  );
+  const [mobileSubMode, setMobileSubMode] = useState<'pairing' | 'android_app'>(() =>
+    initialSubTab === 'android_app' ? 'android_app' : 'pairing'
+  );
+  const [serverSubMode, setServerSubMode] = useState<'diagnostics' | 'brain_server'>(() =>
+    initialSubTab === 'brain_server' ? 'brain_server' : 'diagnostics'
+  );
+  const [logsSubMode, setLogsSubMode] = useState<'logs' | 'usage'>(() =>
+    initialSubTab === 'usage' ? 'usage' : 'logs'
+  );
   const [searchTerm, setSearchTerm] = useState('');
   const [showAdvancedInSimple, setShowAdvancedInSimple] = useState(false);
 
@@ -789,31 +813,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       items: [
         { id: 'general', label: 'Geral', icon: Settings },
         { id: 'appearance', label: 'Aparência', icon: Palette },
+        { id: 'voice', label: 'Voz & Áudio', icon: Mic },
         { id: 'notifications', label: 'Notificações', icon: Bell },
-        { id: 'voice', label: 'Voz', icon: Mic },
       ],
     },
     {
-      title: 'Conta',
+      title: 'Conta & Dispositivos',
       items: [
         { id: 'profile', label: 'Perfil', icon: User },
         { id: 'billing', label: 'Cobrança', icon: CreditCard },
-        { id: 'mobile', label: 'Conectar celular', icon: Smartphone },
+        { id: 'mobile', label: 'Celular & Mobile', icon: Smartphone },
       ],
     },
     {
-      title: 'Este computador',
+      title: 'IA & Workspace',
       items: [
         { id: 'providers', label: 'Modelos & Provedores', icon: Cpu },
-        { id: 'behavior', label: 'Comportamento do app', icon: Power },
+        { id: 'behavior', label: 'Comportamento & Dock', icon: Power },
         ...(isAdvancedVisible
-          ? [
-              { id: 'island', label: 'Dynamic Island', icon: Layers },
-              { id: 'computer', label: 'Uso do computador', icon: Cpu },
-            ]
+          ? [{ id: 'computer', label: 'Uso do computador', icon: Layers }]
           : []),
-        { id: 'dock', label: 'Dock de agentes', icon: Sparkles },
-        { id: 'updates', label: 'Atualizações', icon: RefreshCw },
       ],
     },
     ...(isAdvancedVisible
@@ -821,13 +840,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           {
             title: 'Sistema & Infraestrutura',
             items: [
-              { id: 'companion', label: 'Voz & Companion', icon: Radio },
+              { id: 'server', label: 'Servidor & Cérebro', icon: Server },
+              { id: 'server_logs', label: 'Logs & Custos', icon: Terminal },
               { id: 'security', label: 'Sentinela & Segurança', icon: ShieldCheck },
-              { id: 'android_app', label: 'App Mobile (Android)', icon: Smartphone },
-              { id: 'brain_server', label: 'Cérebro & Servidor', icon: Server },
-              { id: 'server_logs', label: 'Logs & Métricas', icon: Terminal },
-              { id: 'usage', label: 'Uso e Custos', icon: TrendingUp },
               { id: 'architecture', label: 'Arquitetura', icon: Compass },
+              { id: 'updates', label: 'Atualizações', icon: RefreshCw },
             ],
           },
         ]
@@ -936,7 +953,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   style={{ flexShrink: 0 }}
                 />
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  Servidor & Diagnóstico
+                  Servidor &amp; Cérebro
                 </span>
               </span>
               <ChevronRight size={13} color="var(--text-muted)" />
@@ -948,8 +965,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* Conteúdo Principal */}
       <main className="jarvis-settings-content">
         <div
-          className="jarvis-settings-container"
-          style={EMBEDDED_SETTINGS_TABS.has(activeSubTab) ? { maxWidth: 'none' } : undefined}
+          className={`jarvis-settings-container ${
+            WIDE_SETTINGS_TABS.has(activeSubTab) ||
+            (activeSubTab === 'voice' && voiceSubMode === 'companion') ||
+            (activeSubTab === 'mobile' && mobileSubMode === 'android_app')
+              ? 'is-wide'
+              : ''
+          }`}
         >
           {/* ================================================================= */}
           {/* ABA: GERAL                                                        */}
@@ -1433,15 +1455,53 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           )}
 
           {/* ================================================================= */}
-          {/* ABA: CONECTAR CELULAR                                             */}
+          {/* ABA UNIFICADA: CELULAR & MOBILE                                   */}
           {/* ================================================================= */}
           {activeSubTab === 'mobile' && (
             <>
               <PageHeader
                 icon={<Smartphone size={18} />}
-                title="Conectar Celular & Dispositivos Móveis"
-                subtitle="Conecte seu smartphone Android via QR Code instantâneo ou descoberta automática na rede local (LAN)."
+                title="Celular & Mobile"
+                subtitle="Conecte seu smartphone via QR Code / rede local (LAN) ou gerencie o aplicativo Android."
               />
+
+              <div className="jarvis-settings-tabs" role="tablist" aria-label="Modo de celular e mobile">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mobileSubMode === 'pairing'}
+                  onClick={() => setMobileSubMode('pairing')}
+                  className={`jarvis-settings-tab-btn ${mobileSubMode === 'pairing' ? 'is-active' : ''}`}
+                >
+                  <QrCode size={14} />
+                  <span>Pareamento QR &amp; LAN</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mobileSubMode === 'android_app'}
+                  onClick={() => setMobileSubMode('android_app')}
+                  className={`jarvis-settings-tab-btn ${mobileSubMode === 'android_app' ? 'is-active' : ''}`}
+                >
+                  <Smartphone size={14} />
+                  <span>App Mobile (Android)</span>
+                </button>
+              </div>
+
+              {mobileSubMode === 'android_app' ? (
+                <div className="jarvis-settings-embedded">
+                  <Suspense
+                    fallback={
+                      <div className="jarvis-settings-card" style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                        A carregar App Mobile (Android)...
+                      </div>
+                    }
+                  >
+                    <AndroidMobileHubView />
+                  </Suspense>
+                </div>
+              ) : (
+                <>
 
               {/* Status da Rede Local */}
               <section className="jarvis-settings-card">
@@ -1703,19 +1763,62 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </button>
                 </div>
               </section>
+                </>
+              )}
             </>
           )}
 
           {/* ================================================================= */}
-          {/* ABA: VOZ & DITADO                                                 */}
+          {/* ABA UNIFICADA: VOZ & ÁUDIO                                        */}
           {/* ================================================================= */}
           {activeSubTab === 'voice' && (
             <>
               <PageHeader
                 icon={<Mic size={18} />}
-                title="Configurações de Voz"
-                subtitle="Ajuste os modelos de reconhecimento de fala (STT), síntese vocal (TTS) e sensibilidade VAD."
+                title="Voz & Áudio"
+                subtitle="Ajuste os modelos de fala (STT/TTS), sensibilidade VAD e controles do Companion de voz."
               />
+
+              <div className="jarvis-settings-tabs" role="tablist" aria-label="Modo de voz e áudio">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={voiceSubMode === 'voice'}
+                  onClick={() => setVoiceSubMode('voice')}
+                  className={`jarvis-settings-tab-btn ${voiceSubMode === 'voice' ? 'is-active' : ''}`}
+                >
+                  <Mic size={14} />
+                  <span>Voz, STT &amp; TTS</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={voiceSubMode === 'companion'}
+                  onClick={() => setVoiceSubMode('companion')}
+                  className={`jarvis-settings-tab-btn ${voiceSubMode === 'companion' ? 'is-active' : ''}`}
+                >
+                  <Radio size={14} />
+                  <span>Companion &amp; Áudio Avançado</span>
+                </button>
+              </div>
+
+              {voiceSubMode === 'companion' ? (
+                <div className="jarvis-settings-embedded">
+                  <Suspense
+                    fallback={
+                      <div className="jarvis-settings-card" style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                        A carregar Companion &amp; Áudio...
+                      </div>
+                    }
+                  >
+                    <CompanionHubView
+                      onOpenVoiceHud={onOpenVoiceHud || (() => {})}
+                      onNavigate={onNavigate || (() => {})}
+                    />
+                  </Suspense>
+                </div>
+              ) : (
+                <>
 
               <section className="jarvis-settings-card" style={{ gap: '18px' }}>
                 <div>
@@ -1983,6 +2086,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </div>
                 )}
               </section>
+                </>
+              )}
             </>
           )}
 
@@ -2044,116 +2149,111 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           )}
 
           {/* ================================================================= */}
-          {/* ABA: DYNAMIC ISLAND & DOCK DE AGENTES                             */}
-          {/* ================================================================= */}
-          {(activeSubTab === 'island' || activeSubTab === 'dock') && (
-            <>
-              <PageHeader
-                icon={activeSubTab === 'island' ? <Layers size={18} /> : <Sparkles size={18} />}
-                title={activeSubTab === 'island' ? 'Dynamic Island' : 'Dock macOS & Navegação'}
-                subtitle="Preferência aplicada em tempo real e sincronizada com a interface do painel."
-              />
-
-              <section className="jarvis-settings-card">
-                <div className="jarvis-setting-row">
-                  <div className="jarvis-setting-row__info">
-                    <div className="jarvis-setting-row__title">
-                      {activeSubTab === 'island' ? 'Ativar Dynamic Island' : 'Ativar Dock Flutuante macOS'}
-                    </div>
-                    <div className="jarvis-setting-row__desc">
-                      {activeSubTab === 'island'
-                        ? 'Exibe a cápsula de status e telemetria rápida na barra superior do console.'
-                        : 'Dock flutuante centralizado no rodapé com Launchpad, favoritos fixados e especialistas instalados.'}
-                    </div>
-                  </div>
-                  <div className="jarvis-setting-row__control">
-                    {renderToggle(
-                      activeSubTab === 'island' ? dynamicIslandEnabled : agentDockEnabled,
-                      () => {
-                        if (activeSubTab === 'island') handleToggleIsland();
-                        else handleToggleDock();
-                      },
-                      activeSubTab === 'island' ? 'Ativar Dynamic Island' : 'Ativar Dock Flutuante macOS',
-                    )}
-                  </div>
-                </div>
-
-                {activeSubTab === 'dock' && (
-                  <>
-                    <div className="jarvis-setting-row">
-                      <div className="jarvis-setting-row__info">
-                        <div className="jarvis-setting-row__title">Modo Dock Puro (Ocultar Barra Lateral)</div>
-                        <div className="jarvis-setting-row__desc">
-                          Oculta a barra lateral esquerda flutuante para liberar 100% da largura, usando o Dock e o Launchpad (Ctrl+Shift+L).
-                        </div>
-                      </div>
-                      <div className="jarvis-setting-row__control">
-                        {renderToggle(
-                          sidebarHiddenPref,
-                          handleToggleSidebarHiddenPref,
-                          'Modo Dock Puro (Ocultar Barra Lateral)',
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="jarvis-setting-row">
-                      <div className="jarvis-setting-row__info">
-                        <div className="jarvis-setting-row__title">Recolher Dock para Pílula Discreta</div>
-                        <div className="jarvis-setting-row__desc">
-                          Mantém o Dock minimizado em uma pílula compacta no rodapé até você expandir novamente.
-                        </div>
-                      </div>
-                      <div className="jarvis-setting-row__control">
-                        {renderToggle(
-                          dockMinimizedPref,
-                          handleToggleDockMinimizedPref,
-                          'Recolher Dock para Pílula Discreta',
-                        )}
-                      </div>
-                    </div>
-                  </>
-                )}
-              </section>
-            </>
-          )}
-
-          {/* ================================================================= */}
-          {/* ABA: COMPORTAMENTO DO APP                                         */}
+          {/* ABA UNIFICADA: COMPORTAMENTO, DOCK & ISLAND                       */}
           {/* ================================================================= */}
           {activeSubTab === 'behavior' && (
             <>
               <PageHeader
                 icon={<Power size={18} />}
-                title="Comportamento do App"
-                subtitle="Preferências do cliente desktop relacionadas ao arranque e execução em segundo plano."
+                title="Comportamento, Dock & Island"
+                subtitle="Configure o Dock flutuante, Dynamic Island, barra lateral e comportamento do aplicativo."
               />
 
-              <div className="jarvis-callout jarvis-callout--warning" role="note">
-                Preferências do cliente desktop: o dashboard web não altera o arranque do sistema operacional nem o comportamento da bandeja.
-              </div>
-
-              <section className="jarvis-settings-card">
-                <div className="jarvis-setting-row">
-                  <div className="jarvis-setting-row__info">
-                    <div className="jarvis-setting-row__title">Iniciar com o sistema</div>
-                    <div className="jarvis-setting-row__desc">
-                      Abre o JARVIS em segundo plano assim que o computador inicializar.
+              <section className="jarvis-settings-section">
+                <h3 className="jarvis-settings-section__title">Navegação &amp; Dock macOS</h3>
+                <div className="jarvis-settings-card">
+                  <div className="jarvis-setting-row">
+                    <div className="jarvis-setting-row__info">
+                      <div className="jarvis-setting-row__title">Ativar Dock Flutuante macOS</div>
+                      <div className="jarvis-setting-row__desc">
+                        Dock flutuante centralizado no rodapé com Launchpad, favoritos fixados e especialistas instalados.
+                      </div>
+                    </div>
+                    <div className="jarvis-setting-row__control">
+                      {renderToggle(agentDockEnabled, handleToggleDock, 'Ativar Dock Flutuante macOS')}
                     </div>
                   </div>
-                  <div className="jarvis-setting-row__control">
-                    {renderToggle(launchOnStartup, () => setLaunchOnStartup(!launchOnStartup), 'Iniciar com o sistema')}
+
+                  <div className="jarvis-setting-row">
+                    <div className="jarvis-setting-row__info">
+                      <div className="jarvis-setting-row__title">Modo Dock Puro (Ocultar Barra Lateral)</div>
+                      <div className="jarvis-setting-row__desc">
+                        Oculta a barra lateral esquerda flutuante para liberar 100% da largura, usando o Dock e o Launchpad (Ctrl+Shift+L).
+                      </div>
+                    </div>
+                    <div className="jarvis-setting-row__control">
+                      {renderToggle(
+                        sidebarHiddenPref,
+                        handleToggleSidebarHiddenPref,
+                        'Modo Dock Puro (Ocultar Barra Lateral)',
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="jarvis-setting-row">
+                    <div className="jarvis-setting-row__info">
+                      <div className="jarvis-setting-row__title">Recolher Dock para Pílula Discreta</div>
+                      <div className="jarvis-setting-row__desc">
+                        Mantém o Dock minimizado em uma pílula compacta no rodapé até você expandir novamente.
+                      </div>
+                    </div>
+                    <div className="jarvis-setting-row__control">
+                      {renderToggle(
+                        dockMinimizedPref,
+                        handleToggleDockMinimizedPref,
+                        'Recolher Dock para Pílula Discreta',
+                      )}
+                    </div>
                   </div>
                 </div>
+              </section>
 
-                <div className="jarvis-setting-row">
-                  <div className="jarvis-setting-row__info">
-                    <div className="jarvis-setting-row__title">Minimizar para a bandeja</div>
-                    <div className="jarvis-setting-row__desc">
-                      Ao fechar a janela, mantém o assistente e os nós em execução silenciosa.
+              <section className="jarvis-settings-section">
+                <h3 className="jarvis-settings-section__title">Dynamic Island</h3>
+                <div className="jarvis-settings-card">
+                  <div className="jarvis-setting-row">
+                    <div className="jarvis-setting-row__info">
+                      <div className="jarvis-setting-row__title">Ativar Dynamic Island</div>
+                      <div className="jarvis-setting-row__desc">
+                        Exibe a cápsula de status e telemetria rápida na barra superior do console.
+                      </div>
+                    </div>
+                    <div className="jarvis-setting-row__control">
+                      {renderToggle(dynamicIslandEnabled, handleToggleIsland, 'Ativar Dynamic Island')}
                     </div>
                   </div>
-                  <div className="jarvis-setting-row__control">
-                    {renderToggle(minimizeToTray, () => setMinimizeToTray(!minimizeToTray), 'Minimizar para a bandeja')}
+                </div>
+              </section>
+
+              <section className="jarvis-settings-section">
+                <h3 className="jarvis-settings-section__title">Cliente Desktop</h3>
+                <div className="jarvis-callout jarvis-callout--warning" role="note">
+                  Preferências do cliente desktop: o dashboard web não altera o arranque do sistema operacional nem o comportamento da bandeja.
+                </div>
+
+                <div className="jarvis-settings-card">
+                  <div className="jarvis-setting-row">
+                    <div className="jarvis-setting-row__info">
+                      <div className="jarvis-setting-row__title">Iniciar com o sistema</div>
+                      <div className="jarvis-setting-row__desc">
+                        Abre o Calmon IA em segundo plano assim que o computador inicializar.
+                      </div>
+                    </div>
+                    <div className="jarvis-setting-row__control">
+                      {renderToggle(launchOnStartup, () => setLaunchOnStartup(!launchOnStartup), 'Iniciar com o sistema')}
+                    </div>
+                  </div>
+
+                  <div className="jarvis-setting-row">
+                    <div className="jarvis-setting-row__info">
+                      <div className="jarvis-setting-row__title">Minimizar para a bandeja</div>
+                      <div className="jarvis-setting-row__desc">
+                        Ao fechar a janela, mantém o assistente e os nós em execução silenciosa.
+                      </div>
+                    </div>
+                    <div className="jarvis-setting-row__control">
+                      {renderToggle(minimizeToTray, () => setMinimizeToTray(!minimizeToTray), 'Minimizar para a bandeja')}
+                    </div>
                   </div>
                 </div>
               </section>
@@ -2697,38 +2797,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           )}
 
           {/* ================================================================= */}
-          {/* ABA: SERVIDOR & DIAGNÓSTICO                                       */}
+          {/* ABA UNIFICADA: SERVIDOR & CÉREBRO                                 */}
           {/* ================================================================= */}
           {activeSubTab === 'server' && (
             <>
               <PageHeader
                 icon={<Server size={18} />}
-                title="Servidor & Diagnóstico"
-                subtitle="Instância local do Calmon Studio executando em Node.js e SQLite."
+                title="Servidor & Cérebro"
+                subtitle="Diagnóstico da instância local (Node.js/SQLite) e gerenciamento do Cérebro & Dados."
                 meta={[
                   <span
                     key="fastapi-status"
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      color: apiHealthy === false ? '#f87171' : '#4ade80',
-                      fontWeight: 500,
-                    }}
+                    className={`jarvis-status-pill ${apiHealthy === false ? 'is-error' : 'is-ok'}`}
                   >
-                    <span
-                      style={{
-                        width: '7px',
-                        height: '7px',
-                        borderRadius: '50%',
-                        backgroundColor: apiHealthy === false ? '#ef4444' : '#22c55e',
-                      }}
-                    />
+                    <span className="jarvis-status-pill__dot" />
                     {apiHealthy === null
-                      ? 'FastAPI: verificando…'
+                      ? 'Backend: verificando…'
                       : apiHealthy
-                        ? 'FastAPI Operacional'
-                        : 'FastAPI Indisponível'}
+                        ? 'Backend Operacional'
+                        : 'Backend Indisponível'}
                   </span>,
                 ]}
                 actions={
@@ -2744,6 +2831,46 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 }
               />
 
+              <div className="jarvis-settings-tabs" role="tablist" aria-label="Modo de servidor e cérebro">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={serverSubMode === 'diagnostics'}
+                  onClick={() => setServerSubMode('diagnostics')}
+                  className={`jarvis-settings-tab-btn ${serverSubMode === 'diagnostics' ? 'is-active' : ''}`}
+                >
+                  <Server size={14} />
+                  <span>Diagnóstico do Servidor</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={serverSubMode === 'brain_server'}
+                  onClick={() => setServerSubMode('brain_server')}
+                  className={`jarvis-settings-tab-btn ${serverSubMode === 'brain_server' ? 'is-active' : ''}`}
+                >
+                  <Database size={14} />
+                  <span>Cérebro &amp; Dados</span>
+                </button>
+              </div>
+
+              {serverSubMode === 'brain_server' ? (
+                <div className="jarvis-settings-embedded">
+                  <Suspense
+                    fallback={
+                      <div className="jarvis-settings-card" style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                        A carregar Cérebro &amp; Dados...
+                      </div>
+                    }
+                  >
+                    <BrainServerHubView
+                      onNavigate={onNavigate}
+                      canManagePacks={canManagePacks}
+                    />
+                  </Suspense>
+                </div>
+              ) : (
+                <>
               <div className="jarvis-callout jarvis-callout--warning" role="note">
                 Configuração somente leitura: bind, porta, expiração de sessão, runtime e nível de logs são definidos no arranque do backend por variáveis de ambiente ou arquivo de configuração. Reinicie o servidor para alterar esses parâmetros.
               </div>
@@ -3022,45 +3149,68 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </div>
                 </div>
               </section>
+                </>
+              )}
             </>
           )}
 
           {EMBEDDED_SETTINGS_TABS.has(activeSubTab) && (
-            <Suspense
-              fallback={
-                <div
-                  className="jarvis-settings-card"
-                  style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}
-                >
-                  A carregar módulo...
-                </div>
-              }
-            >
-              {activeSubTab === 'companion' && (
-                <CompanionHubView
-                  onOpenVoiceHud={onOpenVoiceHud || (() => {})}
-                  onNavigate={onNavigate || (() => {})}
-                />
+            <div className="jarvis-settings-embedded">
+              {activeSubTab === 'server_logs' && (
+                <>
+                  <PageHeader
+                    icon={<Terminal size={18} />}
+                    title="Logs & Custos"
+                    subtitle="Acompanhe logs em tempo real, métricas operacionais e consumo por provedor."
+                  />
+                  <div className="jarvis-settings-tabs" role="tablist" aria-label="Logs e custos">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={logsSubMode === 'logs'}
+                      onClick={() => setLogsSubMode('logs')}
+                      className={`jarvis-settings-tab-btn ${logsSubMode === 'logs' ? 'is-active' : ''}`}
+                    >
+                      <Terminal size={14} />
+                      <span>Logs &amp; Métricas</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={logsSubMode === 'usage'}
+                      onClick={() => setLogsSubMode('usage')}
+                      className={`jarvis-settings-tab-btn ${logsSubMode === 'usage' ? 'is-active' : ''}`}
+                    >
+                      <TrendingUp size={14} />
+                      <span>Uso e Custos</span>
+                    </button>
+                  </div>
+                </>
               )}
-              {activeSubTab === 'security' && (
-                <SecurityCenterView onRefresh={onRefreshSecurity || (() => {})} />
-              )}
-              {activeSubTab === 'android_app' && <AndroidMobileHubView />}
-              {activeSubTab === 'brain_server' && (
-                <BrainServerHubView
-                  onNavigate={onNavigate}
-                  canManagePacks={canManagePacks}
-                />
-              )}
-              {activeSubTab === 'server_logs' && <ServerLogsView />}
-              {activeSubTab === 'usage' && <UsageAnalyticsView />}
-              {activeSubTab === 'architecture' && (
-                <ArchitectureAgentView
-                  onAskArchitect={onAskArchitect || (() => {})}
-                  onNavigate={onNavigate || (() => {})}
-                />
-              )}
-            </Suspense>
+              <Suspense
+                fallback={
+                  <div
+                    className="jarvis-settings-card"
+                    style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}
+                  >
+                    A carregar módulo...
+                  </div>
+                }
+              >
+                {activeSubTab === 'security' && (
+                  <SecurityCenterView onRefresh={onRefreshSecurity || (() => {})} />
+                )}
+                {activeSubTab === 'server_logs' && (
+                  logsSubMode === 'usage' ? <UsageAnalyticsView /> : <ServerLogsView />
+                )}
+                {activeSubTab === 'architecture' && (
+                  <ArchitectureAgentView
+                    onAskArchitect={onAskArchitect || (() => {})}
+                    onNavigate={onNavigate || (() => {})}
+                  />
+                )}
+              </Suspense>
+            </div>
           )}
         </div>
       </main>

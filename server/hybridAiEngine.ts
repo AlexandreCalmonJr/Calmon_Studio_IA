@@ -622,8 +622,15 @@ export async function runHybridInference(req: HybridInferenceRequest): Promise<H
   }
 
   // 2. Modelos Locais (Ollama)
+  const autoHybridFallbackToLocal =
+    policy === 'auto_hybrid' &&
+    !geminiEnabled &&
+    ollamaEnabled &&
+    (!requested || requested === 'auto' || requested === 'auto_hybrid' || isGeminiModelId(requested));
+
   const wantsLocal =
     policy === 'local_only' ||
+    autoHybridFallbackToLocal ||
     (policy === 'auto_hybrid' &&
       Boolean(requested) &&
       !isGeminiModelId(requested) &&

@@ -474,7 +474,7 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
       <div className="jarvis-settings-content">
         {/* VIEW 1: APPS */}
         {activeStoreTab === 'apps' && (
-          <div style={{ maxWidth: '1040px', width: '100%', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div className="jarvis-settings-container is-wide">
             <PageHeader
               title="Apps & Conectores"
               subtitle="Conecte as ferramentas, cofres e servidores MCP com que seus agentes trabalham."
@@ -630,7 +630,7 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
 
         {/* VIEW 2: AGENTES (Biblioteca Unificada Pronta em 1 Clique) */}
         {activeStoreTab === 'agents' && (
-          <div style={{ maxWidth: '1080px', width: '100%', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div className="jarvis-settings-container is-wide">
             <PageHeader
               title="Loja de Agentes IA Prontos"
               subtitle="Todos os agentes — do dia a dia à engenharia, dados e segurança — já prontos com habilidades configuradas. Instale em 1 clique e desinstale os que não usar."
@@ -657,7 +657,7 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
 
         {/* VIEW 3: HABILIDADES DOS AGENTES */}
         {activeStoreTab === 'skills' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '1100px', width: '100%' }}>
+          <div className="jarvis-settings-container is-wide" style={{ gap: '20px' }}>
             {!roleLoaded && (
               <div role="status" className="jarvis-callout jarvis-callout--info">
                 A verificar permissões do Gestor de Habilidades…

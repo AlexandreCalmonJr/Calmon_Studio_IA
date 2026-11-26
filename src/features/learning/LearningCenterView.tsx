@@ -17,6 +17,7 @@ import {
   Store,
   Workflow,
   Smartphone,
+  X,
 } from 'lucide-react';
 import { getAccountStorageKey } from '../../services/accountScope';
 import { API_BASE } from '../../services/api/client';
@@ -24,6 +25,7 @@ import { fetchAgents } from '../../api';
 import type { AgentInfo } from '../../types';
 import { useAssistantIdentity } from '../../context/AssistantIdentityContext';
 import { MascotAvatar } from '../../shared/common/MascotAvatar';
+import { PageHeader } from '../../shared/layout/PageHeader';
 
 type GuideItem = {
   id: string;
@@ -341,487 +343,438 @@ export const LearningCenterView: React.FC<Props> = ({
   };
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        height: '100%',
-        width: '100%',
-        backgroundColor: 'var(--bg-primary)',
-        color: 'var(--text-primary)',
-        overflow: 'hidden',
-        fontFamily: 'var(--font-sans)',
-      }}
-    >
-      {/* Sub-Sidebar */}
-      <aside
-        style={{
-          width: '232px',
-          minWidth: '232px',
-          backgroundColor: 'var(--bg-secondary)',
-          borderRight: '1px solid var(--border-color)',
-          display: 'flex',
-          flexDirection: 'column',
-          padding: '16px 12px calc(16px + var(--jarvis-dock-clearance, 0px))',
-          gap: '14px',
-          overflowY: 'auto',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0 4px' }}>
-          <div
-            style={{
-              width: '26px',
-              height: '26px',
-              borderRadius: '6px',
-              backgroundColor: 'var(--accent-soft)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'var(--accent-light)',
-            }}
-          >
-            <HelpCircle size={15} />
-          </div>
-          <div>
-            <h2 style={{ fontSize: '0.86rem', fontWeight: 600, margin: 0, color: 'var(--text-primary)' }}>
-              Ajuda & Guias
-            </h2>
+    <div className="jarvis-settings-layout">
+      {/* Sub-painel Esquerdo: Navegação de Ajuda & Guias */}
+      <aside className="jarvis-settings-nav" aria-label="Menu de ajuda e guias">
+        <div className="jarvis-settings-nav__header">
+          <h2 className="jarvis-settings-nav__title">Ajuda &amp; Guias</h2>
+
+          <div className="jarvis-search-box">
+            <Search size={13} />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar guia ou dúvida..."
+              aria-label="Pesquisar ajuda e guias"
+              className="jarvis-search-box__input"
+              style={{ fontSize: '0.8rem', padding: '5px 0' }}
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery('')}
+                className="btn btn-ghost btn-icon-sm"
+                aria-label="Limpar busca"
+                style={{ width: '22px', height: '22px', padding: 0 }}
+              >
+                <X size={12} />
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Busca */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            backgroundColor: 'var(--bg-input)',
-            border: '1px solid var(--border-color)',
-            borderRadius: '6px',
-            padding: '5px 8px',
-          }}
-        >
-          <Search size={13} color="var(--text-muted)" />
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar guia ou dúvida..."
-            aria-label="Pesquisar ajuda e guias"
-            style={{
-              flex: 1,
-              background: 'transparent',
-              border: 'none',
-              outline: 'none',
-              color: 'var(--text-primary)',
-              fontSize: '0.76rem',
-            }}
-          />
-        </div>
+        <nav className="jarvis-settings-nav__list">
+          <div className="jarvis-settings-nav__group">
+            <div className="jarvis-settings-nav__group-title">Explorar</div>
 
-        {/* Navegação */}
-        <nav style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
-          <button
-            type="button"
-            onClick={() => {
-              setCurrentSubTab('news');
-              setSelectedGuideId(null);
-            }}
-            className={`jarvis-subnav-btn ${currentSubTab === 'news' ? 'is-active' : ''}`}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Sparkles size={14} color="var(--accent-light)" />
-              <span>Novidades</span>
-            </div>
-          </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCurrentSubTab('news');
+                setSelectedGuideId(null);
+              }}
+              aria-current={currentSubTab === 'news' ? 'page' : undefined}
+              className={`jarvis-subnav-btn ${currentSubTab === 'news' ? 'is-active' : ''}`}
+            >
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '9px' }}>
+                <Sparkles size={15} color={currentSubTab === 'news' ? 'var(--accent-light)' : 'var(--text-muted)'} />
+                <span>Novidades</span>
+              </span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setCurrentSubTab('guides');
-              setSelectedGuideId(null);
-            }}
-            className={`jarvis-subnav-btn ${currentSubTab === 'guides' ? 'is-active' : ''}`}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <BookOpen size={14} color="#34d399" />
-              <span>Guias Rápidos</span>
-            </div>
-            <span className="jarvis-tabular" style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-              {completed.length}/{QUICK_GUIDES.length}
-            </span>
-          </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCurrentSubTab('guides');
+                setSelectedGuideId(null);
+              }}
+              aria-current={currentSubTab === 'guides' ? 'page' : undefined}
+              className={`jarvis-subnav-btn ${currentSubTab === 'guides' ? 'is-active' : ''}`}
+            >
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '9px' }}>
+                <BookOpen size={15} color={currentSubTab === 'guides' ? 'var(--accent-light)' : 'var(--text-muted)'} />
+                <span>Guias Rápidos</span>
+              </span>
+              <span className="jarvis-tabular" style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                {completed.length}/{QUICK_GUIDES.length}
+              </span>
+            </button>
+          </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              setCurrentSubTab('agents_guide');
-              setSelectedGuideId(null);
-            }}
-            className={`jarvis-subnav-btn ${currentSubTab === 'agents_guide' ? 'is-active' : ''}`}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Bot size={14} color="var(--accent-light)" />
-              <span>Meus Agentes</span>
-            </div>
-            <span className="jarvis-tabular" style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-              {installedAgents.length}
-            </span>
-          </button>
+          <div className="jarvis-settings-nav__group">
+            <div className="jarvis-settings-nav__group-title">Referência</div>
 
-          <button
-            type="button"
-            onClick={() => {
-              setCurrentSubTab('faq');
-              setSelectedGuideId(null);
-            }}
-            className={`jarvis-subnav-btn ${currentSubTab === 'faq' ? 'is-active' : ''}`}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <HelpCircle size={14} color="#fbbf24" />
-              <span>Dúvidas Comuns</span>
-            </div>
-          </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCurrentSubTab('agents_guide');
+                setSelectedGuideId(null);
+              }}
+              aria-current={currentSubTab === 'agents_guide' ? 'page' : undefined}
+              className={`jarvis-subnav-btn ${currentSubTab === 'agents_guide' ? 'is-active' : ''}`}
+            >
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '9px' }}>
+                <Bot size={15} color={currentSubTab === 'agents_guide' ? 'var(--accent-light)' : 'var(--text-muted)'} />
+                <span>Meus Agentes</span>
+              </span>
+              <span className="jarvis-tabular" style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                {installedAgents.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setCurrentSubTab('faq');
+                setSelectedGuideId(null);
+              }}
+              aria-current={currentSubTab === 'faq' ? 'page' : undefined}
+              className={`jarvis-subnav-btn ${currentSubTab === 'faq' ? 'is-active' : ''}`}
+            >
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '9px' }}>
+                <HelpCircle size={15} color={currentSubTab === 'faq' ? 'var(--accent-light)' : 'var(--text-muted)'} />
+                <span>Dúvidas Comuns</span>
+              </span>
+            </button>
+          </div>
         </nav>
 
-        <button
-          type="button"
-          onClick={onStartTour}
-          className="btn btn-secondary btn-sm btn-block"
-        >
-          <Compass size={13} />
-          <span>Iniciar Tour Guiado</span>
-        </button>
+        <div className="jarvis-settings-nav__footer">
+          <button
+            type="button"
+            onClick={onStartTour}
+            className="btn btn-secondary btn-sm btn-block"
+          >
+            <Compass size={13} />
+            <span>Iniciar Tour Guiado</span>
+          </button>
+        </div>
       </aside>
 
       {/* Área Principal */}
-      <main
-        style={{
-          flex: 1,
-          overflowY: 'auto',
-          padding: '24px 32px calc(44px + var(--jarvis-dock-clearance, 0px))',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '20px',
-          maxWidth: '940px',
-        }}
-      >
-        {/* Sub-aba: Novidades */}
-        {currentSubTab === 'news' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <div>
-              <h1 style={{ fontSize: '1.35rem', fontWeight: 700, margin: '0 0 6px', color: 'var(--text-primary)' }}>
-                Bem-vindo à Central de Ajuda do {assistantName}
-              </h1>
-              <p style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.55 }}>
-                Tudo em português simples para você aproveitar voz mãos-livres, agentes prontos em 1 clique, habilidades conectadas e fluxos automáticos no seu dia a dia.
-              </p>
-            </div>
+      <main className="jarvis-settings-content">
+        <div className="jarvis-settings-container">
+          {/* Sub-aba: Novidades */}
+          {currentSubTab === 'news' && (
+            <>
+              <PageHeader
+                icon={<Sparkles size={18} />}
+                title={`Central de Ajuda do ${assistantName}`}
+                subtitle="Tudo em português simples para você aproveitar voz mãos-livres, agentes prontos em 1 clique, habilidades conectadas e fluxos automáticos no seu dia a dia."
+              />
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px' }}>
-              <div style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--accent-light)' }}>
-                  <Mic size={16} />
-                  <strong style={{ fontSize: '0.86rem', color: 'var(--text-primary)' }}>Voz &ldquo;Ei {assistantName}&rdquo;</strong>
-                </div>
-                <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
-                  Clique em &ldquo;Ei {assistantName}&rdquo; para falar na hora ou ative a escuta mãos-livres para chamar seu assistente sem clicar em nada.
-                </p>
-              </div>
-
-              <div style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--accent-light)' }}>
-                  <Store size={16} />
-                  <strong style={{ fontSize: '0.86rem', color: 'var(--text-primary)' }}>Loja Unificada de Agentes</strong>
-                </div>
-                <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
-                  40 agentes prontos para instalar em 1 clique com prévia de habilidades e botão Desinstalar sempre visível no painel lateral.
-                </p>
-              </div>
-
-              <div style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#34d399' }}>
-                  <Wrench size={16} />
-                  <strong style={{ fontSize: '0.86rem', color: 'var(--text-primary)' }}>Habilidades Conectadas</strong>
-                </div>
-                <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
-                  Vincule habilidades a qualquer agente instalado tanto pela página de Habilidades quanto diretamente pelo card de cada agente.
-                </p>
-              </div>
-
-              <div style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fbbf24' }}>
-                  <Workflow size={16} />
-                  <strong style={{ fontSize: '0.86rem', color: 'var(--text-primary)' }}>Fluxos Editáveis & Modelos</strong>
-                </div>
-                <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
-                  Escolha modelos prontos como Resumo Matinal ou Verificador de Golpes e clique em qualquer etapa para escolher o agente responsável.
-                </p>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-              <button type="button" onClick={() => setCurrentSubTab('guides')} className="btn btn-primary btn-sm">
-                <BookOpen size={14} />
-                <span>Ver Guias Rápidos</span>
-              </button>
-              <button type="button" onClick={() => onNavigate('skills')} className="btn btn-secondary btn-sm">
-                <Store size={14} />
-                <span>Abrir Loja & Habilidades</span>
-              </button>
-              <button type="button" onClick={() => onOpenProfile?.()} className="btn btn-secondary btn-sm">
-                <Smartphone size={14} />
-                <span>Personalizar Perfil e Voz</span>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Sub-aba: Meus Agentes Instalados */}
-        {currentSubTab === 'agents_guide' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
-              <div>
-                <h1 style={{ fontSize: '1.3rem', fontWeight: 700, margin: '0 0 4px', color: 'var(--text-primary)' }}>
-                  Seus Agentes Instalados ({installedAgents.length})
-                </h1>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0 }}>
-                  Estes são os agentes ativos no seu hub agora. Clique em Conversar ou instale novos na Loja.
-                </p>
-              </div>
-              <button type="button" onClick={() => onNavigate('skills')} className="btn btn-primary btn-sm">
-                <Store size={14} />
-                <span>Explorar Loja de Agentes</span>
-              </button>
-            </div>
-
-            {filteredAgents.length === 0 ? (
-              <div style={{ padding: '20px', borderRadius: '10px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                Nenhum agente encontrado para &ldquo;{query}&rdquo;.
-              </div>
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(265px, 1fr))', gap: '10px' }}>
-                {filteredAgents.map((agent) => (
-                  <div
-                    key={agent.role}
-                    style={{
-                      backgroundColor: 'var(--bg-secondary)',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '10px',
-                      padding: '13px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '9px', minWidth: 0 }}>
-                        <MascotAvatar
-                          mascot={agent.mascot}
-                          role={agent.role}
-                          name={agent.name || agent.role}
-                          size={30}
-                        />
-                        <div style={{ minWidth: 0 }}>
-                          <strong style={{ fontSize: '0.84rem', color: 'var(--text-primary)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {agent.name || agent.role}
-                          </strong>
-                          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                            {(agent.installed_skills || []).length} habilidade(s)
-                          </span>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => startChatWithAgent(agent)}
-                        className="btn btn-secondary btn-xs"
-                      >
-                        Conversar
-                      </button>
+              <section className="jarvis-settings-section">
+                <h3 className="jarvis-settings-section__title">Destaques da Plataforma</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '12px' }}>
+                  <div className="jarvis-settings-card" style={{ gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--accent-light)' }}>
+                      <Mic size={16} />
+                      <strong style={{ fontSize: '0.88rem', color: 'var(--text-primary)' }}>Voz &ldquo;Ei {assistantName}&rdquo;</strong>
                     </div>
-                    <p style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.45 }}>
-                      {agent.mission || 'Agente especialista pronto para ajudar nas suas conversas.'}
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.55 }}>
+                      Clique em &ldquo;Ei {assistantName}&rdquo; para falar na hora ou ative a escuta mãos-livres para chamar seu assistente sem clicar em nada.
                     </p>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
 
-        {/* Sub-aba: Dúvidas Comuns (FAQ) */}
-        {currentSubTab === 'faq' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div>
-              <h1 style={{ fontSize: '1.3rem', fontWeight: 700, margin: '0 0 4px', color: 'var(--text-primary)' }}>
-                Perguntas Frequentes
-              </h1>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0 }}>
-                Respostas diretas sobre voz, agentes, habilidades, conversas e privacidade.
-              </p>
-            </div>
-
-            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '10px 14px', alignItems: 'center', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-              <strong style={{ color: 'var(--text-primary)' }}>Atalhos úteis:</strong>
-              <span>Ctrl + K (Busca rápida)</span>
-              <span>·</span>
-              <span>Ctrl + B (Menu lateral)</span>
-              <span>·</span>
-              <span>Enter (Enviar mensagem)</span>
-              <span>·</span>
-              <span>Shift + Enter (Nova linha)</span>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {filteredFaqs.map((faq) => {
-                const isExpanded = expandedFaqId === faq.id;
-                return (
-                  <div key={faq.id} style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden' }}>
-                    <button
-                      type="button"
-                      onClick={() => setExpandedFaqId(isExpanded ? null : faq.id)}
-                      className="jarvis-accordion-trigger"
-                      aria-expanded={isExpanded}
-                    >
-                      <span style={{ fontSize: '0.84rem', fontWeight: 500 }}>{faq.question}</span>
-                      {isExpanded ? <ChevronDown size={15} color="var(--text-muted)" /> : <ChevronRight size={15} color="var(--text-muted)" />}
-                    </button>
-                    {isExpanded && (
-                      <div style={{ padding: '10px 14px 13px', color: 'var(--text-secondary)', fontSize: '0.79rem', lineHeight: 1.55, borderTop: '1px solid var(--border-color)' }}>
-                        {faq.answer}
-                      </div>
-                    )}
+                  <div className="jarvis-settings-card" style={{ gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--accent-light)' }}>
+                      <Store size={16} />
+                      <strong style={{ fontSize: '0.88rem', color: 'var(--text-primary)' }}>Loja Unificada de Agentes</strong>
+                    </div>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.55 }}>
+                      40 agentes prontos para instalar em 1 clique com prévia de habilidades e botão Desinstalar sempre visível no painel lateral.
+                    </p>
                   </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
 
-        {/* Sub-aba: Guias Rápidos */}
-        {currentSubTab === 'guides' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-              <div>
-                <h1 style={{ fontSize: '1.3rem', fontWeight: 700, margin: '0 0 4px', color: 'var(--text-primary)' }}>
-                  Guias Rápidos Passo a Passo
-                </h1>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0 }}>
-                  Aprenda em poucos minutos como usar cada recurso do {assistantName}.
-                </p>
-              </div>
-
-              <div className="jarvis-tabular" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
-                {syncState === 'synced' ? <CloudUpload size={13} color="#34d399" /> : <CloudDownload size={13} />}
-                <span>{completed.length} de {QUICK_GUIDES.length} concluídos</span>
-              </div>
-            </div>
-
-            {activeGuide ? (
-              <div style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                <div>
-                  <button type="button" onClick={() => setSelectedGuideId(null)} className="btn btn-ghost btn-xs">
-                    ← Todos os guias
-                  </button>
-                </div>
-                <div>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--accent-light)', fontWeight: 600 }}>
-                    {activeGuide.category} · {activeGuide.duration}
+                  <div className="jarvis-settings-card" style={{ gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--status-ok, #34d399)' }}>
+                      <Wrench size={16} />
+                      <strong style={{ fontSize: '0.88rem', color: 'var(--text-primary)' }}>Habilidades Conectadas</strong>
+                    </div>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.55 }}>
+                      Vincule habilidades a qualquer agente instalado tanto pela página de Habilidades quanto diretamente pelo card de cada agente.
+                    </p>
                   </div>
-                  <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)', margin: '4px 0 6px' }}>
-                    {activeGuide.title}
-                  </h2>
-                  <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
-                    {activeGuide.description}
-                  </p>
+
+                  <div className="jarvis-settings-card" style={{ gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--status-warn, #fbbf24)' }}>
+                      <Workflow size={16} />
+                      <strong style={{ fontSize: '0.88rem', color: 'var(--text-primary)' }}>Fluxos Editáveis &amp; Modelos</strong>
+                    </div>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.55 }}>
+                      Escolha modelos prontos como Resumo Matinal ou Verificador de Golpes e clique em qualquer etapa para escolher o agente responsável.
+                    </p>
+                  </div>
                 </div>
-                <div style={{ backgroundColor: 'var(--bg-surface)', borderRadius: '8px', padding: '14px 16px', border: '1px solid var(--border-color)' }}>
-                  <ol style={{ margin: 0, paddingLeft: '18px', color: 'var(--text-primary)', fontSize: '0.82rem', lineHeight: 1.75 }}>
-                    {activeGuide.steps.map((st, idx) => (
-                      <li key={idx}>{st}</li>
-                    ))}
-                  </ol>
-                </div>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    onClick={() => toggleGuide(activeGuide.id)}
-                    className={`btn btn-sm ${completed.includes(activeGuide.id) ? 'btn-success' : 'btn-primary'}`}
-                  >
-                    {completed.includes(activeGuide.id) ? 'Concluído ✓' : 'Marcar como Concluído'}
+              </section>
+
+              <section className="jarvis-settings-section">
+                <h3 className="jarvis-settings-section__title">Acesso Rápido</h3>
+                <div className="jarvis-settings-card" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: '10px' }}>
+                  <button type="button" onClick={() => setCurrentSubTab('guides')} className="btn btn-primary btn-sm">
+                    <BookOpen size={14} />
+                    <span>Ver Guias Rápidos</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (activeGuide.targetTab === 'profile') onOpenProfile?.();
-                      else onNavigate(activeGuide.targetTab);
-                    }}
-                    className="btn btn-secondary btn-sm"
-                  >
-                    Testar agora
+                  <button type="button" onClick={() => onNavigate('skills')} className="btn btn-secondary btn-sm">
+                    <Store size={14} />
+                    <span>Abrir Loja &amp; Habilidades</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      try {
-                        localStorage.setItem(
-                          'jarvis_active_chat_prompt',
-                          `Oi ${assistantName}, estou lendo o guia "${activeGuide.title}" e quero tirar uma dúvida rápida.`
-                        );
-                      } catch {}
-                      onNavigate('chat');
-                    }}
-                    className="btn btn-secondary btn-sm"
-                  >
-                    Perguntar ao {assistantName}
+                  <button type="button" onClick={() => onOpenProfile?.()} className="btn btn-secondary btn-sm">
+                    <Smartphone size={14} />
+                    <span>Personalizar Perfil e Voz</span>
                   </button>
                 </div>
-              </div>
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(265px, 1fr))', gap: '10px' }}>
-                {filteredGuides.map((guide) => {
-                  const isDone = completed.includes(guide.id);
-                  const isRecommended = Boolean(activeTab && guide.targetTab === activeTab);
-                  return (
+              </section>
+            </>
+          )}
+
+          {/* Sub-aba: Meus Agentes Instalados */}
+          {currentSubTab === 'agents_guide' && (
+            <>
+              <PageHeader
+                icon={<Bot size={18} />}
+                title={`Seus Agentes Instalados (${installedAgents.length})`}
+                subtitle="Estes são os agentes ativos no seu hub agora. Clique em Conversar ou instale novos na Loja."
+                actions={
+                  <button type="button" onClick={() => onNavigate('skills')} className="btn btn-primary btn-sm">
+                    <Store size={14} />
+                    <span>Explorar Loja de Agentes</span>
+                  </button>
+                }
+              />
+
+              {filteredAgents.length === 0 ? (
+                <div className="jarvis-settings-card" style={{ fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
+                  Nenhum agente encontrado para &ldquo;{query}&rdquo;.
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(265px, 1fr))', gap: '12px' }}>
+                  {filteredAgents.map((agent) => (
                     <div
-                      key={guide.id}
-                      style={{
-                        backgroundColor: 'var(--bg-secondary)',
-                        border: `1px solid ${isRecommended ? 'var(--border-accent)' : 'var(--border-color)'}`,
-                        borderRadius: '10px',
-                        padding: '14px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '7px',
-                      }}
+                      key={agent.role}
+                      className="jarvis-settings-card"
+                      style={{ padding: '14px 16px', gap: '10px' }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: '0.7rem', color: 'var(--accent-light)', fontWeight: 600 }}>
-                          {guide.category} · {guide.duration}
-                        </span>
-                        {isDone && <CheckCircle2 size={14} color="#34d399" />}
-                      </div>
-                      <strong style={{ fontSize: '0.84rem', color: 'var(--text-primary)', lineHeight: 1.35 }}>
-                        {guide.title}
-                      </strong>
-                      <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.45, flex: 1 }}>
-                        {guide.description}
-                      </p>
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '8px', borderTop: '1px solid var(--border-subtle)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '9px', minWidth: 0 }}>
+                          <MascotAvatar
+                            mascot={agent.mascot}
+                            role={agent.role}
+                            name={agent.name || agent.role}
+                            size={30}
+                          />
+                          <div style={{ minWidth: 0 }}>
+                            <strong style={{ fontSize: '0.86rem', color: 'var(--text-primary)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {agent.name || agent.role}
+                            </strong>
+                            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                              {(agent.installed_skills || []).length} habilidade(s)
+                            </span>
+                          </div>
+                        </div>
                         <button
                           type="button"
-                          onClick={() => setSelectedGuideId(guide.id)}
-                          className="btn btn-ghost btn-xs"
+                          onClick={() => startChatWithAgent(agent)}
+                          className="btn btn-secondary btn-xs"
                         >
-                          Ler guia →
+                          Conversar
                         </button>
                       </div>
+                      <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
+                        {agent.mission || 'Agente especialista pronto para ajudar nas suas conversas.'}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Sub-aba: Dúvidas Comuns (FAQ) */}
+          {currentSubTab === 'faq' && (
+            <>
+              <PageHeader
+                icon={<HelpCircle size={18} />}
+                title="Perguntas Frequentes"
+                subtitle="Respostas diretas sobre voz, agentes, habilidades, conversas e privacidade."
+              />
+
+              <div className="jarvis-settings-subcard" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center', fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+                <strong style={{ color: 'var(--text-primary)' }}>Atalhos úteis:</strong>
+                <span>Ctrl + K (Busca rápida)</span>
+                <span>·</span>
+                <span>Ctrl + B (Menu lateral)</span>
+                <span>·</span>
+                <span>Enter (Enviar mensagem)</span>
+                <span>·</span>
+                <span>Shift + Enter (Nova linha)</span>
+              </div>
+
+              <div className="jarvis-settings-card" style={{ padding: 0, gap: 0, overflow: 'hidden' }}>
+                {filteredFaqs.map((faq, idx) => {
+                  const isExpanded = expandedFaqId === faq.id;
+                  return (
+                    <div
+                      key={faq.id}
+                      style={{
+                        borderTop: idx > 0 ? '1px solid var(--border-subtle)' : undefined,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setExpandedFaqId(isExpanded ? null : faq.id)}
+                        className="jarvis-accordion-trigger"
+                        aria-expanded={isExpanded}
+                      >
+                        <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>{faq.question}</span>
+                        {isExpanded ? <ChevronDown size={15} color="var(--text-muted)" /> : <ChevronRight size={15} color="var(--text-muted)" />}
+                      </button>
+                      {isExpanded && (
+                        <div style={{ padding: '12px 16px 14px', color: 'var(--text-secondary)', fontSize: '0.8rem', lineHeight: 1.6, borderTop: '1px solid var(--border-subtle)', backgroundColor: 'var(--bg-surface)' }}>
+                          {faq.answer}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
               </div>
-            )}
-          </div>
-        )}
+            </>
+          )}
+
+          {/* Sub-aba: Guias Rápidos */}
+          {currentSubTab === 'guides' && (
+            <>
+              <PageHeader
+                icon={<BookOpen size={18} />}
+                title="Guias Rápidos Passo a Passo"
+                subtitle={`Aprenda em poucos minutos como usar cada recurso do ${assistantName}.`}
+                meta={[
+                  <span
+                    key="guides-progress"
+                    className={`jarvis-status-pill ${syncState === 'synced' ? 'is-ok' : ''}`}
+                    style={{ color: syncState === 'synced' ? undefined : 'var(--text-secondary)' }}
+                  >
+                    {syncState === 'synced' ? <CloudUpload size={13} /> : <CloudDownload size={13} />}
+                    <span className="jarvis-tabular">{completed.length} de {QUICK_GUIDES.length} concluídos</span>
+                  </span>,
+                ]}
+              />
+
+              {activeGuide ? (
+                <div className="jarvis-settings-card" style={{ gap: '16px' }}>
+                  <div>
+                    <button type="button" onClick={() => setSelectedGuideId(null)} className="btn btn-ghost btn-xs">
+                      ← Todos os guias
+                    </button>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.73rem', color: 'var(--accent-light)', fontWeight: 600 }}>
+                      {activeGuide.category} · {activeGuide.duration}
+                    </div>
+                    <h2 style={{ fontSize: '1.12rem', fontWeight: 700, color: 'var(--text-primary)', margin: '4px 0 6px' }}>
+                      {activeGuide.title}
+                    </h2>
+                    <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.55 }}>
+                      {activeGuide.description}
+                    </p>
+                  </div>
+                  <div className="jarvis-settings-subcard">
+                    <ol style={{ margin: 0, paddingLeft: '18px', color: 'var(--text-primary)', fontSize: '0.83rem', lineHeight: 1.75 }}>
+                      {activeGuide.steps.map((st, idx) => (
+                        <li key={idx}>{st}</li>
+                      ))}
+                    </ol>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => toggleGuide(activeGuide.id)}
+                      className={`btn btn-sm ${completed.includes(activeGuide.id) ? 'btn-success' : 'btn-primary'}`}
+                    >
+                      {completed.includes(activeGuide.id) ? 'Concluído ✓' : 'Marcar como Concluído'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (activeGuide.targetTab === 'profile') onOpenProfile?.();
+                        else onNavigate(activeGuide.targetTab);
+                      }}
+                      className="btn btn-secondary btn-sm"
+                    >
+                      Testar agora
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        try {
+                          localStorage.setItem(
+                            'jarvis_active_chat_prompt',
+                            `Oi ${assistantName}, estou lendo o guia "${activeGuide.title}" e quero tirar uma dúvida rápida.`
+                          );
+                        } catch {}
+                        onNavigate('chat');
+                      }}
+                      className="btn btn-secondary btn-sm"
+                    >
+                      Perguntar ao {assistantName}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(265px, 1fr))', gap: '12px' }}>
+                  {filteredGuides.map((guide) => {
+                    const isDone = completed.includes(guide.id);
+                    const isRecommended = Boolean(activeTab && guide.targetTab === activeTab);
+                    return (
+                      <div
+                        key={guide.id}
+                        className="jarvis-settings-card"
+                        style={{
+                          padding: '16px',
+                          gap: '8px',
+                          borderColor: isRecommended ? 'var(--border-accent)' : undefined,
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '0.72rem', color: 'var(--accent-light)', fontWeight: 600 }}>
+                            {guide.category} · {guide.duration}
+                          </span>
+                          {isDone && <CheckCircle2 size={14} color="var(--status-ok, #34d399)" />}
+                        </div>
+                        <strong style={{ fontSize: '0.86rem', color: 'var(--text-primary)', lineHeight: 1.35 }}>
+                          {guide.title}
+                        </strong>
+                        <p style={{ fontSize: '0.77rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5, flex: 1 }}>
+                          {guide.description}
+                        </p>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '8px', borderTop: '1px solid var(--border-subtle)' }}>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedGuideId(guide.id)}
+                            className="btn btn-ghost btn-xs"
+                          >
+                            Ler guia →
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </main>
     </div>
   );

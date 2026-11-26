@@ -1204,40 +1204,5 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
     res.json({ purged_count: Math.max(memPurged, dbPurged), retention_days: retention });
   });
 
-  router.post('/voice/transcribe', requireAuth, async (req: Request, res: Response) => {
-    const providedTranscript = String(req.body?.text || req.body?.transcript || '').trim();
-    if (providedTranscript) {
-      res.json({ text: providedTranscript, engine: 'client_bridge' });
-      return;
-    }
-
-    const chunks: Buffer[] = [];
-    let totalBytes = 0;
-    const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
-    await new Promise<void>((resolve, reject) => {
-      if (req.readableEnded) {
-        resolve();
-        return;
-      }
-      req.on('data', (chunk: Buffer) => {
-        totalBytes += chunk.length;
-        if (totalBytes <= MAX_AUDIO_BYTES) chunks.push(chunk);
-      });
-      req.on('end', () => resolve());
-      req.on('error', reject);
-    });
-
-    if (totalBytes === 0) {
-      res.status(400).json({ detail: 'Nenhum áudio recebido para transcrição.' });
-      return;
-    }
-
-    res.json({
-      text: '',
-      bytes_received: totalBytes,
-      detail: 'Áudio recebido pelo servidor. Use o reconhecimento nativo do navegador ou configure a chave Gemini para transcrição em nuvem.',
-    });
-  });
-
   return router;
 }

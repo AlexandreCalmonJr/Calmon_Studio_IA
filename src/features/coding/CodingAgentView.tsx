@@ -34,6 +34,7 @@ import { API_BASE } from '../../services/api/client';
 import { apiFetch } from '../../services/sessionTransport';
 import { getOperationLabel, getProjectTypeLabel, getRiskLabel, getToolLabel } from '../../types';
 import { IdeWorkspacePanel } from './IdeWorkspacePanel';
+import { PageHeader } from '../../shared/layout/PageHeader';
 
 type Mode = 'plan' | 'ask' | 'auto';
 
@@ -521,52 +522,50 @@ export const CodingAgentView: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: '100%', minHeight: 0 }}>
-      {/* Header */}
-      <header className="jarvis-page-header">
-        <div>
-          <h1 className="jarvis-page-header__title">IDE & Código</h1>
-          <p className="jarvis-page-header__subtitle" style={{ maxWidth: '760px' }}>
-            Editor integrado estilo Claude Code com Diff visual lado a lado, checkpoints reversíveis em 1 clique e terminal de agente confinado ao projeto.
-          </p>
-        </div>
-        <div className="jarvis-page-header__actions">
-          <div className="jarvis-segmented" role="tablist" aria-label="Modo da IDE">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeSurface === 'ide'}
-              onClick={() => setActiveSurface('ide')}
-              className={`jarvis-segmented-btn ${activeSurface === 'ide' ? 'is-active' : ''}`}
-            >
-              IDE · Diff & Checkpoints
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeSurface === 'terminal'}
-              onClick={() => setActiveSurface('terminal')}
-              className={`jarvis-segmented-btn ${activeSurface === 'terminal' ? 'is-active' : ''}`}
-            >
-              Terminal do Agente
-            </button>
-          </div>
-          {activeSurface === 'terminal' && (
-            <>
-              <button type="button" onClick={handleDownloadLog} className="btn btn-secondary" disabled={entries.length === 0}>
-                <Download size={14} /> Exportar log
+      <PageHeader
+        icon={<Terminal size={18} />}
+        title="IDE & Código"
+        subtitle="Editor integrado com Diff visual lado a lado, checkpoints reversíveis em 1 clique e terminal de agente confinado ao projeto."
+        actions={
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <div className="jarvis-settings-tabs" role="tablist" aria-label="Modo da IDE">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeSurface === 'ide'}
+                onClick={() => setActiveSurface('ide')}
+                className={`jarvis-settings-tab-btn ${activeSurface === 'ide' ? 'is-active' : ''}`}
+              >
+                IDE · Diff &amp; Checkpoints
               </button>
-              <button type="button" onClick={handleNewSession} className="btn btn-secondary" disabled={running}>
-                Nova sessão
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeSurface === 'terminal'}
+                onClick={() => setActiveSurface('terminal')}
+                className={`jarvis-settings-tab-btn ${activeSurface === 'terminal' ? 'is-active' : ''}`}
+              >
+                Terminal do Agente
               </button>
-              {canClearHistory && (
-                <button type="button" onClick={handleClearHistory} className="btn btn-secondary" disabled={running}>
-                  Limpar histórico
+            </div>
+            {activeSurface === 'terminal' && (
+              <>
+                <button type="button" onClick={handleDownloadLog} className="btn btn-secondary btn-sm" disabled={entries.length === 0}>
+                  <Download size={14} /> Exportar log
                 </button>
-              )}
+                <button type="button" onClick={handleNewSession} className="btn btn-secondary btn-sm" disabled={running}>
+                  Nova sessão
+                </button>
+                {canClearHistory && (
+                  <button type="button" onClick={handleClearHistory} className="btn btn-secondary btn-sm" disabled={running}>
+                    Limpar histórico
+                  </button>
+                )}
             </>
           )}
         </div>
-      </header>
+        }
+      />
 
       {activeSurface === 'ide' ? (
         <IdeWorkspacePanel />

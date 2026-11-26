@@ -222,6 +222,11 @@ export function createAgentsRouter(deps: AgentsRouterDeps): Router {
     );
 
     // Sincroniza modelo principal no cartão do agente quando existir na lista ativa
+    // e remove rota legada conflitante para que a alteração no núcleo entre em vigor imediatamente.
+    if (req.body?.primary_model || req.body?.primary_provider) {
+      serverState.agentRoutes = serverState.agentRoutes.filter((r) => r.agent_role !== normalizedRole);
+      persistStateNamespace(store, 'agent_routes', serverState.agentRoutes);
+    }
     if (agent && updatedCore.primary_model) {
       agent.preferred_model = updatedCore.primary_model;
       agent.updated_at = nowIso();
@@ -367,6 +372,10 @@ export function createAgentsRouter(deps: AgentsRouterDeps): Router {
       updated.is_read_only = req.body.autonomy_level === 'read_only';
     }
     serverState.agentsList[idx] = updated;
+    if (req.body?.preferred_model || req.body?.routing_policy) {
+      serverState.agentRoutes = serverState.agentRoutes.filter((r) => r.agent_role !== updated.role);
+      persistStateNamespace(store, 'agent_routes', serverState.agentRoutes);
+    }
     if (req.body?.preferred_model) {
       const ownerUserId = getOwnerUserId(req);
       store.upsertAgentCore(ownerUserId, updated.role, { primary_model: String(req.body.preferred_model) }, {

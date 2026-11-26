@@ -295,6 +295,12 @@ export function createVoiceCompanionRouter(deps?: { store?: LocalSqliteBrainStor
 
   // --- TRANSCRIÇÃO DE ÁUDIO VIA BACKEND (FALLBACK PARA CHROMIUM / DESKTOP) ---
   router.post('/voice/transcribe', requireAuth, async (req: Request, res: Response) => {
+    const providedTranscript = String(req.body?.text || req.body?.transcript || '').trim();
+    if (providedTranscript) {
+      res.json({ text: providedTranscript, transcript: providedTranscript, engine: 'client_bridge' });
+      return;
+    }
+
     const rawBase64 = String(req.body?.audio_base64 || '').trim();
     const mimeType = String(req.body?.mime_type || 'audio/webm').split(';')[0].trim() || 'audio/webm';
     const language = String(req.body?.language || 'pt').slice(0, 5);
@@ -356,9 +362,7 @@ export function createVoiceCompanionRouter(deps?: { store?: LocalSqliteBrainStor
       }
 
       const geminiKey =
-        (store && resolveExternalCredentialForRequest(req, store, ownerUserId, undefined, 'gemini')?.apiKey) ||
-        process.env.GEMINI_API_KEY ||
-        '';
+        (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
       if (geminiKey) {
         const gResp = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(geminiKey)}`,

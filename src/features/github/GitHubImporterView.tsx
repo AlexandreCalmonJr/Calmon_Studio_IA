@@ -21,6 +21,7 @@ import {
   Package,
   Clock,
 } from 'lucide-react';
+import { PageHeader } from '../../shared/layout/PageHeader';
 import {
   CURATED_GITHUB_EXAMPLES,
   CuratedGitHubExample,
@@ -183,85 +184,18 @@ export const GitHubImporterView: React.FC<GitHubImporterViewProps> = ({ onNaviga
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingBottom: '36px' }}>
-      {/* Hero Header */}
-      <section
-        className="jarvis-settings-card"
-        style={{
-          padding: '22px 24px',
-          display: 'flex',
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '18px',
-          background:
-            'linear-gradient(135deg, rgba(249, 115, 22, 0.08) 0%, rgba(15, 19, 28, 0.96) 55%, rgba(15, 19, 28, 1) 100%)',
-          borderColor: 'rgba(249, 115, 22, 0.24)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', flex: '1 1 420px', maxWidth: '680px' }}>
-          <div
-            style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '12px',
-              background: 'linear-gradient(135deg, #f97316 0%, #c2410c 100%)',
-              color: '#ffffff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-              boxShadow: '0 8px 20px rgba(249, 115, 22, 0.28)',
-            }}
-          >
-            <GitBranch size={22} />
-          </div>
-          <div>
-            <h1
-              style={{
-                margin: 0,
-                fontSize: '1.28rem',
-                fontWeight: 700,
-                color: 'var(--text-primary)',
-                letterSpacing: '-0.02em',
-              }}
-            >
-              Importador de Repositórios do GitHub
-            </h1>
-            <p
-              style={{
-                margin: '6px 0 0',
-                fontSize: '0.88rem',
-                color: 'var(--text-secondary)',
-                lineHeight: 1.5,
-              }}
-            >
-              Cole o link de qualquer repositório público do GitHub. O JARVIS lê a estrutura e a documentação em
-              português e permite incorporar com 1 clique como <strong>Habilidade</strong>,{' '}
-              <strong>Novo Agente</strong> ou <strong>Base de Conhecimento</strong>.
-            </p>
-          </div>
-        </div>
-
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '8px 12px',
-            borderRadius: '10px',
-            backgroundColor: 'rgba(16, 185, 129, 0.08)',
-            border: '1px solid rgba(16, 185, 129, 0.28)',
-            color: '#6ee7b7',
-            fontSize: '0.78rem',
-            fontWeight: 600,
-          }}
-        >
-          <ShieldCheck size={16} />
-          <span>Análise somente leitura · aprovação obrigatória</span>
-        </div>
-      </section>
+    <div className="jarvis-settings-container is-wide" style={{ paddingBottom: '36px' }}>
+      <PageHeader
+        icon={<GitBranch size={18} />}
+        title="Importador de Repositórios do GitHub"
+        subtitle="Cole o link de qualquer repositório público do GitHub. O Calmon IA lê a estrutura e a documentação em português e permite incorporar com 1 clique como Habilidade, Novo Agente ou Base de Conhecimento."
+        meta={[
+          <span key="readonly-pill" className="jarvis-status-pill is-ok">
+            <ShieldCheck size={14} />
+            <span>Análise somente leitura · aprovação obrigatória</span>
+          </span>,
+        ]}
+      />
 
       {/* Formulário de Leitura do Repositório */}
       <section className="jarvis-settings-card" style={{ padding: '20px 22px' }}>

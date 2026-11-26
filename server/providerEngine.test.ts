@@ -8,6 +8,7 @@ import {
   buildSecureVaultCookieHeader,
   decryptProviderSecret,
   encryptProviderSecret,
+  getEnvProviderCredential,
   inferExternalProviderFromModel,
   maskApiKey,
   parseCookieHeader,
@@ -144,4 +145,9 @@ test('Web Crypto API (AES-GCM 256-bit) encrypts/decrypts runtime & PBKDF2 envelo
   assert.ok(env2.salt);
   assert.ok(!env2.ciphertext.includes('segredo-local'));
   assert.equal(await decryptWithPassphraseWebCrypto(env2, 'senha-mestra-forte-2026'), 'segredo-local-protegido');
+});
+
+test('getEnvProviderCredential retorna null com segurança para provedor desconhecido', () => {
+  assert.equal(getEnvProviderCredential('gemini' as any), null);
+  assert.equal(getEnvProviderCredential('unknown_provider' as any), null);
 });

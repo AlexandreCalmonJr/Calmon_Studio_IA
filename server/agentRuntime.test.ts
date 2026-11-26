@@ -112,6 +112,17 @@ test('resolveAgentTargetModel enforces 5-level precedence and respects auto sele
   assert.equal(l3.requestedModel, 'gemini-4-neon');
   assert.equal(l3.source, 'agent_core');
 
+  const l3Ollama = resolveAgentTargetModel({
+    explicitChatOverride: 'auto',
+    agentRoute: null,
+    agentCore: { primary_provider: 'ollama', primary_model: 'auto_hybrid', fallback_model: 'gpt-4.1-mini' },
+    agentPreferredModel: 'auto_hybrid',
+    systemDefaultModel: 'gemini-4-hydrogen',
+  });
+  assert.equal(l3Ollama.requestedModel, 'calmon-ia:latest');
+  assert.equal(l3Ollama.source, 'agent_core');
+  assert.equal(l3Ollama.fallbackModel, 'gpt-4.1-mini');
+
   // Level 4: agent.preferred_model wins when core is absent
   const l4 = resolveAgentTargetModel({
     explicitChatOverride: undefined,

@@ -72,7 +72,8 @@ async function withTestServer(fn: (baseUrl: string, tokens: { admin: string; aud
     users.delete('test_auditor');
     serverState.agentsList = snapshotAgents;
     serverState.skillsList = snapshotSkills;
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    store.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 }
 
