@@ -4,7 +4,6 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express, { Request, Response, NextFunction } from 'express';
-import { createServer as createViteServer } from 'vite';
 import { WebSocketServer, WebSocket } from 'ws';
 import { isGeminiApiConfigured } from './server/hybridAiEngine.ts';
 import {
@@ -240,7 +239,9 @@ export async function startServer() {
   app.use('/api/v1', buildApiRouter());
 
   if (process.env.NODE_ENV === 'production') {
-    const distDir = path.resolve(process.cwd(), 'dist');
+    const distDir = process.env.STATIC_DIST_DIR
+      ? path.resolve(process.env.STATIC_DIST_DIR)
+      : path.resolve(process.cwd(), 'dist');
     app.use(express.static(distDir));
     app.use((_req, res) => {
       const indexFile = path.join(distDir, 'index.html');
@@ -251,6 +252,7 @@ export async function startServer() {
       }
     });
   } else {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
@@ -331,9 +333,25 @@ export async function startServer() {
     }
   });
 
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`JARVIS AI Hub server listening on http://0.0.0.0:${PORT}`);
+  const listenHost = process.env.HOST || '0.0.0.0';
+  const actualPort = await new Promise<number>((resolve) => {
+    server.listen(PORT, listenHost, () => {
+      const addr = server.address();
+      const resolvedPort = typeof addr === 'object' && addr ? addr.port : PORT;
+      console.log(`Calmon Studio server listening on http://${listenHost}:${resolvedPort}`);
+      resolve(resolvedPort);
+    });
   });
+
+  return {
+    server,
+    port: actualPort,
+    close: () =>
+      new Promise<void>((resolve) => {
+        wss.close();
+        server.close(() => resolve());
+      }),
+  };
 }
 
 // Inicia o servidor se executado diretamente

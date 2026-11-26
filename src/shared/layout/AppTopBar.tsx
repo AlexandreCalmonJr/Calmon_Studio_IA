@@ -11,7 +11,6 @@ import {
   Sun,
 } from 'lucide-react';
 import { DynamicIsland } from '../navigation/DynamicIsland';
-import { AiOrbButton } from '../navigation/AiOrbButton';
 import { LaunchpadGlyph } from '../navigation/NavIcon';
 import type { SystemResourceUsage } from '../../services/api/system';
 import type { ThemeMode } from '../../services/themeEngine';
@@ -23,10 +22,6 @@ export interface AppTopBarProps {
   launchpadOpen: boolean;
   onToggleLaunchpad: () => void;
   activeMeta: { section: string; title: string };
-  assistantName: string;
-  showVoiceHud: boolean;
-  wakeWordEnabled: boolean;
-  onToggleVoiceHud: () => void;
   showDynamicIsland: boolean;
   systemResources: SystemResourceUsage | null;
   onOpenVoiceHud: () => void;
@@ -50,10 +45,6 @@ export const AppTopBar: React.FC<AppTopBarProps> = ({
   launchpadOpen,
   onToggleLaunchpad,
   activeMeta,
-  assistantName,
-  showVoiceHud,
-  wakeWordEnabled,
-  onToggleVoiceHud,
   showDynamicIsland,
   systemResources,
   onOpenVoiceHud,
@@ -123,14 +114,6 @@ export const AppTopBar: React.FC<AppTopBarProps> = ({
         </span>
       </div>
     </div>
-
-    {/* Centro: Orb de IA animado com a letra C */}
-    <AiOrbButton
-      assistantName={assistantName}
-      active={showVoiceHud || wakeWordEnabled}
-      centered
-      onClick={onToggleVoiceHud}
-    />
 
     {/* Direita: Telemetria Inline (DynamicIsland), Comando Ctrl+K, Ação Principal, Perfil */}
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>

@@ -1,0 +1,86 @@
+name: Build Calmon Studio Desktop (Windows, Linux & macOS)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Windows Installer (.exe) & Portable
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck & Unit Tests
+        run: npm run typecheck && npm test -- --run
+      - name: Build Frontend & Server Bundle
+        run: npm run build && npm run build:server
+      - name: Build Windows .exe (NSIS + Portable)
+        run: npx electron-builder --win nsis portable --publish never
+      - name: Upload Windows .exe Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Calmon-Studio-Windows-x64
+          path: |
+            release/*.exe
+            release/*.blockmap
+
+  build-linux:
+    name: Linux AppImage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck & Unit Tests
+        run: npm run typecheck && npm test -- --run
+      - name: Build Frontend & Server Bundle
+        run: npm run build && npm run build:server
+      - name: Build Linux AppImage
+        run: npx electron-builder --linux AppImage --publish never
+      - name: Upload Linux AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: Calmon-Studio-Linux-x64
+          path: release/*.AppImage
+
+  build-macos:
+    name: macOS Installer (.dmg & .zip)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck & Unit Tests
+        run: npm run typecheck && npm test -- --run
+      - name: Build Frontend & Server Bundle
+        run: npm run build && npm run build:server
+      - name: Build macOS DMG & ZIP (Intel + Apple Silicon)
+        run: npx electron-builder --mac dmg zip --publish never
+      - name: Upload macOS Installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: Calmon-Studio-macOS
+          path: |
+            release/*.dmg
+            release/*.zip

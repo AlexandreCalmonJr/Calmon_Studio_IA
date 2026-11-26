@@ -928,13 +928,6 @@ const DashboardApp: React.FC = () => {
             launchpadOpen={launchpadOpen}
             onToggleLaunchpad={() => setLaunchpadOpen((prev) => !prev)}
             activeMeta={activeMeta}
-            assistantName={assistantName}
-            showVoiceHud={showVoiceHud}
-            wakeWordEnabled={wakeWord.enabled}
-            onToggleVoiceHud={() => {
-              setPendingVoiceCommand(null);
-              setShowVoiceHud((prev) => !prev);
-            }}
             showDynamicIsland={showDynamicIsland}
             systemResources={systemResources}
             onOpenVoiceHud={() => setShowVoiceHud(true)}

@@ -321,6 +321,31 @@ export const ServerLogsView: React.FC = () => {
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <button
                 type="button"
+                onClick={async () => {
+                  try {
+                    const res = await apiFetch(`${API_BASE}/system/diagnostics-bundle`);
+                    if (!res.ok) throw new Error('Falha ao gerar diagnóstico.');
+                    const data = await res.json();
+                    triggerTextFileDownload(
+                      JSON.stringify(data, null, 2),
+                      `calmon-studio-diagnostico-${new Date().toISOString().slice(0, 10)}.json`,
+                      'application/json;charset=utf-8'
+                    );
+                    notify('Diagnóstico sanitizado exportado com sucesso!', 'success');
+                  } catch {
+                    notify('Não foi possível exportar o diagnóstico.', 'error');
+                  }
+                }}
+                className="btn btn-secondary btn-sm"
+                title="Exportar diagnóstico sanitizado (sem senhas ou chaves) para reportar bugs"
+                aria-label="Exportar diagnóstico para bug report"
+              >
+                <Download size={14} />
+                <span>Diagnóstico</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => handleExportLogs('json')}
                 disabled={filteredLogs.length === 0}
                 className="btn btn-primary btn-sm"

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { emitAppEvent, subscribeAppEvent } from '../state/appBus';
+import { AiOrbButton } from './AiOrbButton';
 import {
   LayoutDashboard,
   MessageSquare,
@@ -36,7 +37,6 @@ import {
   EyeOff,
 } from 'lucide-react';
 import {
-  getAssistantInitial,
   type WorkspaceExperienceMode,
 } from '../../services/assistantIdentity';
 import { isTabUnlockedByPacks, type ModulePackDefinition } from '../../services/modulePackEngine';
@@ -102,7 +102,6 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
   onToggleExperienceMode,
 }) => {
   const isSimpleMode = experienceMode === 'simple';
-  const assistantInitial = getAssistantInitial(assistantName);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [serverMenuOpen, setServerMenuOpen] = useState(false);
   const [activeBrainLabel, setActiveBrainLabel] = useState<string>('Esta Máquina · Local');
@@ -348,61 +347,54 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
           flexShrink: 0,
         }}
       >
-        <button
-          type="button"
-          onClick={() => onNavigate('overview')}
-          aria-label="Ir para Visão Geral"
-          className={collapsed ? 'btn btn-ghost btn-icon' : 'btn btn-ghost btn-sm btn-start'}
-          title={`${assistantName} · Calmon Studio`}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            minWidth: 0,
+          }}
         >
-          <div
-            style={{
-              width: '30px',
-              height: '30px',
-              borderRadius: '8px',
-              background: 'linear-gradient(135deg, #f97316 0%, #c2410c 100%)',
-              color: '#ffffff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 700,
-              fontSize: '0.88rem',
-              letterSpacing: '-0.03em',
-              flexShrink: 0,
-            }}
-          >
-            {assistantInitial}
-          </div>
+          <AiOrbButton assistantName={assistantName} />
           {!collapsed && (
-            <div style={{ textAlign: 'left', overflow: 'hidden' }}>
-              <div
-                style={{
-                  fontSize: '0.88rem',
-                  fontWeight: 700,
-                  color: 'var(--text-primary)',
-                  letterSpacing: '-0.01em',
-                  lineHeight: 1.15,
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  maxWidth: '132px',
-                }}
-              >
-                {assistantName}
+            <button
+              type="button"
+              onClick={() => onNavigate('overview')}
+              aria-label="Ir para Visão Geral"
+              className="btn btn-ghost btn-sm btn-start"
+              title={`${assistantName} · Calmon Studio`}
+              style={{ padding: '4px 6px', height: 'auto', textAlign: 'left', overflow: 'hidden' }}
+            >
+              <div style={{ textAlign: 'left', overflow: 'hidden' }}>
+                <div
+                  style={{
+                    fontSize: '0.88rem',
+                    fontWeight: 700,
+                    color: 'var(--text-primary)',
+                    letterSpacing: '-0.01em',
+                    lineHeight: 1.15,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    maxWidth: '132px',
+                  }}
+                >
+                  {assistantName}
+                </div>
+                <div
+                  style={{
+                    fontSize: '0.68rem',
+                    color: 'var(--text-muted)',
+                    fontFamily: 'var(--font-mono)',
+                    lineHeight: 1.2,
+                  }}
+                >
+                  {isSimpleMode ? 'Modo Simples' : 'Calmon Studio · Completo'}
+                </div>
               </div>
-              <div
-                style={{
-                  fontSize: '0.68rem',
-                  color: 'var(--text-muted)',
-                  fontFamily: 'var(--font-mono)',
-                  lineHeight: 1.2,
-                }}
-              >
-                {isSimpleMode ? 'Modo Simples' : 'Calmon Studio · Completo'}
-              </div>
-            </div>
+            </button>
           )}
-        </button>
+        </div>
 
         {!collapsed && (onToggleCollapse || onToggleHidden) && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}>

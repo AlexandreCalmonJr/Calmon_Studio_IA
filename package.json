@@ -2,11 +2,19 @@
   "name": "jarvis-dashboard",
   "private": true,
   "version": "3.0.1",
+  "description": "Calmon Studio — Plataforma de IA Local-First e Multi-Agentes",
+  "author": "Alexandre Calmon",
   "type": "module",
+  "main": "electron/main.mjs",
   "scripts": {
     "dev": "tsx server.ts",
     "start": "tsx server.ts",
     "build": "tsc && vite build",
+    "build:server": "esbuild server.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist-server/server.mjs --packages=external --external:vite --banner:js=\"import { createRequire as __cr } from 'module'; const require = __cr(import.meta.url);\"",
+    "desktop:dev": "npm run build && npm run build:server && electron .",
+    "desktop:win": "npm run build && npm run build:server && electron-builder --win nsis portable",
+    "desktop:linux": "npm run build && npm run build:server && electron-builder --linux AppImage",
+    "desktop:mac": "npm run build && npm run build:server && electron-builder --mac dmg zip",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
@@ -54,8 +62,50 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^45.5.0",
+    "electron-builder": "^26.18.0",
     "typescript": "^5.7.2",
     "vite": "^6.0.1",
     "vite-plugin-pwa": "^2.0.0"
+  },
+  "build": {
+    "appId": "com.calmonstudio.hub",
+    "productName": "Calmon Studio",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-server/**/*",
+      "electron/**/*",
+      "models/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "artifactName": "Calmon-Studio-${version}-${arch}-${target}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Utility",
+      "artifactName": "Calmon-Studio-${version}-${arch}.${ext}"
+    },
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["x64", "arm64"] },
+        { "target": "zip", "arch": ["x64", "arm64"] }
+      ],
+      "category": "public.app-category.developer-tools",
+      "artifactName": "Calmon-Studio-${version}-${arch}.${ext}"
+    }
   }
 }

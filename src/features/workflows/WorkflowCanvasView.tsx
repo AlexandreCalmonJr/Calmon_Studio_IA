@@ -24,7 +24,6 @@ import {
   X,
 } from 'lucide-react';
 import { notify } from '../../shared/common/Toast';
-import { AiOrbButton } from '../../shared/navigation/AiOrbButton';
 import {
   fetchAgents,
   fetchWorkflowsHub,
@@ -639,7 +638,7 @@ export const WorkflowCanvasView: React.FC = () => {
         </div>
 
         {/* Centro: Orb de IA animado com a letra C */}
-        <AiOrbButton centered />
+        <div />
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <button

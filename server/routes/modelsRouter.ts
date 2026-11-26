@@ -800,5 +800,57 @@ export function createModelsRouter(deps: ModelsRouterDeps): Router {
     });
   });
 
+  // Provisiona o modelo local incorporado Calmon IA no Ollama do usuário
+  router.post('/models/calmon-ia/provision', requireAuth, async (req: Request, res: Response) => {
+    const activeHw = getActiveHardwareProfile();
+    const ollamaUrl = (String(req.body?.ollama_url || activeHw.ollama_url || 'http://127.0.0.1:11434')).replace(/\/+$/, '');
+    const baseModel = String(req.body?.base_model || 'llama3.2:3b').trim() || 'llama3.2:3b';
+
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 180_000);
+      const response = await fetch(`${ollamaUrl}/api/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: 'calmon-ia',
+          from: baseModel,
+          stream: false,
+          parameters: {
+            temperature: 0.6,
+            top_p: 0.9,
+            num_ctx: 4096,
+            num_predict: 768,
+          },
+          system:
+            'Você é a Calmon IA, a inteligência artificial local oficial do Calmon Studio. Responda em Português do Brasil claro, direto, bem estruturado e técnico quando necessário. Você opera 100% localmente na máquina do usuário com privacidade total.',
+        }),
+      });
+      clearTimeout(timer);
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        res.status(502).json({
+          status: 'error',
+          detail: `Ollama retornou HTTP ${response.status} ao criar calmon-ia${errText ? `: ${errText.slice(0, 180)}` : '.'}`,
+        });
+        return;
+      }
+
+      res.json({
+        status: 'ok',
+        model: 'calmon-ia:latest',
+        base_model: baseModel,
+        message: 'Modelo local Calmon IA provisionado com sucesso no Ollama.',
+      });
+    } catch (err) {
+      res.status(503).json({
+        status: 'error',
+        detail: `Não foi possível conectar ao Ollama em ${ollamaUrl} (${err instanceof Error ? err.message : String(err)}).`,
+      });
+    }
+  });
+
   return router;
 }

@@ -384,5 +384,70 @@ export function createSystemRouter(deps: SystemRouterDeps): Router {
     res.json({ total: merged.length, logs: merged });
   });
 
+  // --- DIAGNOSTICS BUNDLE (SANITIZADO PARA BUG REPORT) ---
+  router.get('/system/diagnostics-bundle', requireAuth, (_req: Request, res: Response) => {
+    const dbHealth = store.getDatabaseHealth();
+    const hw = getActiveHardwareProfile();
+    res.json({
+      app: 'Calmon Studio',
+      version: process.env.CALMON_APP_VERSION || '3.0.1',
+      generated_at: nowIso(),
+      runtime: {
+        node: process.version,
+        platform: process.platform,
+        arch: process.arch,
+        uptime_seconds: Math.round((Date.now() - BOOT_TIME) / 1000),
+      },
+      hardware: {
+        cpu: hw.cpu,
+        ram_gb: hw.ram_gb,
+        gpu_name: hw.gpu_name,
+        vram_gb: hw.vram_gb,
+        ollama_url: hw.ollama_url,
+      },
+      database: {
+        ok: dbHealth.ok,
+        journal_mode: dbHealth.journalMode,
+        size_bytes: dbHealth.dbSizeBytes,
+      },
+      providers: {
+        ollama_connected: serverState.providerConnectivity.ollama_connected,
+        gemini_configured: isGeminiApiConfigured(),
+      },
+      recent_logs: serverState.serverLogs.slice(0, 40),
+    });
+  });
+
+  // --- VERIFICADOR DE NOVA VERSÃO (GITHUB RELEASES) ---
+  router.get('/system/check-release', requireAuth, async (_req: Request, res: Response) => {
+    const currentVersion = process.env.CALMON_APP_VERSION || '3.0.1';
+    const repo = process.env.CALMON_GITHUB_REPO || 'AlexandreCalmonJr/Frontend_JarvisHub';
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4500);
+      const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+        signal: controller.signal,
+        headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'CalmonStudio-Updater/1.0' },
+      });
+      clearTimeout(timer);
+      if (!response.ok) {
+        res.json({ current_version: currentVersion, update_available: false, status: 'unavailable' });
+        return;
+      }
+      const data = (await response.json()) as { tag_name?: string; html_url?: string; name?: string };
+      const latestTag = String(data.tag_name || '').replace(/^v/i, '').trim();
+      res.json({
+        current_version: currentVersion,
+        latest_version: latestTag || currentVersion,
+        update_available: Boolean(latestTag && latestTag !== currentVersion),
+        release_url: data.html_url || `https://github.com/${repo}/releases`,
+        release_name: data.name || latestTag,
+        status: 'ok',
+      });
+    } catch {
+      res.json({ current_version: currentVersion, update_available: false, status: 'offline' });
+    }
+  });
+
   return router;
 }

@@ -215,7 +215,12 @@ async function runOllamaChat(
   const start = Date.now();
   const base = ollamaBaseUrl.replace(/\/+$/, '');
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 120000);
+  const timeoutMs = Math.max(30_000, Number(process.env.OLLAMA_TIMEOUT_MS || 240_000));
+  let timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const resetTimeout = () => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => controller.abort(), timeoutMs);
+  };
   const messages = [
     { role: 'system', content: systemInstruction },
     ...(Array.isArray(history)
@@ -235,6 +240,7 @@ async function runOllamaChat(
       body: JSON.stringify({
         model,
         stream: useStream,
+        keep_alive: '15m',
         messages,
       }),
     });
@@ -254,6 +260,7 @@ async function runOllamaChat(
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        resetTimeout();
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
@@ -653,7 +660,7 @@ export async function runHybridInference(req: HybridInferenceRequest): Promise<H
       } catch (localErr: any) {
         const errorDetail =
           localErr?.name === 'AbortError'
-            ? 'Tempo limite de resposta excedido (120s)'
+            ? 'Tempo limite de resposta excedido (inatividade/timeout Ollama)'
             : String(localErr?.message || 'nó local inacessível');
         if (policy === 'local_only' || !geminiEnabled) {
           throw new Error(
