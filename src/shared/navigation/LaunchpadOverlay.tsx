@@ -55,7 +55,7 @@ export const LaunchpadOverlay: React.FC<LaunchpadOverlayProps> = ({
   onToggleSidebarHidden,
   isSimpleMode = false,
   onToggleSimpleMode,
-  assistantName = 'JARVIS',
+  assistantName = 'Calmon IA',
   installedAgents = [],
   onSelectAgent,
 }) => {

@@ -97,7 +97,7 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
   customPacks = [],
   canManagePacks = false,
   canAccessTab,
-  assistantName = 'JARVIS',
+  assistantName = 'Calmon IA',
   experienceMode = 'engineering',
   onToggleExperienceMode,
 }) => {

@@ -76,7 +76,7 @@ export function createVoiceCompanionRouter(deps?: { store?: LocalSqliteBrainStor
   router.get('/voice/briefing', requireAuth, (req: Request, res: Response) => {
     const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
     const profile = user ? userProfiles.get(user.username) : undefined;
-    const assistantName = String(profile?.assistantName || 'JARVIS');
+    const assistantName = String(profile?.assistantName || 'Calmon IA');
     const userName = String(profile?.displayName || user?.display_name || 'Você');
     const pendingApprovals = serverState.approvals.filter((a) => a.status === 'pending').length;
     const openIncidents = serverState.sentinelIncidents.filter((i) => i.status === 'open').length;
@@ -122,7 +122,7 @@ export function createVoiceCompanionRouter(deps?: { store?: LocalSqliteBrainStor
 
     const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
     const profile = user ? userProfiles.get(user.username) : undefined;
-    const assistantName = String(profile?.assistantName || 'JARVIS');
+    const assistantName = String(profile?.assistantName || 'Calmon IA');
     const userName = String(profile?.displayName || user?.display_name || 'Você');
     const wake = detectWakeWord(transcript, assistantName);
     const effectiveCommand = wake.command || transcript;
@@ -156,21 +156,25 @@ export function createVoiceCompanionRouter(deps?: { store?: LocalSqliteBrainStor
       reply = `${assistantName} na escuta! Entendi seu pedido: "${effectiveCommand}". ${attachmentNote ? `${attachmentNote} Já registrei o contexto para análise.` : 'Tudo pronto para executar no seu workspace assim que desejar.'}`;
     }
 
-    // Tenta enriquecer com motor híbrido rápido (timeout curto de 4.5s para voz fluida)
+    // Tenta enriquecer com motor híbrido (prioriza Calmon IA local quando Ollama estiver ativo sem Gemini)
     if (!navAction && (serverState.providerConnectivity.gemini_connected || serverState.providerConnectivity.ollama_connected)) {
       try {
         const activeHw = getActiveHardwareProfile();
+        const preferLocalCalmon =
+          serverState.providerConnectivity.ollama_connected && !serverState.providerConnectivity.gemini_connected;
+        const targetVoiceModel = preferLocalCalmon ? 'calmon-ia:latest' : 'gemini-3.1-flash-lite';
+        const voiceTimeoutMs = preferLocalCalmon ? 18_000 : 6_000;
         const voicePrompt =
           practiceMode === 'english'
             ? `You are ${assistantName}, a friendly English voice tutor. Reply in 2 short spoken sentences in English with a gentle tip and a follow-up question. User said: "${effectiveCommand}". ${attachmentNote}`
-            : `Você é ${assistantName}, assistente pessoal por voz estilo JARVIS falando com ${userName}. Responda em português de forma calorosa, direta e natural para ser lida em voz alta (máximo 3 frases curtas). Contexto atual: ${pendingApp} aprovações pendentes, ${openInc} alertas Sentinela, Vault Lock ${serverState.vaultLocked ? 'travado' : 'aberto'}. ${attachmentNote} Pedido falado: "${effectiveCommand}"`;
+            : `Você é ${assistantName}, assistente pessoal por voz falando com ${userName}. Responda em português do Brasil de forma calorosa, direta e natural para ser lida em voz alta (máximo 3 frases curtas). Contexto atual: ${pendingApp} aprovações pendentes, ${openInc} alertas Sentinela, Vault Lock ${serverState.vaultLocked ? 'travado' : 'aberto'}. ${attachmentNote} Pedido falado: "${effectiveCommand}"`;
 
         const aiRes = await Promise.race([
           runHybridInference({
             prompt: voicePrompt,
             systemInstruction: 'Responda em texto limpo sem markdown excessivo, pronto para síntese de voz.',
-            requestedModel: 'gemini-3.1-flash-lite',
-            routingPolicy: 'auto_hybrid',
+            requestedModel: targetVoiceModel,
+            routingPolicy: preferLocalCalmon ? 'local_only' : 'auto_hybrid',
             ollamaBaseUrl: activeHw.ollama_url,
             ollamaConnected: serverState.providerConnectivity.ollama_connected,
             geminiConnected: serverState.providerConnectivity.gemini_connected,
@@ -179,11 +183,11 @@ export function createVoiceCompanionRouter(deps?: { store?: LocalSqliteBrainStor
             agentName: 'Assistente de Voz',
             agentProperName: assistantName,
           }),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 4500)),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), voiceTimeoutMs)),
         ]);
         if (aiRes && aiRes.text && aiRes.text.trim().length > 8) {
           reply = aiRes.text.replace(/[*#`]/g, '').trim();
-          modelUsed = aiRes.modelUsed || 'gemini-3.1-flash-lite';
+          modelUsed = aiRes.modelUsed || targetVoiceModel;
           executionMode = aiRes.executionMode;
         }
       } catch {
@@ -205,52 +209,88 @@ export function createVoiceCompanionRouter(deps?: { store?: LocalSqliteBrainStor
     });
   });
 
-  // --- SÍNTESE DE VOZ NEURAL (OPENAI TTS QUANDO CONFIGURADO) ---
+  // --- SÍNTESE DE VOZ NEURAL (OPENAI TTS OU EDGE NEURAL PT-BR GRATUITO) ---
   router.post('/voice/tts', requireAuth, async (req: Request, res: Response) => {
     const text = String(req.body?.text || '').trim().slice(0, 600);
     if (!text) {
       res.status(400).json({ detail: 'Texto vazio para síntese de voz.' });
       return;
     }
+    const requestedEngine = String(req.body?.model || '').trim();
+    const requestedVoice = String(req.body?.voice || 'female_1').trim();
+    const requestedSpeed = Math.max(0.75, Math.min(1.8, Number(req.body?.speed || 1.0)));
+
     const store = deps?.store;
     const ownerUserId = getOwnerUserId(req);
     const openaiCred = store
       ? resolveExternalCredentialForRequest(req, store, ownerUserId, undefined, 'openai')
       : getEnvProviderCredential('openai');
 
-    if (!openaiCred?.apiKey) {
-      res.json({ audio_base64: null, fallback: true });
-      return;
+    if (openaiCred?.apiKey && requestedEngine === 'openai_tts') {
+      try {
+        const resp = await fetch('https://api.openai.com/v1/audio/speech', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${openaiCred.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'tts-1',
+            voice: requestedVoice === 'male_1' ? 'onyx' : 'nova',
+            speed: requestedSpeed,
+            input: text,
+            response_format: 'mp3',
+          }),
+        });
+        if (resp.ok) {
+          const arr = Buffer.from(await resp.arrayBuffer());
+          res.json({
+            audio_base64: arr.toString('base64'),
+            mime_type: 'audio/mpeg',
+            provider: 'openai',
+            fallback: false,
+          });
+          return;
+        }
+      } catch {
+        // segue para Edge Neural TTS gratuito
+      }
     }
 
+    // Edge Neural TTS PT-BR gratuito (voz humana natural sem API key)
     try {
-      const resp = await fetch('https://api.openai.com/v1/audio/speech', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${openaiCred.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'tts-1',
-          voice: 'nova',
-          input: text,
-          response_format: 'mp3',
-        }),
-      });
-      if (!resp.ok) {
-        res.json({ audio_base64: null, fallback: true });
+      const { MsEdgeTTS, OUTPUT_FORMAT } = await import('msedge-tts');
+      const edgeVoice =
+        requestedVoice === 'male_1'
+          ? 'pt-BR-AntonioNeural'
+          : requestedVoice === 'neutral_1'
+            ? 'pt-BR-ThalitaMultilingualNeural'
+            : 'pt-BR-FranciscaNeural';
+      const tts = new MsEdgeTTS();
+      await tts.setMetadata(edgeVoice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+      const ratePct = Math.round((requestedSpeed - 1) * 100);
+      const rateStr = `${ratePct >= 0 ? '+' : ''}${ratePct}%`;
+      const { audioStream } = tts.toStream(text, { rate: rateStr });
+      const chunks: Buffer[] = [];
+      for await (const chunk of audioStream) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      const audioBuf = Buffer.concat(chunks);
+      if (audioBuf.length > 0) {
+        res.json({
+          audio_base64: audioBuf.toString('base64'),
+          mime_type: 'audio/mpeg',
+          provider: 'edge-neural-tts',
+          voice: edgeVoice,
+          fallback: false,
+        });
         return;
       }
-      const arr = Buffer.from(await resp.arrayBuffer());
-      res.json({
-        audio_base64: arr.toString('base64'),
-        mime_type: 'audio/mpeg',
-        provider: 'openai',
-        fallback: false,
-      });
     } catch {
-      res.json({ audio_base64: null, fallback: true });
+      // Fallback para speechSynthesis do navegador caso esteja offline
     }
+
+    res.json({ audio_base64: null, fallback: true });
   });
 
   // --- TRANSCRIÇÃO DE ÁUDIO VIA BACKEND (FALLBACK PARA CHROMIUM / DESKTOP) ---
@@ -409,7 +449,7 @@ export function createVoiceCompanionRouter(deps?: { store?: LocalSqliteBrainStor
       ? req.body.channel
       : 'task_completed') as PushNotificationServerItem['channel'];
 
-    const title = String(req.body?.title || 'JARVIS AI Hub · Teste de Push').trim();
+    const title = String(req.body?.title || 'Calmon Studio · Teste de Push').trim();
     const body = String(
       req.body?.body || 'Conexão Push ativa! Você receberá alertas de tarefas concluídas, recados e aprovações no celular.'
     ).trim();

@@ -9,7 +9,7 @@ import {
 } from '../src/services/androidAppEngine';
 
 export function resolveAndroidMobileConfig(raw: Partial<AndroidMobileConfig>): AndroidMobileConfig {
-  const assistantName = String(raw.assistantName || 'JARVIS').trim().slice(0, 32) || 'JARVIS';
+  const assistantName = String(raw.assistantName || 'Calmon IA').trim().slice(0, 32) || 'Calmon IA';
   const appName = String(raw.appName || `${assistantName} Mobile`).trim().slice(0, 48) || `${assistantName} Mobile`;
   const packageId = normalizeAndroidAppId(raw.packageId || 'br.jarvis.mobile');
   const serverUrl = validateBrainServerUrl(raw.serverUrl || 'http://192.168.1.50:3000');

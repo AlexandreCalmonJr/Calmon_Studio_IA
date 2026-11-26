@@ -122,7 +122,7 @@ export function createAuthRouter(deps?: AuthRouterDeps): Router {
         return {
           username: u.username,
           display_name: prof?.displayName || u.display_name,
-          assistant_name: prof?.assistantName || 'JARVIS',
+          assistant_name: prof?.assistantName || 'Calmon IA',
           experience_mode: prof?.experienceMode === 'simple' ? 'simple' : 'engineering',
           role: u.role,
           avatar_icon: prof?.avatarIcon || u.display_name.slice(0, 1).toUpperCase(),
@@ -142,7 +142,7 @@ export function createAuthRouter(deps?: AuthRouterDeps): Router {
     const rawUsername = String(req.body?.username || '').trim().toLowerCase();
     const display_name = String(req.body?.display_name || '').trim();
     const password = String(req.body?.password || '');
-    const assistant_name = String(req.body?.assistant_name || 'JARVIS').trim().slice(0, 40) || 'JARVIS';
+    const assistant_name = String(req.body?.assistant_name || 'Calmon IA').trim().slice(0, 40) || 'Calmon IA';
     const experience_mode = req.body?.experience_mode === 'engineering' ? 'engineering' : 'simple';
 
     if (!/^[a-z0-9._-]{3,32}$/.test(rawUsername)) {
@@ -218,7 +218,7 @@ export function createAuthRouter(deps?: AuthRouterDeps): Router {
         seniorityLevel: isBootstrappedAdmin ? 'architect' : 'mid',
         responseStyle: isBootstrappedAdmin ? 'detailed' : 'educational',
         customInstructions: '',
-        assistantName: 'JARVIS',
+        assistantName: 'Calmon IA',
         assistantGreeting: '',
         experienceMode: isBootstrappedAdmin ? 'engineering' : 'simple',
       });
@@ -384,7 +384,7 @@ export function createAuthRouter(deps?: AuthRouterDeps): Router {
       seniorityLevel: 'senior',
       responseStyle: 'detailed',
       customInstructions: '',
-      assistantName: 'JARVIS',
+      assistantName: 'Calmon IA',
       assistantGreeting: '',
       experienceMode: user.role === 'admin' ? 'engineering' : 'simple',
     };
@@ -397,7 +397,7 @@ export function createAuthRouter(deps?: AuthRouterDeps): Router {
     const merged = {
       ...prev,
       ...req.body,
-      assistantName: String(req.body?.assistantName || prev.assistantName || 'JARVIS').trim().slice(0, 40) || 'JARVIS',
+      assistantName: String(req.body?.assistantName || prev.assistantName || 'Calmon IA').trim().slice(0, 40) || 'Calmon IA',
       experienceMode: req.body?.experienceMode === 'simple' ? 'simple' : 'engineering',
     };
     userProfiles.set(user.username, merged);

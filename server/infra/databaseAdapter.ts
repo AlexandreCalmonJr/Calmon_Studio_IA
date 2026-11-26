@@ -68,7 +68,7 @@ export interface HubRepositoryAdapter {
   close?(): Promise<void>;
 }
 
-export const POSTGRES_PGVECTOR_DDL = `-- JARVIS AI Hub — Schema PostgreSQL 16 + pgvector (HNSW) para Escala Multi-Réplica
+export const POSTGRES_PGVECTOR_DDL = `-- Calmon Studio — Schema PostgreSQL 16 + pgvector (HNSW) para Escala Multi-Réplica
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS agent_runs (

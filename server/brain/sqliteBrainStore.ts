@@ -305,7 +305,7 @@ export class LocalSqliteBrainStore {
           .trim()
           .slice(0, 64) || 'Esta Máquina · Local (Sem Docker)';
       const assistantName =
-        String(options.assistantName || process.env.ASSISTANT_NAME || 'JARVIS').trim().slice(0, 32) || 'JARVIS';
+        String(options.assistantName || process.env.ASSISTANT_NAME || 'Calmon IA').trim().slice(0, 32) || 'Calmon IA';
 
       this.db
         .prepare(
@@ -1258,7 +1258,7 @@ export class LocalSqliteBrainStore {
       workspacesRootDir: this.workspacesDir,
       slug: row.slug,
       workspaceName: row.name,
-      assistantName: identity?.assistant_name || 'JARVIS',
+      assistantName: identity?.assistant_name || 'Calmon IA',
     });
     this.workspaceStores.set(clean, store);
     return store;
@@ -1821,7 +1821,7 @@ export class LocalSqliteBrainStore {
       session_id: String(input.session_id || 'default').slice(0, 120),
       user_id: String(input.user_id || 'admin').slice(0, 80),
       agent_role: String(input.agent_role || 'jarvis_master').slice(0, 80),
-      agent_name: String(input.agent_name || 'JARVIS').slice(0, 80),
+      agent_name: String(input.agent_name || 'Calmon IA').slice(0, 80),
       prompt: String(input.prompt || '').slice(0, 8000),
       status: input.status || 'running',
       model_used: String(input.model_used || '').slice(0, 120),

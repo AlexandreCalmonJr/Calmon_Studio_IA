@@ -664,7 +664,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                     <span style={{ fontSize: '0.84rem', color: 'var(--text-primary)', fontWeight: 600 }}>
-                      {message.statusMessage || 'JARVIS Maestro processando a solicitação...'}
+                      {message.statusMessage || 'Calmon IA · Maestro processando a solicitação...'}
                     </span>
                     <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
                       Aguardando o resultado real do processamento.

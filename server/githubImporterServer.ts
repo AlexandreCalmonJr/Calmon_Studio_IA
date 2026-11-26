@@ -74,7 +74,7 @@ async function enrichWithGemini(
     `Arquivos na raiz: ${snapshot.files.map((f) => f.name).join(', ')}`,
     `Scripts: ${base.detectedScripts.join(', ') || 'nenhum'}`,
     `Trecho do README:\n${base.readmeExcerpt.slice(0, 1400)}`,
-    'Retorne um JSON resumindo em português simples o que este repositório faz, como pode turbinar o JARVIS AI Hub, um nome amigável de habilidade e uma missão objetiva para um agente dedicado.',
+    'Retorne um JSON resumindo em português simples o que este repositório faz, como pode turbinar o Calmon Studio, um nome amigável de habilidade e uma missão objetiva para um agente dedicado.',
   ].join('\n');
 
   const response = await ai.models.generateContent({

@@ -814,7 +814,7 @@ export const CompanionHubView: React.FC<CompanionHubViewProps> = ({
                   <span>Aplicativo Instalável (PWA) & Conformidade Mobile</span>
                 </h2>
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
-                  Instale o JARVIS AI Hub na tela inicial do Android, iPhone ou Desktop para abrir em modo tela cheia (standalone), com cache offline e atalhos de voz.
+                  Instale o Calmon Studio na tela inicial do Android, iPhone ou Desktop para abrir em modo tela cheia (standalone), com cache offline e atalhos de voz.
                 </p>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>

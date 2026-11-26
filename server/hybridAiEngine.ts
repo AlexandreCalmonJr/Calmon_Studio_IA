@@ -504,7 +504,7 @@ async function runGeminiInference(
 }
 
 export async function runHybridInference(req: HybridInferenceRequest): Promise<HybridInferenceResult> {
-  const assistantName = req.assistantName || 'JARVIS';
+  const assistantName = req.assistantName || 'Calmon IA';
   const agentDisplay = req.agentProperName
     ? `${req.agentProperName} (${req.agentName || 'Especialista'})`
     : req.agentName || assistantName;
@@ -634,7 +634,7 @@ export async function runHybridInference(req: HybridInferenceRequest): Promise<H
     const localModel =
       requested && !isGeminiModelId(requested) && requested !== 'auto' && requested !== 'auto_hybrid'
         ? requested
-        : 'llama3.1:8b';
+        : 'calmon-ia:latest';
 
     if (ollamaEnabled) {
       try {

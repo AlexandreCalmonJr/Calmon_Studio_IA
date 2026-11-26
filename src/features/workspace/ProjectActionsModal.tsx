@@ -262,7 +262,7 @@ export const ProjectActionsModal: React.FC<ProjectActionsModalProps> = ({
                       Discutir no Chat
                     </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                      Vincula o projeto ao Chat com os 26 agentes do JARVIS
+                      Vincula o projeto ao Chat com os 26 agentes da Calmon IA
                     </div>
                   </div>
                 </div>

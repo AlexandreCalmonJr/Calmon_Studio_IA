@@ -287,7 +287,7 @@ export function buildStaticRepoInspection(snapshot: GitHubRawSnapshot): GitHubRe
     capabilities.push({
       id: 'cap_api_sdk',
       title: 'Integração via API / SDK',
-      description: 'Expõe contratos de API ou SDK reutilizáveis para conectar agentes do JARVIS.',
+      description: 'Expõe contratos de API ou SDK reutilizáveis para conectar agentes da Calmon IA.',
       category: 'integration',
     });
   }
@@ -308,7 +308,7 @@ export function buildStaticRepoInspection(snapshot: GitHubRawSnapshot): GitHubRe
     capabilities.push({
       id: 'cap_docs_reference',
       title: 'Base Documental e Referência Técnica',
-      description: 'Documentação e arquivos do repositório prontos para orientar respostas especializadas no JARVIS.',
+      description: 'Documentação e arquivos do repositório prontos para orientar respostas especializadas no Calmon Studio.',
       category: 'knowledge',
     });
   }
@@ -351,7 +351,7 @@ export function buildStaticRepoInspection(snapshot: GitHubRawSnapshot): GitHubRe
     suggestedSkillName: `GitHub · ${friendlyName}`,
     suggestedAgentName: `Especialista ${friendlyName}`,
     suggestedAgentHandle: `@${cleanHandleBase}`,
-    suggestedMission: `Dominar, explicar e aplicar recursos e padrões do projeto ${snapshot.owner}/${snapshot.repo} no JARVIS.`,
+    suggestedMission: `Dominar, explicar e aplicar recursos e padrões do projeto ${snapshot.owner}/${snapshot.repo} no Calmon Studio.`,
     detectedCapabilities: capabilities,
     detectedScripts: scripts,
     topDependencies: deps,

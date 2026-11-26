@@ -114,7 +114,7 @@ export const AssistantFederationPanel: React.FC = () => {
     setSending(true);
     try {
       const res = await sendAssistantRelayMessage({
-        from_assistant: assistantName || 'JARVIS',
+        from_assistant: assistantName || 'Calmon IA',
         to_peer_id: selectedPeer.id,
         content: messageText.trim(),
         save_to_household_brain: saveToHousehold,
@@ -158,7 +158,7 @@ export const AssistantFederationPanel: React.FC = () => {
         asset_id: item.asset_id,
         asset_name: item.asset_name,
         summary: item.summary,
-        from_assistant: assistantName || 'JARVIS',
+        from_assistant: assistantName || 'Calmon IA',
         to_peer_id: selectedPeer.id,
       });
       notify(`'${item.asset_name}' compartilhado com ${selectedPeer.assistant_name} em 1 clique.`, 'success');

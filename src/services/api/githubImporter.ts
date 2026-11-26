@@ -53,5 +53,5 @@ export async function incorporateGitHubRepoApi(input: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   });
-  return parseJsonOrThrow(res, 'Não foi possível incorporar este repositório ao JARVIS.');
+  return parseJsonOrThrow(res, 'Não foi possível incorporar este repositório à Calmon IA.');
 }

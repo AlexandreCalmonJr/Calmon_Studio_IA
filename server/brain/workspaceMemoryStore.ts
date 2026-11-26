@@ -71,7 +71,7 @@ export function floatVectorToBlob(vec: number[]): Uint8Array {
   return new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
 }
 
-export function defaultMarkdownTemplates(workspaceName: string, assistantName = 'JARVIS'): Record<MemoryFilename, string> {
+export function defaultMarkdownTemplates(workspaceName: string, assistantName = 'Calmon IA'): Record<MemoryFilename, string> {
   return {
     'SOUL.md': `# Identidade do Perfil — ${workspaceName}
 
@@ -157,7 +157,7 @@ export class WorkspaceMemoryStore {
     this.db = new DatabaseSync(this.dbPath);
     this.db.exec(WORKSPACE_SQLITE_DDL);
 
-    this.ensureDefaultFilesAndSeed(options.workspaceName, options.assistantName || 'JARVIS');
+    this.ensureDefaultFilesAndSeed(options.workspaceName, options.assistantName || 'Calmon IA');
   }
 
   private ensureDefaultFilesAndSeed(workspaceName: string, assistantName: string): void {

@@ -111,7 +111,7 @@ export function createWorkflowsRouter(deps: WorkflowsRouterDeps = {}): Router {
     }
     const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
     const profile = user ? userProfiles.get(user.username) : undefined;
-    const assistantName = String(req.body?.assistant_name || profile?.assistantName || 'JARVIS');
+    const assistantName = String(req.body?.assistant_name || profile?.assistantName || 'Calmon IA');
     const requestedRoles: string[] = Array.isArray(req.body?.participant_roles) && req.body.participant_roles.length
       ? req.body.participant_roles.map((r: unknown) => String(r))
       : ['software_architect', 'sentinel_security', 'ux_ui_designer', 'research_analyst'];
@@ -343,7 +343,7 @@ export function createWorkflowsRouter(deps: WorkflowsRouterDeps = {}): Router {
             ollamaConnected: serverState.providerConnectivity.ollama_connected,
             geminiConnected: serverState.providerConnectivity.gemini_connected,
             enableWebSearch: node.agentRole === 'research_analyst',
-            assistantName: 'JARVIS',
+            assistantName: 'Calmon IA',
             agentName: agent.name,
             agentProperName: agent.proper_name,
           });
@@ -427,7 +427,7 @@ export function createWorkflowsRouter(deps: WorkflowsRouterDeps = {}): Router {
     }
     const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
     const profile = user ? userProfiles.get(user.username) : undefined;
-    const assistantName = String(req.body?.assistant_name || profile?.assistantName || 'JARVIS');
+    const assistantName = String(req.body?.assistant_name || profile?.assistantName || 'Calmon IA');
     try {
       const artifact = await generateStructuredArtifact({
         kind,

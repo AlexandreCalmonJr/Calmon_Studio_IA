@@ -328,7 +328,7 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
     setTabs((prev) =>
       prev.map((t) =>
         (t.id === 'default' || t.id === sessionId) &&
-        (t.title === 'JARVIS Master' || t.title === 'JARVIS' || t.title === 'Calmon')
+        (t.title === 'Calmon IA' || t.title === 'JARVIS' || t.title === 'Calmon')
           ? { ...t, title: assistantName }
           : t
       )
@@ -548,7 +548,7 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
       prev.map((t) =>
         t.id === activeTabId &&
         (t.title === assistantName ||
-          t.title === 'JARVIS Master' ||
+          t.title === 'Calmon IA' ||
           t.title === 'Novo Chat' ||
           t.title === 'Calmon Dev' ||
           t.title.startsWith('Chat sess_'))

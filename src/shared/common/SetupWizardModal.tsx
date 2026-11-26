@@ -147,7 +147,7 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
                 Assistente de Configuração Inicial
               </h2>
               <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                Configure o ambiente local e conheça as opções de segurança do JARVIS
+                Configure o ambiente local e conheça as opções de segurança da Calmon IA
               </span>
             </div>
           </div>
@@ -210,7 +210,7 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div>
                 <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#f8fafc', marginBottom: '6px' }}>
-                  Passo 1: Como você deseja rodar a inteligência do JARVIS?
+                  Passo 1: Como você deseja rodar a inteligência da Calmon IA?
                 </h3>
                 <p style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', margin: 0 }}>
                   O modo local fica disponível de imediato. O modo nuvem usa o Cofre Privado por Conta: a sua chave fica cifrada e isolada na sua conta.
@@ -484,7 +484,7 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
                   Passo 3: Garantia de Segurança & Conclusão
                 </h3>
                 <p style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', margin: 0 }}>
-                  Seu ambiente local é protegido pelo Núcleo de Políticas e Auditoria do JARVIS.
+                  Seu ambiente local é protegido pelo Núcleo de Políticas e Auditoria da Calmon IA.
                 </p>
               </div>
 
@@ -503,7 +503,7 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
                 <ShieldCheck size={22} color="#10b981" style={{ flexShrink: 0, marginTop: '2px' }} />
                 <div>
                   <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#34d399', margin: '0 0 4px' }}>
-                    Políticas de Segurança do JARVIS
+                    Políticas de Segurança da Calmon IA
                   </h4>
                   <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: '1.5', margin: 0 }}>
                     As políticas de autenticação, permissões e auditoria podem ser consultadas no Security Center. No modo nuvem, a chave fica no Cofre Privado por Conta, cifrada em repouso e isolada das restantes contas.
@@ -589,7 +589,7 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
               className="btn btn-primary btn-lg"
             >
               {saving ? <RefreshCw size={15} className="spin" /> : <CheckCircle2 size={16} />}
-              <span>Concluir e Iniciar JARVIS Studio</span>
+              <span>Concluir e Iniciar Calmon Studio</span>
             </button>
           )}
         </div>

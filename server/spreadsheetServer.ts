@@ -218,7 +218,7 @@ function excelNumFmtForType(type: SpreadsheetColumn['type']): string | undefined
 
 export async function renderSpreadsheetToXlsxBuffer(spec: SpreadsheetSpec): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'JARVIS AI Hub · Iris Planilhas';
+  workbook.creator = 'Calmon Studio · Iris Planilhas';
   workbook.created = new Date(spec.createdAt || Date.now());
   workbook.modified = new Date();
 

@@ -1059,9 +1059,10 @@ const DashboardApp: React.FC = () => {
               );
             })()
           ) : (
+            activeTab !== 'chat' && (
             <div
-              className={activeTab === 'chat' ? undefined : 'jarvis-view-enter'}
-              key={activeTab === 'chat' ? 'chat-persistent-shell' : `view-${activeTab}`}
+              className="jarvis-view-enter"
+              key={`view-${activeTab}`}
               style={
                 isFullscreenTab
                   ? { width: '100%', height: '100%', minHeight: 0 }
@@ -1131,17 +1132,6 @@ const DashboardApp: React.FC = () => {
                       initialTab="skills"
                       onOpenGitHubImport={() => navigate('github_import')}
                     />
-                  )}
-                  {chatLoaded && (
-                    <div style={{ display: activeTab === 'chat' ? 'block' : 'none', height: '100%' }}>
-                      <ChatMaster
-                        attachedProjectId={attachedProjectId}
-                        onDetachProject={() => setAttachedProjectId(null)}
-                        targetSessionId={targetChatSessionId}
-                        initialPrompt={pendingChatPrompt}
-                        onInitialPromptConsumed={() => setPendingChatPrompt(null)}
-                      />
-                    </div>
                   )}
                   {activeTab === 'approvals' && (
                     <ApprovalCenter
@@ -1213,6 +1203,30 @@ const DashboardApp: React.FC = () => {
                   {activeTab === 'brain_server' && (
                     <BrainServerHubView onNavigate={navigate} canManagePacks={canManagePacks} />
                   )}
+                </Suspense>
+              </ModuleErrorBoundary>
+            </div>
+            )
+          )}
+          {/* ChatMaster persistente fora do container key={activeTab} para não desmontar nem abortar streaming ao trocar de aba */}
+          {chatLoaded && (
+            <div
+              style={{
+                display: activeTab === 'chat' && authLoaded && canAccessTab(activeTab) ? 'block' : 'none',
+                width: '100%',
+                height: '100%',
+                minHeight: 0,
+              }}
+            >
+              <ModuleErrorBoundary key="chat-persistent-boundary">
+                <Suspense fallback={<ViewFallback />}>
+                  <ChatMaster
+                    attachedProjectId={attachedProjectId}
+                    onDetachProject={() => setAttachedProjectId(null)}
+                    targetSessionId={targetChatSessionId}
+                    initialPrompt={pendingChatPrompt}
+                    onInitialPromptConsumed={() => setPendingChatPrompt(null)}
+                  />
                 </Suspense>
               </ModuleErrorBoundary>
             </div>

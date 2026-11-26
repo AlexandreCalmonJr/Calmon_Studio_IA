@@ -23,7 +23,7 @@ const STORAGE_SESSION_KEY = 'jarvis_chat_session_id_v1';
 
 export const INITIAL_GREETING: ChatMessage = {
   sender: 'jarvis',
-  text: 'Olá! Sou o JARVIS Master. Posso ajudar a planear, analisar e executar tarefas com os agentes e ferramentas efetivamente disponíveis, respeitando as permissões e aprovações configuradas no ambiente.',
+  text: 'Olá! Sou o Calmon IA. Posso ajudar a planear, analisar e executar tarefas com os agentes e ferramentas efetivamente disponíveis, respeitando as permissões e aprovações configuradas no ambiente.',
   timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
 };
 
@@ -88,9 +88,10 @@ export function useChatStream(
     });
   }, []);
 
-  // Persistência automática otimizada (apenas quando inativo para não bloquear a thread em streaming)
+  // Persistência automática: salva imediatamente quando novas mensagens entram e ao finalizar streaming
   useEffect(() => {
-    if (loading || deletedSessionsRef.current.has(sessionId)) return;
+    if (deletedSessionsRef.current.has(sessionId)) return;
+    if (loading && messages.length === 0) return;
     try {
       localStorage.setItem(getAccountStorageKey(STORAGE_MESSAGES_KEY), JSON.stringify(messages));
       if (messages.length > 0) {
@@ -99,7 +100,7 @@ export function useChatStream(
     } catch (e) {
       console.warn('Falha ao salvar mensagens no localStorage:', e);
     }
-  }, [messages, sessionId, loading]);
+  }, [messages.length, sessionId, loading]);
 
   useEffect(() => {
     try {
@@ -410,7 +411,7 @@ export function useChatStream(
         mdText = await exportChatSessionMarkdown(sessionId);
       } catch {
         mdText = `# 📜 Conversa Calmon Studio\n**Sessão:** \`${sessionId}\`\n\n---\n\n` +
-          messages.map((m) => `### ${m.sender === 'user' ? '👤 Usuário' : '🤖 JARVIS'} (${m.timestamp}):\n${m.text}\n`).join('\n---\n\n');
+          messages.map((m) => `### ${m.sender === 'user' ? '👤 Usuário' : '🤖 Calmon IA'} (${m.timestamp}):\n${m.text}\n`).join('\n---\n\n');
       }
 
       const blob = new Blob([mdText], { type: 'text/markdown;charset=utf-8' });
@@ -580,7 +581,7 @@ export function useChatStream(
         { sender: 'user', text: trimmed, timestamp: timeStr },
         {
           sender: 'jarvis',
-          text: '🛠️ **Comandos Rápidos Disponíveis no JARVIS Studio:**\n\n' +
+          text: '🛠️ **Comandos Rápidos Disponíveis no Calmon Studio:**\n\n' +
             '- `🌿 /ponytail [senior|lite|ultra|off]`: Ajusta a disciplina de código limpo e YAGNI.\n' +
             '- `🦙 /model <nome>`: Altera o modelo de inferência (ex: /model qwen2.5-coder:7b).\n' +
             '- `🏛️ /debate`: Aciona a Mesa Redonda Técnica entre Arquiteto, Cibersegurança e Revisor.\n' +
@@ -822,7 +823,7 @@ export function useChatStream(
             if (lastIdx >= 0 && next[lastIdx].sender === 'jarvis') {
               next[lastIdx] = {
                 ...next[lastIdx],
-                statusMessage: statusPayload.message || 'JARVIS Maestro coordenando os especialistas...',
+                statusMessage: statusPayload.message || 'Calmon IA · Maestro coordenando os especialistas...',
               };
             }
             return next;

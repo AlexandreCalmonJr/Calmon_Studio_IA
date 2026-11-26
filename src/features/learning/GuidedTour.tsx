@@ -4,7 +4,7 @@ import { ArrowLeft, ArrowRight, BookOpen, X } from 'lucide-react';
 type TourStep = { tab: string; title: string; description: string; permission: string };
 const TOUR_STEPS: TourStep[] = [
   {tab:'overview',title:'Visão Geral',description:'Comece aqui para acompanhar a disponibilidade dos serviços, indicadores do ambiente e aprovações pendentes.',permission:'system:read'},
-  {tab:'chat',title:'Chat JARVIS e Maestro',description:'Envie pedidos ao Maestro. Acompanhe as etapas, os resultados efetivamente produzidos e as aprovações solicitadas.',permission:'chat:read'},
+  {tab:'chat',title:'Chat Calmon IA e Maestro',description:'Envie pedidos ao Maestro. Acompanhe as etapas, os resultados efetivamente produzidos e as aprovações solicitadas.',permission:'chat:read'},
   {tab:'agents',title:'Centro de Agentes',description:'Consulte os agentes registados, as respetivas capacidades e os estados apresentados pelo servidor.',permission:'agents:read'},
   {tab:'office',title:'Escritório Virtual',description:'Acompanhe a organização visual dos agentes. A representação não substitui a confirmação de execução na tarefa.',permission:'agents:read'},
   {tab:'tasks',title:'Gestão de Tarefas',description:'Consulte tarefas, estados, histórico e bloqueios. Use os detalhes para distinguir o que foi planeado do que foi concluído.',permission:'tasks:read'},

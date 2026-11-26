@@ -696,7 +696,7 @@ export const GitHubImporterView: React.FC<GitHubImporterViewProps> = ({ onNaviga
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                  Incorporar ao JARVIS (escolha como deseja usar)
+                  Incorporar à Calmon IA (escolha como deseja usar)
                 </h3>
                 <p style={{ margin: '2px 0 0', fontSize: '0.79rem', color: 'var(--text-muted)' }}>
                   Nenhuma alteração é aplicada automaticamente — clique abaixo para aprovar e incorporar o modo desejado.

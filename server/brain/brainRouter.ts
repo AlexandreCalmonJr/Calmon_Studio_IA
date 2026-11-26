@@ -101,7 +101,7 @@ export function createBrainRouter(deps: BrainRouterDeps): Router {
         try {
           const inference = await runHybridInference({
             prompt: job.target_ref,
-            systemInstruction: `Você é o Agendador Autônomo 24/7 do JARVIS AI Hub executando a rotina "${job.name}" (${job.cron_expr}). Responda de forma objetiva, acionável e em português.`,
+            systemInstruction: `Você é o Agendador Autônomo 24/7 do Calmon Studio executando a rotina "${job.name}" (${job.cron_expr}). Responda de forma objetiva, acionável e em português.`,
             geminiConnected: true,
             routingPolicy: 'auto_hybrid',
           });
@@ -134,7 +134,7 @@ export function createBrainRouter(deps: BrainRouterDeps): Router {
       if (deps.isGeminiConfigured()) {
         const inference = await runHybridInference({
           prompt: text,
-          systemInstruction: `Você é o especialista @${binding.agent_role} do JARVIS AI Hub respondendo a ${senderName} via ${binding.provider.toUpperCase()} no workspace "${binding.workspace_slug}". Seja claro, seguro e conciso em português.`,
+          systemInstruction: `Você é o especialista @${binding.agent_role} do Calmon Studio respondendo a ${senderName} via ${binding.provider.toUpperCase()} no workspace "${binding.workspace_slug}". Seja claro, seguro e conciso em português.`,
           geminiConnected: true,
           routingPolicy: 'auto_hybrid',
         });

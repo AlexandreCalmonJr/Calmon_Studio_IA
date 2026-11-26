@@ -335,7 +335,7 @@ export function createKnowledgeRouter(deps?: KnowledgeRouterDeps): Router {
   router.get('/assistants/federation', requireAuth, (req: Request, res: Response) => {
     const user = (req as Request & { jarvisUser: UserAccount }).jarvisUser;
     const profile = userProfiles.get(user.username);
-    const localName = profile?.assistantName || 'JARVIS';
+    const localName = profile?.assistantName || 'Calmon IA';
     const hydratedPeers = serverState.assistantPeers.map((p) =>
       p.id === 'peer-principal' ? { ...p, assistant_name: localName, last_seen_at: nowIso() } : p
     );
@@ -371,7 +371,7 @@ export function createKnowledgeRouter(deps?: KnowledgeRouterDeps): Router {
     const targetPeer =
       serverState.assistantPeers.find((p) => p.id === req.body?.to_peer_id) ||
       serverState.assistantPeers.find((p) => p.id === 'peer-casa-maria')!;
-    const fromName = String(req.body?.from_assistant || profile?.assistantName || 'JARVIS');
+    const fromName = String(req.body?.from_assistant || profile?.assistantName || 'Calmon IA');
     const saveToHousehold = Boolean(req.body?.save_to_household_brain);
 
     let createdMemory: BrainMemoryItem | undefined;
@@ -452,7 +452,7 @@ export function createKnowledgeRouter(deps?: KnowledgeRouterDeps): Router {
       asset_id: String(req.body?.asset_id || `asset_${Date.now()}`),
       asset_name: assetName,
       summary: String(req.body?.summary || 'Compartilhado em 1 clique entre assistentes da casa.'),
-      from_assistant: String(req.body?.from_assistant || profile?.assistantName || 'JARVIS'),
+      from_assistant: String(req.body?.from_assistant || profile?.assistantName || 'Calmon IA'),
       to_assistant: targetPeer.assistant_name,
       status: 'pending',
       created_at: nowIso(),

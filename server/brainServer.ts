@@ -34,7 +34,7 @@ export function resolveDeploymentOptions(body: Record<string, unknown>): BrainDe
       String(body?.postgresDb || DEFAULT_DEPLOYMENT_OPTIONS.postgresDb).trim().slice(0, 40) ||
       DEFAULT_DEPLOYMENT_OPTIONS.postgresDb,
     assistantName:
-      String(body?.assistantName || DEFAULT_DEPLOYMENT_OPTIONS.assistantName).trim().slice(0, 32) || 'JARVIS',
+      String(body?.assistantName || DEFAULT_DEPLOYMENT_OPTIONS.assistantName).trim().slice(0, 32) || 'Calmon IA',
   };
 }
 

@@ -47,6 +47,7 @@
     "jspdf": "^4.2.1",
     "jszip": "^3.10.2",
     "lucide-react": "^1.16.0",
+    "msedge-tts": "^2.1.1",
     "pg": "^8.23.1",
     "pptxgenjs": "^4.0.1",
     "qrcode": "^1.5.4",
@@ -83,8 +84,18 @@
     ],
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "artifactName": "Calmon-Studio-${version}-${arch}-${target}.${ext}"
     },
@@ -95,14 +106,28 @@
       "createStartMenuShortcut": true
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "category": "Utility",
       "artifactName": "Calmon-Studio-${version}-${arch}.${ext}"
     },
     "mac": {
       "target": [
-        { "target": "dmg", "arch": ["x64", "arm64"] },
-        { "target": "zip", "arch": ["x64", "arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "category": "public.app-category.developer-tools",
       "artifactName": "Calmon-Studio-${version}-${arch}.${ext}"

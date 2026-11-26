@@ -473,7 +473,7 @@ export const CodingAgentView: React.FC = () => {
         <div key={entry.id} style={styles.assistantRow}>
           <div style={styles.assistantBubble}>
             <div style={{ ...styles.meta, color: 'var(--accent-color)' }}>
-              {entry.timestamp} • JARVIS Coding Agent
+              {entry.timestamp} • Calmon IA Coding Agent
             </div>
             <div style={styles.preWrap}>{entry.text}</div>
           </div>

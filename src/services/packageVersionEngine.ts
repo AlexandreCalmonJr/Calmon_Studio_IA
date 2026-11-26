@@ -1,6 +1,6 @@
 /**
  * Motor puro de verificação de versões e cálculo de atualizações
- * para Pacotes Modulares e Agentes do JARVIS AI Hub.
+ * para Pacotes Modulares e Agentes do Calmon Studio.
  *
  * Mantido sem dependências de I/O ou React para permitir testes unitários
  * determinísticos via `node:test` e reutilização entre backend e frontend.

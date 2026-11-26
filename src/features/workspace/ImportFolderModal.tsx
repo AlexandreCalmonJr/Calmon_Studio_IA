@@ -42,7 +42,7 @@ export const ImportFolderModal: React.FC<ImportFolderModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Anexar Pasta do Computador ao JARVIS"
+      title="Anexar Pasta do Computador à Calmon IA"
       maxWidth="md"
     >
       <form onSubmit={handleImportSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>

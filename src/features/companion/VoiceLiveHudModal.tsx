@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { sendVoiceTurn, synthesizeVoiceAudio, transcribeVoiceAudio } from '../../services/api';
+import { getAccountStorageKey } from '../../services/accountScope';
 import { useAssistantIdentity } from '../../context/AssistantIdentityContext';
 import { useOfflineQueue } from '../../shared/pwa/usePWAInstall';
 import { notify } from '../../shared/common/Toast';
@@ -82,28 +83,66 @@ function pickNaturalBrowserVoice(lang: 'pt-BR' | 'en-US'): SpeechSynthesisVoice 
   }
 }
 
-async function speakText(text: string, lang: 'pt-BR' | 'en-US') {
+function readVoiceSettings(): {
+  voice: string;
+  speed: number;
+  model: string;
+  vadPauseMs: number;
+} {
   try {
-    const neural = await synthesizeVoiceAudio(text).catch(() => null);
-    if (neural && !neural.fallback && neural.audio_base64) {
-      const audio = new Audio(`data:${neural.mime_type || 'audio/mpeg'};base64,${neural.audio_base64}`);
-      await audio.play();
-      return;
+    const raw = localStorage.getItem(getAccountStorageKey('jarvis_openbot_general_settings'));
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        voice: typeof parsed.selectedVoice === 'string' ? parsed.selectedVoice : 'female_1',
+        speed: typeof parsed.speechSpeed === 'number' ? parsed.speechSpeed : 1.0,
+        model: typeof parsed.ttsModel === 'string' ? parsed.ttsModel : 'edge_neural',
+        vadPauseMs: Math.max(700, Math.min(4000, Math.round((Number(parsed.vadPauseSeconds) || 1.5) * 1000))),
+      };
     }
   } catch {
-    // segue para Web Speech fallback
+    // defaults
+  }
+  return { voice: 'female_1', speed: 1.0, model: 'edge_neural', vadPauseMs: 1500 };
+}
+
+async function speakText(text: string, lang: 'pt-BR' | 'en-US'): Promise<void> {
+  const prefs = readVoiceSettings();
+  if (prefs.model !== 'webspeech') {
+    try {
+      const neural = await synthesizeVoiceAudio(text, {
+        voice: prefs.voice,
+        speed: prefs.speed,
+        model: prefs.model,
+      }).catch(() => null);
+      if (neural && !neural.fallback && neural.audio_base64) {
+        const audio = new Audio(`data:${neural.mime_type || 'audio/mpeg'};base64,${neural.audio_base64}`);
+        await new Promise<void>((resolve) => {
+          audio.onended = () => resolve();
+          audio.onerror = () => resolve();
+          void audio.play().catch(() => resolve());
+        });
+        return;
+      }
+    } catch {
+      // segue para Web Speech fallback
+    }
   }
 
   try {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
     window.speechSynthesis.cancel();
-    const utter = new SpeechSynthesisUtterance(text);
-    utter.lang = lang;
-    utter.rate = 1.0;
-    utter.pitch = 1.0;
-    const voice = pickNaturalBrowserVoice(lang);
-    if (voice) utter.voice = voice;
-    window.speechSynthesis.speak(utter);
+    await new Promise<void>((resolve) => {
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = lang;
+      utter.rate = prefs.speed;
+      utter.pitch = 1.0;
+      const voice = pickNaturalBrowserVoice(lang);
+      if (voice) utter.voice = voice;
+      utter.onend = () => resolve();
+      utter.onerror = () => resolve();
+      window.speechSynthesis.speak(utter);
+    });
   } catch {
     // ignore speech synthesis fallback
   }
@@ -136,6 +175,25 @@ export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingStreamRef = useRef<MediaStream | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
+  const vadTimerRef = useRef<number | null>(null);
+  const vadAudioCtxRef = useRef<AudioContext | null>(null);
+  const isOpenRef = useRef(isOpen);
+  isOpenRef.current = isOpen;
+
+  const cleanupVad = () => {
+    if (vadTimerRef.current !== null) {
+      window.clearInterval(vadTimerRef.current);
+      vadTimerRef.current = null;
+    }
+    if (vadAudioCtxRef.current && vadAudioCtxRef.current.state !== 'closed') {
+      try {
+        void vadAudioCtxRef.current.close();
+      } catch {
+        // ignore
+      }
+      vadAudioCtxRef.current = null;
+    }
+  };
 
   const appendVoiceLog = (entry: string) => {
     const ts = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -151,6 +209,7 @@ export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({
   }, []);
 
   const stopMicrophone = () => {
+    cleanupVad();
     try {
       recognitionRef.current?.stop();
     } catch {
@@ -218,7 +277,7 @@ export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({
         },
       ]);
       if (speechOutEnabled) {
-        void speakText(res.reply, 'pt-BR');
+        await speakText(res.reply, 'pt-BR');
       }
       if (res.action?.type === 'navigate' && res.action.tab) {
         if (res.action.tab === 'chat' && onOpenChat) {
@@ -226,6 +285,9 @@ export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({
         } else if (onNavigate) {
           onNavigate(res.action.tab);
         }
+      } else if (isOpenRef.current && autoListenOnOpen) {
+        // Ciclo contínuo mãos-livres: volta a escutar automaticamente após responder
+        startMicrophone(true);
       }
     } catch (err: any) {
       notify(err?.message || 'Erro no processamento de voz.', 'error');
@@ -308,8 +370,65 @@ export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({
       mediaRecorderRef.current = recorder;
       recorder.start();
       setListening(true);
-      setMicHint('Gravando áudio (modo servidor) — toque no botão para enviar.');
-      appendVoiceLog(`MediaRecorder iniciado (${mimeType})`);
+      setMicHint('Mãos-livres ativo — fale naturalmente, envio automático após pausa.');
+      appendVoiceLog(`MediaRecorder + VAD iniciado (${mimeType})`);
+
+      // Detecção automática de voz/silêncio (VAD) para envio mãos-livres
+      try {
+        cleanupVad();
+        const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = new AudioCtx();
+          vadAudioCtxRef.current = ctx;
+          const src = ctx.createMediaStreamSource(stream);
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 1024;
+          src.connect(analyser);
+          const data = new Uint8Array(analyser.fftSize);
+          const { vadPauseMs } = readVoiceSettings();
+          let speechDetected = false;
+          let lastSpeechAt = Date.now();
+          const startedAt = Date.now();
+
+          vadTimerRef.current = window.setInterval(() => {
+            if (!mediaRecorderRef.current || mediaRecorderRef.current.state !== 'recording') {
+              cleanupVad();
+              return;
+            }
+            analyser.getByteTimeDomainData(data);
+            let sum = 0;
+            for (let i = 0; i < data.length; i += 1) {
+              const v = (data[i] - 128) / 128;
+              sum += v * v;
+            }
+            const rms = Math.sqrt(sum / data.length);
+            const now = Date.now();
+            if (rms > 0.018) {
+              speechDetected = true;
+              lastSpeechAt = now;
+            } else if (speechDetected && now - lastSpeechAt >= vadPauseMs) {
+              cleanupVad();
+              setListening(false);
+              try {
+                mediaRecorderRef.current?.stop();
+              } catch {
+                // ignore
+              }
+            } else if (!speechDetected && now - startedAt > 12_000) {
+              // Evita gravação infinita se usuário não falar
+              cleanupVad();
+              setListening(false);
+              try {
+                mediaRecorderRef.current?.stop();
+              } catch {
+                // ignore
+              }
+            }
+          }, 120);
+        }
+      } catch {
+        // segue com controle manual se AudioContext falhar
+      }
     } catch (err: any) {
       setListening(false);
       appendVoiceLog(`Falha MediaRecorder: ${err?.name || 'Error'} — ${err?.message || err}`);

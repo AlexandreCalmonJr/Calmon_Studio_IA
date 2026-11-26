@@ -798,7 +798,7 @@ export class ChannelGatewayService {
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : 'provedor indisponível';
-      reply = `Recebido no JARVIS Hub (@${binding.agent_role}). Mensagem registrada na fila durável (${errMsg}).`;
+      reply = `Recebido no Calmon Studio Hub (@${binding.agent_role}). Mensagem registrada na fila durável (${errMsg}).`;
     }
     if (!reply) {
       reply = `Mensagem recebida por @${binding.agent_role} no workspace "${binding.workspace_slug}": "${params.text.slice(0, 160)}".`;

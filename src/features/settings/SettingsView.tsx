@@ -320,10 +320,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [openExternalLinksIn, setOpenExternalLinksIn] = useState<'default_browser' | 'embedded'>('default_browser');
   const [linkTelemetryToAccount, setLinkTelemetryToAccount] = useState(false);
 
-  // Configurações de Voz
-  const [sttModel, setSttModel] = useState('Parakeet TDT 0.6B v3 (Local Rápido)');
+  // Configurações de Voz (motores reais + persistência por conta)
+  const [sttModel, setSttModel] = useState('webspeech');
   const [vadPauseSeconds, setVadPauseSeconds] = useState(1.5);
-  const [ttsModel, setTtsModel] = useState('Supertonic 3 (Local)');
+  const [ttsModel, setTtsModel] = useState('edge_neural');
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const [selectedVoice, setSelectedVoice] = useState('female_1');
   const [speechSpeed, setSpeechSpeed] = useState<number>(1.0);
@@ -580,6 +580,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         if (parsed.openExternalLinksIn) setOpenExternalLinksIn(parsed.openExternalLinksIn);
         if (typeof parsed.linkTelemetryToAccount === 'boolean') setLinkTelemetryToAccount(parsed.linkTelemetryToAccount);
         if (typeof parsed.vadPauseSeconds === 'number') setVadPauseSeconds(parsed.vadPauseSeconds);
+        if (typeof parsed.sttModel === 'string' && ['webspeech', 'whisper_groq', 'whisper_openai'].includes(parsed.sttModel)) {
+          setSttModel(parsed.sttModel);
+        }
+        if (typeof parsed.ttsModel === 'string' && ['edge_neural', 'webspeech', 'openai_tts'].includes(parsed.ttsModel)) {
+          setTtsModel(parsed.ttsModel);
+        }
+        if (typeof parsed.ttsEnabled === 'boolean') setTtsEnabled(parsed.ttsEnabled);
+        if (typeof parsed.selectedVoice === 'string') setSelectedVoice(parsed.selectedVoice);
+        if (typeof parsed.speechSpeed === 'number') setSpeechSpeed(parsed.speechSpeed);
       }
       const savedRail = localStorage.getItem(getAccountStorageKey('jarvis_rail_agents_mode')) as any;
       if (savedRail && ['auto', 'always', 'never'].includes(savedRail)) {
@@ -612,6 +621,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         openExternalLinksIn,
         linkTelemetryToAccount,
         vadPauseSeconds,
+        sttModel,
+        ttsModel,
+        ttsEnabled,
+        selectedVoice,
+        speechSpeed,
         ...updates,
       };
       localStorage.setItem(getAccountStorageKey('jarvis_openbot_general_settings'), JSON.stringify(current));
@@ -1706,17 +1720,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <section className="jarvis-settings-card" style={{ gap: '18px' }}>
                 <div>
                   <label className="user-profile-field-label" htmlFor="voice-stt-model">
-                    Modelo de Ditado (STT)
+                    Motor de Reconhecimento de Fala (STT)
                   </label>
                   <select
                     id="voice-stt-model"
                     value={sttModel}
-                    onChange={(e) => setSttModel(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSttModel(val);
+                      saveGeneralSettings({ sttModel: val });
+                    }}
                     className="jarvis-select"
                   >
-                    <option value="Parakeet TDT 0.6B v3 (Local Rápido)">Parakeet TDT 0.6B v3 (Local Rápido - 25 idiomas)</option>
-                    <option value="Whisper Base (Local)">Whisper Base (Local - Baixo uso de memória)</option>
-                    <option value="Whisper Medium (Alta Precisão)">Whisper Medium (Alta Precisão)</option>
+                    <option value="webspeech">Reconhecimento do Navegador (Web Speech API · Gratuito)</option>
+                    <option value="whisper_groq">Whisper Large v3 Turbo (Backend · requer chave Groq)</option>
+                    <option value="whisper_openai">Whisper-1 (Backend · requer chave OpenAI)</option>
                   </select>
                 </div>
 
@@ -1756,17 +1774,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
                 <div>
                   <label className="user-profile-field-label" htmlFor="voice-tts-model">
-                    Modelo de Resposta Falada (TTS)
+                    Motor de Resposta Falada (TTS)
                   </label>
                   <select
                     id="voice-tts-model"
                     value={ttsModel}
-                    onChange={(e) => setTtsModel(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setTtsModel(val);
+                      saveGeneralSettings({ ttsModel: val });
+                    }}
                     className="jarvis-select"
                   >
-                    <option value="Supertonic 3 (Local)">Supertonic 3 (Local - Leitura natural multilingue)</option>
-                    <option value="Kokoro TTS (Local)">Kokoro TTS (Voz expressiva ultraleve)</option>
-                    <option value="WebSpeech API (Navegador)">WebSpeech API Nativa do Navegador</option>
+                    <option value="edge_neural">Edge Neural PT-BR (Voz Humana Natural · Gratuito)</option>
+                    <option value="openai_tts">OpenAI Neural TTS (tts-1 · requer chave OpenAI)</option>
+                    <option value="webspeech">Voz Nativa do Sistema (Web Speech API · Offline)</option>
                   </select>
                 </div>
 
@@ -1777,11 +1799,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <div className="jarvis-setting-row__info">
                     <div className="jarvis-setting-row__title">Ler respostas em voz alta</div>
                     <div className="jarvis-setting-row__desc">
-                      O JARVIS reproduzirá a fala automaticamente ao término da resposta gerada.
+                      A {identity.assistantName || 'Calmon IA'} reproduzirá a fala automaticamente ao término da resposta gerada.
                     </div>
                   </div>
                   <div className="jarvis-setting-row__control">
-                    {renderToggle(ttsEnabled, () => setTtsEnabled(!ttsEnabled), 'Ler respostas em voz alta')}
+                    {renderToggle(
+                      ttsEnabled,
+                      () => {
+                        const next = !ttsEnabled;
+                        setTtsEnabled(next);
+                        saveGeneralSettings({ ttsEnabled: next });
+                      },
+                      'Ler respostas em voz alta'
+                    )}
                   </div>
                 </div>
 
@@ -1793,7 +1823,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <select
                       id="voice-selector"
                       value={selectedVoice}
-                      onChange={(e) => setSelectedVoice(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSelectedVoice(val);
+                        saveGeneralSettings({ selectedVoice: val });
+                      }}
                       className="jarvis-select"
                     >
                       <option value="female_1">Voz feminina 1 (Suave)</option>
@@ -1840,7 +1874,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       <button
                         key={speed}
                         type="button"
-                        onClick={() => setSpeechSpeed(speed)}
+                        onClick={() => {
+                          setSpeechSpeed(speed);
+                          saveGeneralSettings({ speechSpeed: speed });
+                        }}
                         className={`jarvis-segmented-btn jarvis-tabular ${speechSpeed === speed ? 'is-active' : ''}`}
                         aria-pressed={speechSpeed === speed}
                       >

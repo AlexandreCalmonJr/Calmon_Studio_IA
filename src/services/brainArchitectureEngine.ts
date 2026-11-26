@@ -1,7 +1,7 @@
 /**
  * Fase 8 — Motor Puro da Arquitetura do Servidor ("Cérebro") Dual-Mode & Multi-Cérebros.
  *
- * Gera artefatos reais para rodar o JARVIS AI Hub em:
+ * Gera artefatos reais para rodar o Calmon Studio em:
  *   1. Modo Local Sem Docker (SQLite WAL + sqlite-vec em pasta única — ideal para usuários comuns)
  *   2. Modo Docker Completo (PostgreSQL 16 + pgvector + Redis + Ollama opcional + Caddy HTTPS)
  *
@@ -116,16 +116,16 @@ export interface ApiRouteReference {
 }
 
 export const DEFAULT_DEPLOYMENT_OPTIONS: BrainDeploymentOptions = {
-  brainName: 'Cérebro JARVIS Principal',
+  brainName: 'Cérebro Calmon Studio Principal',
   mode: 'local_sqlite',
   port: 3000,
   enableOllama: true,
   enableRemoteGateway: true,
   enablePythonWorker: true,
   enableGoGateway: true,
-  dataDir: '~/JARVIS-Brain',
+  dataDir: '~/Calmon-Brain',
   postgresDb: 'jarvis_brain',
-  assistantName: 'JARVIS',
+  assistantName: 'Calmon IA',
 };
 
 export const SERVER_LANGUAGE_COMPARISON: LanguageArchitectureRow[] = [
@@ -244,7 +244,7 @@ function isBlockedMetadataHost(hostname: string): boolean {
 }
 
 /**
- * Valida URL de um Cérebro JARVIS antes de salvar ou testar conexão.
+ * Valida URL de um Cérebro Calmon Studio antes de salvar ou testar conexão.
  * - Exige HTTPS para servidores remotos.
  * - Permite HTTP apenas para localhost, rede local (192.168.x.x / 10.x.x.x / 172.16-31.x.x / Tailscale) ou mDNS (.local).
  * - Bloqueia esquemas perigosos, credenciais embutidas na URL e endereços de metadados de nuvem.
@@ -327,7 +327,7 @@ export function createDefaultBrainProfiles(currentOrigin = 'http://localhost:300
       baseUrl: safeOrigin,
       mode: 'local_sqlite',
       databaseEngine: 'SQLite WAL + sqlite-vec',
-      description: 'Banco local leve em pasta única (~/JARVIS-Brain). Ideal para uso direto sem precisar instalar Docker.',
+      description: 'Banco local leve em pasta única (~/Calmon-Brain). Ideal para uso direto sem precisar instalar Docker.',
       isDefault: true,
       isLocalCurrent: true,
       status: 'online',
@@ -489,8 +489,8 @@ export function buildDualModeServerArtifacts(
     port: Math.min(65535, Math.max(1024, Number(partial?.port || DEFAULT_DEPLOYMENT_OPTIONS.port) || 3000)),
     postgresDb: sanitizeDbName(partial?.postgresDb || DEFAULT_DEPLOYMENT_OPTIONS.postgresDb),
     brainName: String(partial?.brainName || DEFAULT_DEPLOYMENT_OPTIONS.brainName).trim().slice(0, 64) || DEFAULT_DEPLOYMENT_OPTIONS.brainName,
-    assistantName: String(partial?.assistantName || DEFAULT_DEPLOYMENT_OPTIONS.assistantName).trim().slice(0, 32) || 'JARVIS',
-    dataDir: String(partial?.dataDir || DEFAULT_DEPLOYMENT_OPTIONS.dataDir).trim().slice(0, 120) || '~/JARVIS-Brain',
+    assistantName: String(partial?.assistantName || DEFAULT_DEPLOYMENT_OPTIONS.assistantName).trim().slice(0, 32) || 'Calmon IA',
+    dataDir: String(partial?.dataDir || DEFAULT_DEPLOYMENT_OPTIONS.dataDir).trim().slice(0, 120) || '~/Calmon-Brain',
   };
 
   const ollamaBlock = opts.enableOllama
@@ -580,7 +580,7 @@ export function buildDualModeServerArtifacts(
     .filter(Boolean)
     .join('\n');
 
-  const dockerCompose = `# JARVIS AI Hub — Cérebro Dual-Mode (Docker Compose Avançado)
+  const dockerCompose = `# Calmon Studio — Cérebro Dual-Mode (Docker Compose Avançado)
 # Suba o núcleo completo com: docker compose up -d
 # Com IA local Ollama:          docker compose --profile local-ai up -d
 # Com HTTPS remoto (Caddy):     docker compose --profile remote up -d
@@ -656,7 +656,7 @@ volumes:
 ${extraVolumes}
 `;
 
-  const dockerfile = `# Imagem multi-stage ultra-leve (~90MB) para o Cérebro JARVIS em TypeScript/Node 22
+  const dockerfile = `# Imagem multi-stage ultra-leve (~90MB) para o Cérebro Calmon Studio em TypeScript/Node 22
 FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
@@ -686,13 +686,13 @@ CMD ["npx", "tsx", "server.ts"]
 `;
 
   const envExample = `# ==========================================================
-# JARVIS AI Hub — Configuração do Servidor ("Cérebro")
+# Calmon Studio — Configuração do Servidor ("Cérebro")
 # Copie para .env e preencha apenas o necessário.
 # NUNCA faça commit do arquivo .env com chaves reais!
 # ==========================================================
 
 # Escolha o modo do banco:
-#   local_sqlite    -> Sem Docker (salva tudo em ~/JARVIS-Brain/brain.db)
+#   local_sqlite    -> Sem Docker (salva tudo em ~/Calmon-Brain/brain.db)
 #   docker_postgres -> Com Docker Compose (PostgreSQL 16 + pgvector + Redis)
 BRAIN_MODE=${opts.mode}
 BRAIN_NAME=${opts.brainName}
@@ -897,7 +897,7 @@ CREATE TABLE IF NOT EXISTS workflows (
 `;
 
   const dualDriver = `/**
- * Adaptador Dual-Mode do Cérebro JARVIS
+ * Adaptador Dual-Mode do Cérebro Calmon Studio
  * Detecta automaticamente se deve abrir SQLite Local (sem Docker) ou PostgreSQL (Docker).
  */
 import path from 'node:path';
@@ -949,8 +949,8 @@ export function resolveBrainDriverFromEnv(env = process.env): ActiveBrainDriverI
   const startLocalScript = `#!/usr/bin/env bash
 set -euo pipefail
 
-# Inicia o Cérebro JARVIS diretamente na máquina (SEM Docker) com banco SQLite local.
-DATA_DIR="\${SQLITE_DATA_DIR:-$HOME/JARVIS-Brain}"
+# Inicia o Cérebro Calmon Studio diretamente na máquina (SEM Docker) com banco SQLite local.
+DATA_DIR="\${SQLITE_DATA_DIR:-$HOME/Calmon-Brain}"
 mkdir -p "$DATA_DIR/media" "$DATA_DIR/spreadsheets" "$DATA_DIR/backups"
 
 export BRAIN_MODE="local_sqlite"
@@ -970,7 +970,7 @@ npm install --no-audit --no-fund
 npm run dev
 `;
 
-  const caddyfile = `# Gateway HTTPS Automático para o Cérebro JARVIS (Modo Docker --profile remote)
+  const caddyfile = `# Gateway HTTPS Automático para o Cérebro Calmon Studio (Modo Docker --profile remote)
 # Substitua seu-dominio.exemplo.com pelo domínio apontado para o seu servidor
 # ou use Tailscale Serve (tailscale serve https / http://127.0.0.1:${opts.port}) sem abrir portas!
 
@@ -986,7 +986,7 @@ seu-cerebro.exemplo.com {
 
   const readme = `# ${opts.brainName} — Guia do Servidor Dual-Mode (Sem Docker vs. Docker)
 
-Este pacote permite rodar o **Cérebro do JARVIS** exatamente do jeito que faz sentido para você — usando **o mesmo código-fonte em TypeScript + Node.js 22 LTS** e o mesmo contrato de API \`/api/v1\`:
+Este pacote permite rodar o **Cérebro do Calmon Studio** exatamente do jeito que faz sentido para você — usando **o mesmo código-fonte em TypeScript + Node.js 22 LTS** e o mesmo contrato de API \`/api/v1\`:
 
 ---
 
@@ -1035,7 +1035,7 @@ Ideal para rodar em um Mini PC, NAS, servidor doméstico ou VPS com alta escala 
 go 1.23
 `;
 
-  const goMain = `// JARVIS AI Hub — Serviço Go (Edge Gateway de Alta Concorrência + Crawler)
+  const goMain = `// Calmon Studio — Serviço Go (Edge Gateway de Alta Concorrência + Crawler)
 // Inspirado nos utilitários concorrentes do OpenClaw/OpenBot para VPS e servidores domésticos.
 package main
 
@@ -1243,7 +1243,7 @@ func main() {
 }
 `;
 
-  const goDockerfile = `# Binário estático Go (~12 MB) para Edge Gateway + Crawler do JARVIS
+  const goDockerfile = `# Binário estático Go (~12 MB) para Edge Gateway + Crawler da Calmon IA
 FROM golang:1.23-alpine AS builder
 WORKDIR /src
 COPY go.mod ./
@@ -1258,7 +1258,7 @@ EXPOSE 8080
 CMD ["/usr/local/bin/jarvis-go-gateway"]
 `;
 
-  const pythonRequirements = `# JARVIS AI Hub — Worker Python 3.11 (FastAPI + LangChain/LangGraph + OpenClaw Vector Store)
+  const pythonRequirements = `# Calmon Studio — Worker Python 3.11 (FastAPI + LangChain/LangGraph + OpenClaw Vector Store)
 fastapi>=0.115.0,<1.0.0
 uvicorn[standard]>=0.32.0,<1.0.0
 pydantic>=2.9.0,<3.0.0
@@ -1292,7 +1292,7 @@ HEALTHCHECK --interval=20s --timeout=5s --start-period=15s --retries=3 CMD curl 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
 `;
 
-  const pythonWorkerArtifact = `"""JARVIS AI Hub — FastAPI Worker (LangChain/LangGraph + SQLAlchemy + ChromaDB + OpenClaw)."""
+  const pythonWorkerArtifact = `"""Calmon Studio — FastAPI Worker (LangChain/LangGraph + SQLAlchemy + ChromaDB + OpenClaw)."""
 from fastapi import FastAPI
 from pydantic import BaseModel
 

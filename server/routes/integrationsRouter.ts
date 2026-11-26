@@ -337,7 +337,7 @@ export function createIntegrationsRouter(deps: IntegrationsRouterDeps = {}): Rou
       const instructions = [
         `Origem GitHub (somente leitura): ${inspection.canonicalUrl}`,
         `Resumo: ${inspection.summaryPtBr}`,
-        `Como aplicar no JARVIS: ${inspection.howItBoostsJarvis}`,
+        `Como aplicar no Calmon Studio: ${inspection.howItBoostsJarvis}`,
         inspection.detectedCapabilities.length
           ? `Capacidades detectadas:\n${inspection.detectedCapabilities.map((c) => `- ${c.title}: ${c.description}`).join('\n')}`
           : '',

@@ -129,7 +129,7 @@ export function detectInvokedAgents(
 export function planMultiAgentExecution(
   prompt: string,
   catalog: OrchestratorAgentRef[],
-  assistantName = 'JARVIS'
+  assistantName = 'Calmon IA'
 ): MultiAgentPlan {
   const norm = normalizeToken(prompt);
   const deliverable = detectDeliverableKind(prompt);
@@ -299,7 +299,7 @@ export function parseWorkflowPromptToGraph(prompt: string): GeneratedWorkflowDra
   if (specialists.length === 0) {
     specialists.push({
       role: 'jarvis_master',
-      title: 'JARVIS Maestro',
+      title: 'Calmon IA · Maestro',
       subtitle: 'Processa o pedido e sintetiza entregas',
     });
   }

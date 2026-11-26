@@ -15,7 +15,7 @@ export const ALL_26_AGENTS: CatalogAgent[] = [
   {
     id: 'jarvis_master',
     role: 'jarvis_master',
-    name: 'JARVIS Maestro',
+    name: 'Calmon IA · Maestro',
     category: 'orchestration',
     categoryLabel: 'Orquestração & Governança',
     mission: 'Orquestrador central cognitivo do hub. Clarifica metas, planeja tarefas em ReAct e delega aos especialistas.',

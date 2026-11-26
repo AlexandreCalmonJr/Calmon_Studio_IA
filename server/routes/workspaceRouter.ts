@@ -289,7 +289,7 @@ export function createWorkspaceRouter(deps?: WorkspaceRouterDeps): Router {
     const proj = serverState.workspaceProjects.find((p) => p.id === req.params.id);
     zip.file(
       'README.jarvis.md',
-      `# ${proj?.name || projectId}\n\nExportado em ${nowIso()} pelo Workspace do JARVIS AI Hub.\n`
+      `# ${proj?.name || projectId}\n\nExportado em ${nowIso()} pelo Workspace do Calmon Studio.\n`
     );
     const buffer = await zip.generateAsync({ type: 'nodebuffer' });
     res.setHeader('Content-Type', 'application/zip');
@@ -439,7 +439,7 @@ ${original}
           ollamaConnected: serverState.providerConnectivity.ollama_connected,
           geminiConnected: serverState.providerConnectivity.gemini_connected,
           enableWebSearch: false,
-          assistantName: 'JARVIS',
+          assistantName: 'Calmon IA',
           agentName: 'Engenheiro de Código',
           agentProperName: 'Dante',
         });

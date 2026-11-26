@@ -161,7 +161,7 @@ export const BrainServerHubView: React.FC<BrainServerHubViewProps> = ({
   // Configurador Dual-Mode & Arquivos do Servidor
   const [deployOpts, setDeployOpts] = useState<BrainDeploymentOptions>({
     ...DEFAULT_DEPLOYMENT_OPTIONS,
-    assistantName: assistantName || 'JARVIS',
+    assistantName: assistantName || 'Calmon IA',
   });
   const [serverFiles, setServerFiles] = useState<GeneratedServerArtifact[]>(() =>
     buildDualModeServerArtifacts(DEFAULT_DEPLOYMENT_OPTIONS)
@@ -812,7 +812,7 @@ export const BrainServerHubView: React.FC<BrainServerHubViewProps> = ({
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
                 }}
-                title={brainInfo?.storage_path || '~/JARVIS-Brain/brain.db'}
+                title={brainInfo?.storage_path || '~/Calmon-Brain/brain.db'}
               >
                 {brainInfo?.journal_mode ? `${brainInfo.journal_mode.toUpperCase()} ativo` : 'WAL ativo'}
                 {brainInfo?.db_size_bytes ? ` · ${(brainInfo.db_size_bytes / 1024).toFixed(1)} KB em disco` : ''}

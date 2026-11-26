@@ -159,7 +159,7 @@ export async function generateStructuredArtifact(input: {
   assistantName?: string;
 }): Promise<StructuredArtifactPayload> {
   const topic = (input.topic || 'Projeto Estratégico').trim();
-  const assistantName = (input.assistantName || 'JARVIS').trim();
+  const assistantName = (input.assistantName || 'Calmon IA').trim();
   const id = `art_${Date.now().toString(36)}`;
   const now = new Date().toISOString();
   const ai = createGeminiClient();
@@ -423,7 +423,7 @@ export async function runRoundtableDeliberation(input: {
   assistantName: string;
 }): Promise<RoundtableSession> {
   const topic = (input.topic || 'Estratégia do Projeto').trim();
-  const assistantName = (input.assistantName || 'JARVIS').trim();
+  const assistantName = (input.assistantName || 'Calmon IA').trim();
   const id = `rt_${Date.now().toString(36)}`;
   const now = new Date().toISOString();
   const ai = createGeminiClient();

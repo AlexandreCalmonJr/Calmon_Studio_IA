@@ -44,7 +44,7 @@ export const BrainDualModePanel: React.FC<BrainDualModePanelProps> = ({
           </p>
           <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.65 }}>
             <li><strong>Banco embarcado:</strong> SQLite em modo WAL + busca vetorial <code>sqlite-vec</code>.</li>
-            <li><strong>Pasta única:</strong> <code>~/JARVIS-Brain/brain.db</code> + planilhas e mídias geradas.</li>
+            <li><strong>Pasta única:</strong> <code>~/Calmon-Brain/brain.db</code> + planilhas e mídias geradas.</li>
             <li><strong>IA automática:</strong> Gemini na nuvem + detecção automática de Ollama local se instalado.</li>
             <li><strong>1 comando:</strong> <code>./scripts/start-local-brain.sh</code></li>
           </ul>

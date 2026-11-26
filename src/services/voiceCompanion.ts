@@ -29,7 +29,7 @@ function stripDiacritics(input: string): string {
 }
 
 /**
- * Detecta palavra de ativação dinâmica ("Ei JARVIS", "Hey Maria", "Oi João", etc.)
+ * Detecta palavra de ativação dinâmica ("Ei Calmon IA", "Hey Maria", "Oi João", etc.)
  * e extrai o comando falado logo após a saudação.
  */
 export function detectWakeWord(transcript: string, assistantName: string): WakeWordDetectionResult {
@@ -38,7 +38,7 @@ export function detectWakeWord(transcript: string, assistantName: string): WakeW
     return { detected: false, triggerPhrase: null, command: '' };
   }
 
-  const displayAssistant = (assistantName || 'JARVIS').trim() || 'JARVIS';
+  const displayAssistant = (assistantName || 'Calmon IA').trim() || 'Calmon IA';
   const cleanAssistant = stripDiacritics(displayAssistant);
   const escapedName = cleanAssistant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const norm = stripDiacritics(raw);
@@ -85,7 +85,7 @@ export function buildContextualGreeting(input: DailyBriefingInput): {
   briefingLine: string;
 } {
   const name = (input.userName || 'você').trim().split(' ')[0];
-  const assistant = (input.assistantName || 'JARVIS').trim();
+  const assistant = (input.assistantName || 'Calmon IA').trim();
   const h = Number.isFinite(input.hour) ? input.hour : 9;
 
   const salutation =

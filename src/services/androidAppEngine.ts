@@ -147,7 +147,7 @@ function sanitizeColor(hex: string): string {
 export function buildAndroidMobilePreviewHtml(config: AndroidMobileConfig): string {
   const accent = sanitizeColor(config.accentColor);
   const safeApp = escapeHtml(config.appName || `${config.assistantName} Mobile`);
-  const safeAssistant = escapeHtml(config.assistantName || 'JARVIS');
+  const safeAssistant = escapeHtml(config.assistantName || 'Calmon IA');
   const safeBrain = escapeHtml(config.brainName || 'Cérebro Casa · Local');
   const safeUrl = escapeHtml(config.serverUrl || 'http://192.168.1.50:3000');
 
@@ -327,7 +327,7 @@ export function buildAndroidMobilePreviewHtml(config: AndroidMobileConfig): stri
       brainIdx = (brainIdx + 1) % brains.length;
       document.getElementById('brainLabel').textContent = brains[brainIdx].label;
       document.getElementById('brainSub').textContent = brains[brainIdx].url;
-      addMsg('bot', ${JSON.stringify(config.assistantName || 'JARVIS')}, 'Cérebro alternado para ' + brains[brainIdx].label + '.');
+      addMsg('bot', ${JSON.stringify(config.assistantName || 'Calmon IA')}, 'Cérebro alternado para ' + brains[brainIdx].label + '.');
     });
 
     const micBtn = document.getElementById('micBtn');
@@ -336,11 +336,11 @@ export function buildAndroidMobilePreviewHtml(config: AndroidMobileConfig): stri
     micBtn.addEventListener('click', () => {
       listening = !listening;
       micBtn.classList.toggle('listening', listening);
-      micBtn.textContent = listening ? 'Ouvindo... toque para enviar' : 'Falar agora com ' + ${JSON.stringify(config.assistantName || 'JARVIS')};
+      micBtn.textContent = listening ? 'Ouvindo... toque para enviar' : 'Falar agora com ' + ${JSON.stringify(config.assistantName || 'Calmon IA')};
       voiceStatus.textContent = listening ? 'Microfone Android ativo — diga seu comando.' : 'Comando recebido e processado!';
       if (!listening) {
         addMsg('user', 'Você (Voz)', 'Resuma minhas tarefas e avisos de hoje.');
-        addMsg('bot', ${JSON.stringify(config.assistantName || 'JARVIS')}, 'Você tem 3 tarefas prioritárias e 1 fluxo pronto. Tudo sincronizado com seu Cérebro.');
+        addMsg('bot', ${JSON.stringify(config.assistantName || 'Calmon IA')}, 'Você tem 3 tarefas prioritárias e 1 fluxo pronto. Tudo sincronizado com seu Cérebro.');
       }
     });
 
@@ -370,8 +370,8 @@ export function buildAndroidMobilePreviewHtml(config: AndroidMobileConfig): stri
 export function buildAndroidMobileProjectFiles(rawConfig: AndroidMobileConfig): GeneratedAndroidFile[] {
   const packageId = normalizeAndroidAppId(rawConfig.packageId);
   const serverUrl = validateBrainServerUrl(rawConfig.serverUrl);
-  const appName = (rawConfig.appName || `${rawConfig.assistantName || 'JARVIS'} Mobile`).trim();
-  const assistantName = (rawConfig.assistantName || 'JARVIS').trim();
+  const appName = (rawConfig.appName || `${rawConfig.assistantName || 'Calmon IA'} Mobile`).trim();
+  const assistantName = (rawConfig.assistantName || 'Calmon IA').trim();
   const accentColor = sanitizeColor(rawConfig.accentColor);
   const caps = rawConfig.capabilities;
   const packagePath = packageId.replace(/\./g, '/');
@@ -388,7 +388,7 @@ export function buildAndroidMobileProjectFiles(rawConfig: AndroidMobileConfig): 
   const packageJson = {
     name: packageId.replace(/\./g, '-'),
     version: '1.0.0',
-    description: `${appName} — Aplicativo Android oficial conectado ao Cérebro JARVIS`,
+    description: `${appName} — Aplicativo Android oficial conectado ao Cérebro Calmon Studio`,
     private: true,
     scripts: {
       'android:init': 'npx cap add android && node scripts/apply-android-overlay.mjs',
@@ -717,7 +717,7 @@ console.log('Overlay nativo do ${appName} aplicado com sucesso em android/!');
 
   const readmeMd = `# ${appName} — Projeto Android Oficial (.apk e .aab)
 
-Este pacote foi gerado pelo **JARVIS AI Hub (Fase 7)** com Capacitor 6, permissões Android configuradas, segurança de rede estrita, compartilhamento nativo (Share Intent) e Widget de voz na tela inicial.
+Este pacote foi gerado pelo **Calmon Studio (Fase 7)** com Capacitor 6, permissões Android configuradas, segurança de rede estrita, compartilhamento nativo (Share Intent) e Widget de voz na tela inicial.
 
 ## Dados do Projeto
 - **Nome do App**: ${appName}

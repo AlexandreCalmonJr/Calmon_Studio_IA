@@ -487,7 +487,7 @@ export async function testExternalProviderConnection(input: {
     } else {
       headers.Authorization = `Bearer ${apiKey}`;
       if (input.provider === 'openrouter') {
-        headers['X-Title'] = 'JARVIS AI Hub';
+        headers['X-Title'] = 'Calmon Studio';
       }
     }
 
@@ -747,7 +747,7 @@ export async function runExternalProviderChat(input: {
       'User-Agent': 'jarvis-ai-hub',
     };
     if (credential.provider === 'openrouter') {
-      headers['X-Title'] = 'JARVIS AI Hub';
+      headers['X-Title'] = 'Calmon Studio';
     }
 
     const response = await fetch(`${urlCheck.normalizedUrl}/chat/completions`, {

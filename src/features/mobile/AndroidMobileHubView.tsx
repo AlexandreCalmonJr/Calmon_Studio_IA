@@ -85,7 +85,7 @@ const CAPABILITY_ITEMS: Array<{
   {
     key: 'shareIntent',
     title: 'Compartilhar do WhatsApp → Kira',
-    description: 'Registra ACTION_SEND no Android para enviar links suspeitos, PDFs e imagens ao JARVIS.',
+    description: 'Registra ACTION_SEND no Android para enviar links suspeitos, PDFs e imagens à Calmon IA.',
     permission: 'ACTION_SEND',
     icon: Share2,
   },

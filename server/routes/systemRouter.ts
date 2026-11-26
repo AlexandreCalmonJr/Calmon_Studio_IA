@@ -106,7 +106,7 @@ export function createSystemRouter(deps: SystemRouterDeps): Router {
   router.get('/system/discovery', requireAuth, (req: Request, res: Response) => {
     const origin = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.headers.host}`;
     res.json({
-      hub_name: 'JARVIS AI Hub',
+      hub_name: 'Calmon Studio',
       version: '3.0.1',
       local_url: origin,
       lan_ip: '127.0.0.1',

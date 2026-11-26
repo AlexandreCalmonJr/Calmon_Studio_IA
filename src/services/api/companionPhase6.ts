@@ -121,15 +121,19 @@ export async function transcribeVoiceAudio(payload: {
   return handleApiResponse(res, 'Falha ao transcrever áudio.');
 }
 
-export async function synthesizeVoiceAudio(text: string): Promise<{
+export async function synthesizeVoiceAudio(
+  text: string,
+  opts?: { voice?: string; speed?: number; model?: string }
+): Promise<{
   audio_base64: string | null;
   mime_type?: string;
+  provider?: string;
   fallback?: boolean;
 }> {
   const res = await apiFetch(`${API_BASE}/voice/tts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, ...opts }),
   });
   return handleApiResponse(res, 'Falha na síntese de voz.');
 }

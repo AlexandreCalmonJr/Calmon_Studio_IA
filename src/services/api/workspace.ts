@@ -81,7 +81,7 @@ export async function importExternalFolder(folderPath: string, name?: string): P
       url,
       init: { ...init, body: JSON.stringify({ ...body, approval_id: approvalId }) },
     }),
-    `Importar a pasta "${folderPath}" para o Workspace do JARVIS.`,
+    `Importar a pasta "${folderPath}" para o Workspace da Calmon IA.`,
   );
 }
 

@@ -38,7 +38,7 @@ type GuideItem = {
 const QUICK_GUIDES: GuideItem[] = [
   {
     id: 'voice_handsfree',
-    title: 'Voz Mãos-Livres ("Ei JARVIS" ou nome personalizado)',
+    title: 'Voz Mãos-Livres ("Ei Calmon IA" ou nome personalizado)',
     description: 'Chame seu assistente falando o nome escolhido ou clique uma vez para falar na hora.',
     duration: '2 min',
     category: 'Voz & Rotina',
@@ -155,7 +155,7 @@ const FAQS: FAQItem[] = [
     category: 'Voz',
     question: 'Como chamar o assistente por voz sem clicar no botão?',
     answer:
-      'Ative a escuta contínua no ícone de ondas ao lado de "Ei JARVIS" no topo da tela (ou em Perfil → Voz & Respostas). Depois basta falar "Ei [Nome do seu assistente]" que o painel abre sozinho. Se preferir clicar no botão "Ei [Nome]", o microfone já começa a ouvir imediatamente.',
+      'Ative a escuta contínua no ícone de ondas ao lado de "Ei Calmon IA" no topo da tela (ou em Perfil → Voz & Respostas). Depois basta falar "Ei [Nome do seu assistente]" que o painel abre sozinho. Se preferir clicar no botão "Ei [Nome]", o microfone já começa a ouvir imediatamente.',
   },
   {
     id: 'install_uninstall_faq',

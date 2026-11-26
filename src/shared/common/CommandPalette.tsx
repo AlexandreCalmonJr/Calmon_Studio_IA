@@ -101,7 +101,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     {
       id: 'nav-chat',
       category: 'Navegação',
-      title: 'Chat JARVIS Maestro',
+      title: 'Chat Calmon IA · Maestro',
       subtitle: 'Converse com o Maestro e utilize os agentes e ferramentas disponíveis',
       icon: MessageSquare,
       iconColor: 'var(--accent-color)',

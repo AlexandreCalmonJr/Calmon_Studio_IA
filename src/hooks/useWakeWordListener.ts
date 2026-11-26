@@ -62,7 +62,7 @@ function getSpeechRecognitionCtor(): any {
 }
 
 /**
- * Escuta passiva por palavra de ativação ("Ei JARVIS", "Oi Luna", etc.).
+ * Escuta passiva por palavra de ativação ("Ei Calmon IA", "Oi Luna", etc.).
  * Pausa automaticamente quando o HUD de voz está aberto para evitar conflito de microfone.
  */
 export function useWakeWordListener({

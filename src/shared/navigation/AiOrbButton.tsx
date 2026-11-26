@@ -14,7 +14,7 @@ interface AiOrbButtonProps {
  * Animated circular AI Orb with the letter "C", synced across all topbars.
  */
 export const AiOrbButton: React.FC<AiOrbButtonProps> = ({
-  assistantName = 'JARVIS',
+  assistantName = 'Calmon IA',
   active,
   onClick,
   centered = false,

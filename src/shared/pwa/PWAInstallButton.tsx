@@ -41,7 +41,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
     if (isInstallable) {
       const accepted = await install();
       if (accepted) {
-        notify('JARVIS AI Hub instalado na tela inicial!', 'success');
+        notify('Calmon Studio instalado na tela inicial!', 'success');
       }
       return;
     }
@@ -58,7 +58,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
         type="button"
         onClick={() => void handleClick()}
         className={compact ? 'btn btn-secondary btn-sm' : 'btn btn-primary btn-sm'}
-        title="Instalar JARVIS AI Hub como aplicativo PWA"
+        title="Instalar Calmon Studio como aplicativo PWA"
       >
         <Download size={14} />
         <span>{isIOS ? 'Instalar no iOS' : 'Instalar App'}</span>
@@ -68,7 +68,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Como instalar o JARVIS AI Hub"
+          aria-label="Como instalar o Calmon Studio"
           style={{
             position: 'fixed',
             inset: 0,

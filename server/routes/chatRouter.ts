@@ -160,7 +160,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
     const requestedModel = req.body?.model ? String(req.body.model) : undefined;
     const enableWebSearch = typeof req.body?.enable_web_search === 'boolean' ? req.body.enable_web_search : undefined;
     const profile = user ? userProfiles.get(user.username) : undefined;
-    const assistantName = String(req.body?.assistant_name || profile?.assistantName || 'JARVIS');
+    const assistantName = String(req.body?.assistant_name || profile?.assistantName || 'Calmon IA');
     const activeAgent = detectInvokedAgent(prompt, sessionId);
     const activeHw = getActiveHardwareProfile();
     const taskId = `tsk_${Date.now()}`;
@@ -326,7 +326,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
     const requestedModel = req.body?.model ? String(req.body.model) : undefined;
     const enableWebSearch = typeof req.body?.enable_web_search === 'boolean' ? req.body.enable_web_search : undefined;
     const profile = user ? userProfiles.get(user.username) : undefined;
-    const assistantName = String(req.body?.assistant_name || profile?.assistantName || 'JARVIS');
+    const assistantName = String(req.body?.assistant_name || profile?.assistantName || 'Calmon IA');
     const activeAgent = detectInvokedAgent(prompt, sessionId);
     const activeHw = getActiveHardwareProfile();
     const taskId = `tsk_${Date.now()}`;
@@ -1104,7 +1104,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
           try {
             const inference = await runHybridInference({
               prompt: continuationPrompt,
-              systemInstruction: `Você é ${run.agent_name} (@${run.agent_role}) retomando uma execução interrompida a partir de um checkpoint persistido no banco do JARVIS AI Hub.`,
+              systemInstruction: `Você é ${run.agent_name} (@${run.agent_role}) retomando uma execução interrompida a partir de um checkpoint persistido no banco do Calmon Studio.`,
               requestedModel,
               routingPolicy: serverState.aiRoutingPolicy,
               ollamaBaseUrl,
