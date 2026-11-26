@@ -96,14 +96,17 @@
             "x64"
           ]
         }
-      ],
-      "artifactName": "Calmon-Studio-${version}-${arch}-${target}.${ext}"
+      ]
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "artifactName": "Calmon-Studio-${version}-${arch}-Setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "Calmon-Studio-${version}-${arch}-Portable.${ext}"
     },
     "linux": {
       "target": [
