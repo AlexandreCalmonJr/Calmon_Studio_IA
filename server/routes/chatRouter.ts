@@ -28,6 +28,10 @@ import {
   generateStructuredArtifact,
   StructuredArtifactPayload,
 } from '../artifactEngine.ts';
+import {
+  resolveNaturalChatMedia,
+  type ChatMediaAssetPayload,
+} from '../services/chatMediaService.ts';
 import type { LocalSqliteBrainStore } from '../brain/sqliteBrainStore.ts';
 import { serverRateLimit, RATE_LIMITS, getClientIp } from '../rateLimiter.ts';
 import { DurableRunEngine } from '../durableRunEngine.ts';
@@ -724,8 +728,17 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
       });
       sendEvent({ type: 'run_step', run_id: durableRun.id, step: modelStep });
 
+      const mediaAssets: ChatMediaAssetPayload[] = await resolveNaturalChatMedia({
+        req,
+        store,
+        ownerUserId,
+        prompt,
+        requestedModel: result.requestedModel || result.modelUsed,
+      });
+
+      const hasRasterImage = mediaAssets.some((m) => m.kind === 'image');
       let generatedArtifact: StructuredArtifactPayload | null = null;
-      if (orchestrationPlan.deliverable) {
+      if (orchestrationPlan.deliverable && !(orchestrationPlan.deliverable === 'png' && hasRasterImage)) {
         try {
           generatedArtifact = await generateStructuredArtifact({
             kind: orchestrationPlan.deliverable,
@@ -866,6 +879,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
         sources: result.sources,
         agent_meta: agentMeta,
         artifact_payload: generatedArtifact || undefined,
+        media_assets: mediaAssets.length > 0 ? mediaAssets : undefined,
         is_completed: true,
         error: null,
       };
@@ -923,6 +937,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
         selected_agents: selectedRoles,
         classified_intent: taskData.classified_intent,
         artifact_payload: generatedArtifact || undefined,
+        media_assets: mediaAssets.length > 0 ? mediaAssets : undefined,
         latency_ms: result.latencyMs,
         reasoning: result.reasoning,
         routing_note: result.routingNote,

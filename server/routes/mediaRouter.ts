@@ -1,5 +1,11 @@
 import express, { Request, Response, Router } from 'express';
-import { serverState, requireAuth } from '../serverState.ts';
+import {
+  serverState,
+  requireAuth,
+  getOwnerUserId,
+  resolveExternalCredentialForRequest,
+} from '../serverState.ts';
+import type { LocalSqliteBrainStore } from '../brain/sqliteBrainStore.ts';
 import {
   SPREADSHEET_PRESETS,
   SpreadsheetPresetInfo,
@@ -18,8 +24,9 @@ import {
 } from '../mediaEngine.ts';
 import { isGeminiApiConfigured } from '../hybridAiEngine.ts';
 
-export function createMediaRouter(): Router {
+export function createMediaRouter(deps?: { store?: LocalSqliteBrainStore }): Router {
   const router = express.Router();
+  const store = deps?.store;
 
   // ==================== ESTÚDIO CRIATIVO: PLANILHAS EXCEL (.XLSX/.CSV) & MÍDIA GEMINI ====================
   router.get('/spreadsheets', requireAuth, (_req: Request, res: Response) => {
@@ -37,11 +44,16 @@ export function createMediaRouter(): Router {
         title?: string;
         useAi?: boolean;
       };
+      const ownerUserId = getOwnerUserId(req);
+      const externalCredential = store
+        ? resolveExternalCredentialForRequest(req, store, ownerUserId)
+        : null;
       const spec = await generateSpreadsheetSpec({
         prompt: body.prompt,
         presetId: body.presetId,
         title: body.title,
         useAi: Boolean(body.useAi),
+        externalCredential,
       });
       const xlsxBuffer = await renderSpreadsheetToXlsxBuffer(spec);
       serverState.spreadsheetStore.set(spec.id, { spec, xlsxBuffer });
@@ -121,12 +133,16 @@ export function createMediaRouter(): Router {
     try {
       const body = (req.body || {}) as {
         prompt?: string;
-        model?: 'gemini-3.1-flash-lite-image' | 'gemini-nano-banana-2.1';
+        model?: string;
         aspectRatio?: '1:1' | '16:9' | '9:16' | '4:3' | '3:4';
         imageSize?: '1K' | '2K' | '4K';
         referenceImageBase64?: string;
         referenceMimeType?: string;
       };
+      const ownerUserId = getOwnerUserId(req);
+      const externalCredential = store
+        ? resolveExternalCredentialForRequest(req, store, ownerUserId, body.model)
+        : null;
       const asset = await generateStudioImage({
         prompt: String(body.prompt || ''),
         model: body.model,
@@ -134,13 +150,14 @@ export function createMediaRouter(): Router {
         imageSize: body.imageSize,
         referenceImageBase64: body.referenceImageBase64,
         referenceMimeType: body.referenceMimeType,
+        externalCredential,
       });
       serverState.imageGallery.unshift(asset);
       if (serverState.imageGallery.length > 24) serverState.imageGallery.pop();
       res.json({ asset });
     } catch (err: any) {
       res.status(400).json({
-        error: err?.message || 'Falha ao gerar imagem com o modelo Gemini.',
+        error: err?.message || 'Falha ao gerar imagem.',
       });
     }
   });
@@ -149,6 +166,7 @@ export function createMediaRouter(): Router {
     try {
       const body = (req.body || {}) as {
         prompt?: string;
+        model?: string;
         aspectRatio?: '16:9' | '9:16';
         duration?: '5s' | '8s' | '10s';
         resolution?: '720p' | '1080p';
@@ -156,14 +174,20 @@ export function createMediaRouter(): Router {
         referenceMimeType?: string;
         previousInteractionId?: string;
       };
+      const ownerUserId = getOwnerUserId(req);
+      const externalCredential = store
+        ? resolveExternalCredentialForRequest(req, store, ownerUserId, body.model)
+        : null;
       const job = startStudioVideoJob(serverState.videoJobStore, {
         prompt: String(body.prompt || ''),
+        model: body.model,
         aspectRatio: body.aspectRatio,
         duration: body.duration,
         resolution: body.resolution,
         referenceImageBase64: body.referenceImageBase64,
         referenceMimeType: body.referenceMimeType,
         previousInteractionId: body.previousInteractionId,
+        externalCredential,
       });
 
       if (serverState.videoJobStore.size > 12) {

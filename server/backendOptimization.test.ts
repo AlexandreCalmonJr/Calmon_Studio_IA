@@ -75,6 +75,10 @@ test('Otimização Backend: 404 real, rotas implementadas, persistência SQLite 
   };
 
   let instance = await startTestApp(tempDir);
+  const prevOllama = serverState.providerConnectivity.ollama_connected;
+  const prevGemini = serverState.providerConnectivity.gemini_connected;
+  serverState.providerConnectivity.ollama_connected = false;
+  serverState.providerConnectivity.gemini_connected = false;
 
   try {
     await t.test('1. Rotas inexistentes retornam 404 JSON estruturado', async () => {
@@ -410,6 +414,8 @@ test('Otimização Backend: 404 real, rotas implementadas, persistência SQLite 
       assert.equal(pushAfter.webhook_url, 'https://hooks.example.com/jarvis-notify');
     });
   } finally {
+    serverState.providerConnectivity.ollama_connected = prevOllama;
+    serverState.providerConnectivity.gemini_connected = prevGemini;
     instance.close();
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

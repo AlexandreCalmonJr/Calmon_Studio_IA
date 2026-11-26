@@ -7,6 +7,7 @@ import {
   transcribeAudio,
 } from '../api';
 import { ChatMessage } from '../types';
+import { buildCompletedTaskData, detectStreamArtifacts } from './chatStreamHelpers';
 import { getAccountStorageKey } from '../services/accountScope';
 import { subscribeAppEvent } from '../shared/state/appBus';
 import { notify } from '../shared/common/Toast';
@@ -694,7 +695,6 @@ export function useChatStream(
         (done: any) => {
           finishStream();
           const finalText = done.final_summary || accumulatedText || 'Tarefa concluída.';
-          const sourceList = Array.isArray(done.sources) ? done.sources : [];
           setMessages((prev) => {
             const next = [...prev];
             const lastIdx = next.length - 1;
@@ -702,97 +702,18 @@ export function useChatStream(
               next[lastIdx] = {
                 ...next[lastIdx],
                 text: finalText,
-                taskData: {
-                  ...metaInfo,
-                  final_summary: finalText,
-                  is_completed: done.is_completed,
-                  approval_required: done.approval_required,
-                  approval_id: done.approval_id,
-                  execution_mode: done.execution_mode || metaInfo?.execution_mode,
-                  provider: done.provider || metaInfo?.provider,
-                  model_used: done.model_used || metaInfo?.model_used,
-                  requested_model: done.requested_model || metaInfo?.requested_model,
-                  model_source: done.model_source || metaInfo?.model_source,
-                  fallback_occurred:
-                    typeof done.fallback_occurred === 'boolean'
-                      ? done.fallback_occurred
-                      : metaInfo?.fallback_occurred,
-                  skills_used: Array.isArray(done.skills_used)
-                    ? done.skills_used
-                    : Array.isArray(metaInfo?.skills_used)
-                      ? metaInfo.skills_used
-                      : [],
-                  latency_ms: done.latency_ms ?? metaInfo?.latency_ms,
-                  reasoning: done.reasoning || metaInfo?.reasoning,
-                  routing_note: done.routing_note || metaInfo?.routing_note,
-                  sources: sourceList,
-                  agent_meta: done.agent_meta || metaInfo?.agent_meta,
-                  selected_agents: done.selected_agents || metaInfo?.selected_agents || [],
-                  plan_steps: done.plan_steps || metaInfo?.plan_steps || [],
-                  classified_intent: done.classified_intent || metaInfo?.classified_intent,
-                  agent_outputs: done.agent_outputs || metaInfo?.agent_outputs,
-                  orchestration_mode: done.orchestration_mode || metaInfo?.orchestration_mode,
-                  artifact_payload: done.artifact_payload || null,
-                },
+                taskData: buildCompletedTaskData(done, metaInfo, finalText),
               };
             }
             return next;
           });
 
-          if (done.artifact_payload && onArtifactDetected) {
-            onArtifactDetected({
-              title: done.artifact_payload.title || 'Artefato Gerado',
-              structuredArtifact: done.artifact_payload,
-              studioMode: true,
-            });
-            return;
+          const { artifact, projectsNeedRefresh } = detectStreamArtifacts(done, finalText);
+          if (artifact && onArtifactDetected) {
+            onArtifactDetected(artifact);
           }
-
-          // Detecta se a resposta contém payload JSON estruturado ou projeto/diff
-          let parsedArtPayload = false;
-          try {
-            const trimmedFinal = finalText.trim();
-            let jsonStr = '';
-            if (trimmedFinal.startsWith('{') && trimmedFinal.endsWith('}')) {
-              jsonStr = trimmedFinal;
-            } else {
-              const m = trimmedFinal.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-              if (m) jsonStr = m[1];
-            }
-            if (jsonStr) {
-              const parsed = JSON.parse(jsonStr);
-              if (parsed.artifact_payload && parsed.artifact_payload.code) {
-                parsedArtPayload = true;
-                if (onArtifactDetected) {
-                  onArtifactDetected({
-                    title: parsed.artifact_payload.title || 'Artefato de Código',
-                    content: parsed.artifact_payload.code,
-                    htmlContent: parsed.artifact_payload.language === 'html' ? parsed.artifact_payload.code : undefined,
-                    mode: parsed.active_agent_mode,
-                    planStatus: parsed.ui_layout_instructions?.plan_status,
-                  });
-                }
-              }
-            }
-          } catch {}
-
-          // Detecta projeto ou diff para abrir Canvas (caso não tenha vindo via JSON)
-          if (!parsedArtPayload) {
-            const prjMatch = finalText.match(/workspace[\\/]([a-zA-Z0-9_-]+)/i);
-            const diffMatch = finalText.match(/```diff\n([\s\S]*?)\n```/);
-            if (prjMatch || diffMatch) {
-              if (onArtifactDetected) {
-                onArtifactDetected({
-                  title: prjMatch ? `Projeto: ${prjMatch[1]}` : 'Diff de Alterações',
-                  projectId: prjMatch ? prjMatch[1] : undefined,
-                  diffContent: diffMatch ? diffMatch[1] : undefined,
-                  content: finalText,
-                });
-              }
-              if (onProjectsNeedRefresh) {
-                onProjectsNeedRefresh();
-              }
-            }
+          if (projectsNeedRefresh && onProjectsNeedRefresh) {
+            onProjectsNeedRefresh();
           }
         },
         (errStr: string, code?: string) => {

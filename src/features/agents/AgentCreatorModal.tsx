@@ -30,7 +30,7 @@ import {
 } from '../../services/mascots';
 import { MascotAvatar } from '../../shared/common/MascotAvatar';
 import { notify } from '../../shared/common/Toast';
-import { canUninstallAgent } from '../../services/agentTemplates';
+import { canUninstallAgent } from '../../services/agentRules';
 
 interface AgentCreatorModalProps {
   isOpen: boolean;

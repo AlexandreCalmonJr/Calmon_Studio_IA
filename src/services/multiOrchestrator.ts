@@ -76,6 +76,30 @@ export function detectDeliverableKind(prompt: string): DeliverableKind {
   return null;
 }
 
+export type NaturalMediaIntent = 'image' | 'video' | 'spreadsheet' | null;
+
+export function detectNaturalMediaIntent(prompt: string): NaturalMediaIntent {
+  const norm = normalizeToken(prompt);
+  if (!norm) return null;
+  if (
+    /\b(gere|gerar|crie|criar|faca|fazer|produz[ia]r?)\b.*\b(video|animacao|clipe)\b/.test(norm) ||
+    /\b(video|animacao)\b.*\b(de|sobre|com)\b/.test(norm)
+  ) {
+    return 'video';
+  }
+  if (/\b(planilha|excel|xlsx|tabela financeira|orcamento em tabela)\b/.test(norm)) {
+    return 'spreadsheet';
+  }
+  if (
+    /\b(gere|gerar|crie|criar|faca|fazer|desenh[eo]|ilustre)\b.*\b(imagem|foto|fotografia|ilustracao|poster|banner|capa|arte|logo)\b/.test(
+      norm
+    )
+  ) {
+    return 'image';
+  }
+  return null;
+}
+
 export function detectInvokedAgents(
   prompt: string,
   catalog: OrchestratorAgentRef[]

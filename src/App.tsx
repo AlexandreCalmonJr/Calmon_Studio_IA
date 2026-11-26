@@ -1,14 +1,12 @@
-import React, { useState, useEffect, useRef, useMemo, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useMemo, Suspense, lazy } from 'react';
 import { AuthGate } from './features/auth/AuthGate';
 import { PrimaryRail } from './shared/navigation/PrimaryRail';
 import { AgentDock } from './shared/navigation/AgentDock';
 import { AppTopBar } from './shared/layout/AppTopBar';
 import { VOICE_HUD_STATE_EVENT, VOICE_HUD_TOGGLE_EVENT } from './shared/navigation/AiOrbButton';
-import { LaunchpadOverlay } from './shared/navigation/LaunchpadOverlay';
 import { LaunchpadGlyph } from './shared/navigation/NavIcon';
-import { SystemHealth, ApprovalRequestItem, AgentInfo } from './types';
-import { fetchHealth, fetchApprovals, fetchAgents } from './api';
-import { fetchResources, SystemResourceUsage } from './services/api/system';
+import { AgentInfo } from './types';
+import { fetchAgents } from './api';
 import {
   ShieldAlert,
   PanelLeft,
@@ -19,46 +17,23 @@ import {
   Smartphone,
   ShieldCheck,
 } from 'lucide-react';
-import {
-  getNextQuickTheme,
-  loadThemePreferences,
-  saveAndApplyThemePreferences,
-  THEME_CHANGED_EVENT,
-  type ThemeMode,
-} from './services/themeEngine';
 import { useWakeWordListener } from './hooks/useWakeWordListener';
+import { useShellPreferences } from './hooks/useShellPreferences';
+import { useSystemPolling } from './hooks/useSystemPolling';
 import { subscribeAppEvent } from './shared/state/appBus';
-import { SetupWizardModal } from './shared/common/SetupWizardModal';
-import { InitialPasswordChangeModal } from './shared/common/InitialPasswordChangeModal';
-import { GuidedTour } from './shared/common/GuidedTour';
-import { UserProfileModal, getUserProfile, UserProfileData } from './shared/common/UserProfileModal';
-import { ToastContainer, notify } from './shared/common/Toast';
+import { getUserProfile, type UserProfileData } from './services/userProfile';
+import { ToastContainer } from './shared/common/Toast';
 import { ApprovalPromptHost } from './shared/common/ApprovalPromptHost';
-import { CommandPalette } from './shared/common/CommandPalette';
 import {
   computeDockClearancePx,
-  DOCK_FAVORITES_UPDATED_EVENT,
-  DOCK_MINIMIZED_UPDATED_EVENT,
-  loadDockFavorites,
-  loadDockMinimized,
-  loadSidebarHidden,
   resolveDockFavoriteItems,
   resolveVisibleNavModules,
-  saveDockFavorites,
-  saveDockMinimized,
-  saveSidebarHidden,
-  shouldAutoMinimizeDockForTab,
-  SIDEBAR_HIDDEN_UPDATED_EVENT,
-  toggleDockFavorite,
 } from './services/navigationShell';
 import { OfflineIndicator } from './shared/pwa/PWAInstallButton';
-import { VoiceLiveHudModal } from './features/companion/VoiceLiveHudModal';
 import { ErrorBanner } from './shared/layout/StateFeedback';
 import { pathForTab, tabFromLocation } from './router';
 import { API_BASE } from './services/api/client';
-import { subscribeJarvisRealtime } from './services/api/brain';
 import { apiFetch } from './services/sessionTransport';
-import { getAccountStorageKey } from './services/accountScope';
 import {
   AssistantIdentityProvider,
   useAssistantIdentity,
@@ -74,6 +49,30 @@ import {
   isTabUnlockedByPacks,
   type ModulePackDefinition,
 } from './services/modulePackEngine';
+
+const LaunchpadOverlay = lazy(() =>
+  import('./shared/navigation/LaunchpadOverlay').then((m) => ({ default: m.LaunchpadOverlay }))
+);
+const SetupWizardModal = lazy(() =>
+  import('./shared/common/SetupWizardModal').then((m) => ({ default: m.SetupWizardModal }))
+);
+const InitialPasswordChangeModal = lazy(() =>
+  import('./shared/common/InitialPasswordChangeModal').then((m) => ({
+    default: m.InitialPasswordChangeModal,
+  }))
+);
+const GuidedTour = lazy(() =>
+  import('./shared/common/GuidedTour').then((m) => ({ default: m.GuidedTour }))
+);
+const CommandPalette = lazy(() =>
+  import('./shared/common/CommandPalette').then((m) => ({ default: m.CommandPalette }))
+);
+const VoiceLiveHudModal = lazy(() =>
+  import('./features/companion/VoiceLiveHudModal').then((m) => ({ default: m.VoiceLiveHudModal }))
+);
+const UserProfileModal = lazy(() =>
+  import('./shared/common/UserProfileModal').then((m) => ({ default: m.UserProfileModal }))
+);
 
 // Code splitting: cada tela é carregada sob demanda
 const Overview = lazy(() =>
@@ -343,28 +342,28 @@ const DashboardApp: React.FC = () => {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showVoiceHud, setShowVoiceHud] = useState(false);
-  const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadThemePreferences().themeMode);
-
-  useEffect(() => {
-    const syncTheme = () => setThemeMode(loadThemePreferences().themeMode);
-    window.addEventListener(THEME_CHANGED_EVENT, syncTheme);
-    return () => window.removeEventListener(THEME_CHANGED_EVENT, syncTheme);
-  }, []);
-
-  const handleCycleTheme = () => {
-    const next = getNextQuickTheme(themeMode);
-    saveAndApplyThemePreferences({ themeMode: next });
-    setThemeMode(next);
-  };
-
-  const themeQuickLabel =
-    themeMode === 'friendly_light'
-      ? 'Tema: Claro Amigável (clique para Escuro)'
-      : themeMode === 'auto'
-        ? 'Tema: Automático do Sistema (clique para Claro)'
-        : 'Tema: Escuro Studio (clique para Automático)';
   const [pendingVoiceCommand, setPendingVoiceCommand] = useState<string | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfileData>(getUserProfile);
+  const [launchpadOpen, setLaunchpadOpen] = useState(false);
+  const [installedAgents, setInstalledAgents] = useState<AgentInfo[]>([]);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  const {
+    themeMode,
+    themeQuickLabel,
+    handleCycleTheme,
+    isSidebarCollapsed,
+    isSidebarHidden,
+    dockFavorites,
+    showDynamicIsland,
+    showAgentDock,
+    effectiveDockMinimized,
+    handleToggleSidebar,
+    handleToggleSidebarHidden,
+    handleToggleAgentDock,
+    handleToggleDockMinimized,
+    handleToggleDockFavorite,
+  } = useShellPreferences({ activeTab, setMobileNavOpen });
 
   const wakeWord = useWakeWordListener({
     assistantName,
@@ -395,33 +394,19 @@ const DashboardApp: React.FC = () => {
   useEffect(() => {
     setUserProfile(identityProfile);
   }, [identityProfile]);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem('jarvis_sidebar_collapsed') === 'true';
-    } catch {
-      return false;
-    }
-  });
-  const [isSidebarHidden, setIsSidebarHidden] = useState<boolean>(() => loadSidebarHidden());
-  const sidebarHiddenRef = useRef(isSidebarHidden);
-  useEffect(() => {
-    sidebarHiddenRef.current = isSidebarHidden;
-  }, [isSidebarHidden]);
-  const [isDockMinimized, setIsDockMinimized] = useState<boolean>(() => loadDockMinimized());
-  const [dockFavorites, setDockFavorites] = useState<string[]>(() => loadDockFavorites());
-  const [launchpadOpen, setLaunchpadOpen] = useState(false);
-  const [installedAgents, setInstalledAgents] = useState<AgentInfo[]>([]);
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [attachedProjectId, setAttachedProjectId] = useState<string | null>(null);
   const [targetChatSessionId, setTargetChatSessionId] = useState<string | null>(null);
   const [pendingChatPrompt, setPendingChatPrompt] = useState<string | null>(null);
-  const [health, setHealth] = useState<SystemHealth | null>(null);
-  const [approvals, setApprovals] = useState<ApprovalRequestItem[]>([]);
-  const [healthLoading, setHealthLoading] = useState(true);
-  const [approvalsLoading, setApprovalsLoading] = useState(true);
-  const [healthError, setHealthError] = useState<string | null>(null);
-  const [approvalsError, setApprovalsError] = useState<string | null>(null);
-  const [systemResources, setSystemResources] = useState<SystemResourceUsage | null>(null);
+  const {
+    health,
+    approvals,
+    healthLoading,
+    approvalsLoading,
+    healthError,
+    approvalsError,
+    systemResources,
+    loadData,
+  } = useSystemPolling();
   const [installedPackIds, setInstalledPackIds] = useState<string[] | null>(null);
   const [customPacks, setCustomPacks] = useState<ModulePackDefinition[]>([]);
   const [installingRequiredPack, setInstallingRequiredPack] = useState(false);
@@ -457,55 +442,6 @@ const DashboardApp: React.FC = () => {
       window.removeEventListener(PACKS_UPDATED_EVENT, onPacksUpdated);
     };
   }, [authLoaded]);
-
-  const [showDynamicIsland, setShowDynamicIsland] = useState<boolean>(() => {
-    try {
-      const v = localStorage.getItem(getAccountStorageKey('jarvis_pref_dynamic_island'));
-      return v !== null ? v !== 'false' : true;
-    } catch {
-      return true;
-    }
-  });
-
-  const [showAgentDock, setShowAgentDock] = useState<boolean>(() => {
-    try {
-      const v = localStorage.getItem(getAccountStorageKey('jarvis_pref_agent_dock'));
-      return v !== null ? v !== 'false' : true;
-    } catch {
-      return true;
-    }
-  });
-
-  useEffect(() => {
-    const syncPreferences = () => {
-      try {
-        const islandVal = localStorage.getItem(getAccountStorageKey('jarvis_pref_dynamic_island'));
-        setShowDynamicIsland(islandVal !== null ? islandVal !== 'false' : true);
-        const dockVal = localStorage.getItem(getAccountStorageKey('jarvis_pref_agent_dock'));
-        setShowAgentDock(dockVal !== null ? dockVal !== 'false' : true);
-        setIsSidebarHidden(loadSidebarHidden());
-        setIsDockMinimized(loadDockMinimized());
-        setDockFavorites(loadDockFavorites());
-      } catch {}
-    };
-
-    const syncFavorites = () => setDockFavorites(loadDockFavorites());
-    const syncSidebarHidden = () => setIsSidebarHidden(loadSidebarHidden());
-    const syncDockMinimized = () => setIsDockMinimized(loadDockMinimized());
-
-    window.addEventListener('jarvis_ui_preferences_changed', syncPreferences);
-    window.addEventListener('storage', syncPreferences);
-    window.addEventListener(DOCK_FAVORITES_UPDATED_EVENT, syncFavorites);
-    window.addEventListener(SIDEBAR_HIDDEN_UPDATED_EVENT, syncSidebarHidden);
-    window.addEventListener(DOCK_MINIMIZED_UPDATED_EVENT, syncDockMinimized);
-    return () => {
-      window.removeEventListener('jarvis_ui_preferences_changed', syncPreferences);
-      window.removeEventListener('storage', syncPreferences);
-      window.removeEventListener(DOCK_FAVORITES_UPDATED_EVENT, syncFavorites);
-      window.removeEventListener(SIDEBAR_HIDDEN_UPDATED_EVENT, syncSidebarHidden);
-      window.removeEventListener(DOCK_MINIMIZED_UPDATED_EVENT, syncDockMinimized);
-    };
-  }, []);
 
   useEffect(() => {
     if (!authLoaded) return;
@@ -588,72 +524,6 @@ const DashboardApp: React.FC = () => {
     }
   };
 
-  const handleToggleSidebar = () => {
-    if (typeof window !== 'undefined' && window.innerWidth <= 768) {
-      setMobileNavOpen((prev) => !prev);
-      return;
-    }
-    if (sidebarHiddenRef.current) {
-      saveSidebarHidden(false);
-      setIsSidebarHidden(false);
-      return;
-    }
-    setIsSidebarCollapsed((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem('jarvis_sidebar_collapsed', String(next));
-      } catch {}
-      return next;
-    });
-  };
-
-  const handleToggleSidebarHidden = () => {
-    const next = !sidebarHiddenRef.current;
-    saveSidebarHidden(next);
-    setIsSidebarHidden(next);
-  };
-
-  const handleToggleAgentDock = () => {
-    setShowAgentDock((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem(getAccountStorageKey('jarvis_pref_agent_dock'), String(next));
-        window.dispatchEvent(new Event('jarvis_ui_preferences_changed'));
-      } catch {}
-      return next;
-    });
-  };
-
-  const [dockTabOverride, setDockTabOverride] = useState<{ tab: string; minimized: boolean } | null>(null);
-
-  const effectiveDockMinimized =
-    dockTabOverride && dockTabOverride.tab === activeTab
-      ? dockTabOverride.minimized
-      : isDockMinimized || shouldAutoMinimizeDockForTab(activeTab);
-
-  const handleToggleDockMinimized = () => {
-    const next = !effectiveDockMinimized;
-    setDockTabOverride({ tab: activeTab, minimized: next });
-    if (!shouldAutoMinimizeDockForTab(activeTab)) {
-      setIsDockMinimized(next);
-      saveDockMinimized(next);
-    }
-  };
-
-  const handleToggleDockFavorite = (tabId: string) => {
-    setDockFavorites((prev) => {
-      const res = toggleDockFavorite(tabId, prev);
-      if (res.limitReached) {
-        notify('Limite de 6 favoritos no Dock atingido. Remova um ícone fixado antes de adicionar outro.', 'info');
-        return prev;
-      }
-      const saved = saveDockFavorites(res.favorites);
-      if (res.added) notify('Módulo fixado nos Favoritos do Dock.', 'success');
-      else if (res.removed) notify('Módulo removido dos Favoritos do Dock.', 'info');
-      return saved;
-    });
-  };
-
   const handleStartChatFromOverview = (prompt?: string) => {
     if (prompt && prompt.trim()) {
       setTargetChatSessionId('new_' + Date.now());
@@ -731,87 +601,6 @@ const DashboardApp: React.FC = () => {
       unsubAgentChat();
       window.removeEventListener('jarvis:toggle-launchpad', handleToggleLaunchpadEvent);
       window.removeEventListener('jarvis:toggle-sidebar-hidden', handleToggleSidebarHiddenEvent);
-    };
-  }, []);
-
-  const loadData = async (opts: { initial?: boolean } = {}) => {
-    if (opts.initial) {
-      setHealthLoading(true);
-      setApprovalsLoading(true);
-    }
-    const [healthResult, approvalsResult, resourcesResult] = await Promise.allSettled([
-      fetchHealth(),
-      fetchApprovals(),
-      fetchResources(),
-    ]);
-    if (healthResult.status === 'fulfilled') {
-      setHealth(healthResult.value);
-      setHealthError(null);
-    } else {
-      setHealthError(
-        healthResult.reason instanceof Error
-          ? healthResult.reason.message
-          : 'Falha ao consultar a saúde do sistema.'
-      );
-    }
-    setHealthLoading(false);
-    if (approvalsResult.status === 'fulfilled') {
-      setApprovals(approvalsResult.value);
-      setApprovalsError(null);
-    } else {
-      setApprovalsError(
-        approvalsResult.reason instanceof Error
-          ? approvalsResult.reason.message
-          : 'Falha ao consultar aprovações.'
-      );
-    }
-    setApprovalsLoading(false);
-    if (resourcesResult.status === 'fulfilled') {
-      setSystemResources(resourcesResult.value);
-    }
-  };
-
-  useEffect(() => {
-    loadData({ initial: true });
-
-    // Polling suavizado para 60 segundos (reduzindo sobrecarga de requisições de 8s para 60s)
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') loadData();
-    }, 60000);
-
-    // Revalidação imediata quando o usuário retorna o foco à aba
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        loadData();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    // Sincronização inteligente acionada por eventos do canal WebSocket em tempo real (com debounce contra rajadas)
-    let wsDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-    const unsubscribeWs = subscribeJarvisRealtime((event) => {
-      if (
-        event.type === 'sentinel_incident' ||
-        event.type === 'companion_update' ||
-        event.type === 'office_agent_event' ||
-        event.type === 'roundtable_started' ||
-        event.type === 'roundtable_verdict' ||
-        event.type === 'connected'
-      ) {
-        if (document.visibilityState === 'visible') {
-          if (wsDebounceTimer) clearTimeout(wsDebounceTimer);
-          wsDebounceTimer = setTimeout(() => {
-            loadData();
-          }, 1000);
-        }
-      }
-    });
-
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      if (wsDebounceTimer) clearTimeout(wsDebounceTimer);
-      unsubscribeWs();
     };
   }, []);
 
@@ -1300,106 +1089,132 @@ const DashboardApp: React.FC = () => {
       </div>
 
       {/* Launchpad macOS (Grade de Módulos) */}
-      <LaunchpadOverlay
-        isOpen={launchpadOpen}
-        onClose={() => setLaunchpadOpen(false)}
-        activeTab={activeTab}
-        onNavigate={navigate}
-        modules={launchpadModules}
-        favoriteIds={dockFavorites}
-        onToggleFavorite={handleToggleDockFavorite}
-        pendingApprovalsCount={pendingApprovalsCount}
-        isSidebarHidden={isSidebarHidden}
-        onToggleSidebarHidden={handleToggleSidebarHidden}
-        isSimpleMode={isSimpleMode}
-        onToggleSimpleMode={() => void setExperienceMode(isSimpleMode ? 'engineering' : 'simple')}
-        assistantName={assistantName}
-        installedAgents={installedAgents}
-        onSelectAgent={(agentId) => {
-          setTargetChatSessionId('agent_' + agentId);
-          navigate('chat');
-        }}
-      />
+      {launchpadOpen && (
+        <Suspense fallback={null}>
+          <LaunchpadOverlay
+            isOpen={launchpadOpen}
+            onClose={() => setLaunchpadOpen(false)}
+            activeTab={activeTab}
+            onNavigate={navigate}
+            modules={launchpadModules}
+            favoriteIds={dockFavorites}
+            onToggleFavorite={handleToggleDockFavorite}
+            pendingApprovalsCount={pendingApprovalsCount}
+            isSidebarHidden={isSidebarHidden}
+            onToggleSidebarHidden={handleToggleSidebarHidden}
+            isSimpleMode={isSimpleMode}
+            onToggleSimpleMode={() => void setExperienceMode(isSimpleMode ? 'engineering' : 'simple')}
+            assistantName={assistantName}
+            installedAgents={installedAgents}
+            onSelectAgent={(agentId) => {
+              setTargetChatSessionId('agent_' + agentId);
+              navigate('chat');
+            }}
+          />
+        </Suspense>
+      )}
 
       {/* Modais e Overlays Globais */}
-      <InitialPasswordChangeModal
-        isOpen={authLoaded && authMustChangePassword}
-        onCompleted={() => {
-          setAuthMustChangePassword(false);
-          setShowSetupWizard(true);
-        }}
-      />
+      {authLoaded && authMustChangePassword && (
+        <Suspense fallback={null}>
+          <InitialPasswordChangeModal
+            isOpen
+            onCompleted={() => {
+              setAuthMustChangePassword(false);
+              setShowSetupWizard(true);
+            }}
+          />
+        </Suspense>
+      )}
 
-      <GuidedTour
-        isOpen={guidedTourOpen}
-        permissions={authPermissions}
-        onNavigate={navigate}
-        onClose={() => setGuidedTourOpen(false)}
-      />
+      {guidedTourOpen && (
+        <Suspense fallback={null}>
+          <GuidedTour
+            isOpen={guidedTourOpen}
+            permissions={authPermissions}
+            onNavigate={navigate}
+            onClose={() => setGuidedTourOpen(false)}
+          />
+        </Suspense>
+      )}
 
-      <SetupWizardModal
-        isOpen={
-          showSetupWizard &&
-          authLoaded &&
-          !authMustChangePassword &&
-          authKind === 'human' &&
-          authRole === 'admin'
-        }
-        onClose={() => setShowSetupWizard(false)}
-        onCompleted={loadData}
-      />
+      {showSetupWizard &&
+        authLoaded &&
+        !authMustChangePassword &&
+        authKind === 'human' &&
+        authRole === 'admin' && (
+          <Suspense fallback={null}>
+            <SetupWizardModal
+              isOpen
+              onClose={() => setShowSetupWizard(false)}
+              onCompleted={loadData}
+            />
+          </Suspense>
+        )}
 
-      <UserProfileModal
-        isOpen={showProfileModal}
-        onClose={() => setShowProfileModal(false)}
-        onNavigate={navigate}
-        onOpenSetupWizard={
-          authKind === 'human' && authRole === 'admin'
-            ? () => {
-                setShowProfileModal(false);
-                setShowSetupWizard(true);
-              }
-            : undefined
-        }
-        onProfileUpdated={(updated) => {
-          setUserProfile(updated);
-          void updateIdentityProfile(updated);
-        }}
-      />
+      {showProfileModal && (
+        <Suspense fallback={null}>
+          <UserProfileModal
+            isOpen={showProfileModal}
+            onClose={() => setShowProfileModal(false)}
+            onNavigate={navigate}
+            onOpenSetupWizard={
+              authKind === 'human' && authRole === 'admin'
+                ? () => {
+                    setShowProfileModal(false);
+                    setShowSetupWizard(true);
+                  }
+                : undefined
+            }
+            onProfileUpdated={(updated) => {
+              setUserProfile(updated);
+              void updateIdentityProfile(updated);
+            }}
+          />
+        </Suspense>
+      )}
 
-      <CommandPalette
-        isOpen={showCommandPalette}
-        permissions={authPermissions}
-        role={authRole || undefined}
-        principalKind={authKind || undefined}
-        permissionsLoaded={authLoaded}
-        onClose={() => setShowCommandPalette(false)}
-        onNavigate={(tab) => {
-          navigate(tab);
-          setShowCommandPalette(false);
-        }}
-        onOpenProfile={() => setShowProfileModal(true)}
-      />
+      {showCommandPalette && (
+        <Suspense fallback={null}>
+          <CommandPalette
+            isOpen={showCommandPalette}
+            permissions={authPermissions}
+            role={authRole || undefined}
+            principalKind={authKind || undefined}
+            permissionsLoaded={authLoaded}
+            onClose={() => setShowCommandPalette(false)}
+            onNavigate={(tab) => {
+              navigate(tab);
+              setShowCommandPalette(false);
+            }}
+            onOpenProfile={() => setShowProfileModal(true)}
+          />
+        </Suspense>
+      )}
 
-      <VoiceLiveHudModal
-        isOpen={showVoiceHud}
-        onClose={() => {
-          setShowVoiceHud(false);
-          setPendingVoiceCommand(null);
-        }}
-        autoListenOnOpen
-        initialCommand={pendingVoiceCommand}
-        onInitialCommandConsumed={() => setPendingVoiceCommand(null)}
-        wakeWordEnabled={wakeWord.enabled}
-        onToggleWakeWord={wakeWord.toggle}
-        onOpenChat={(prompt) => {
-          setShowVoiceHud(false);
-          setPendingVoiceCommand(null);
-          if (prompt) setPendingChatPrompt(prompt);
-          navigate('chat');
-        }}
-        onNavigate={(tab) => navigate(tab)}
-      />
+      {showVoiceHud && (
+        <Suspense fallback={null}>
+          <VoiceLiveHudModal
+            isOpen={showVoiceHud}
+            onClose={() => {
+              setShowVoiceHud(false);
+              setPendingVoiceCommand(null);
+            }}
+            autoListenOnOpen
+            initialCommand={pendingVoiceCommand}
+            onInitialCommandConsumed={() => setPendingVoiceCommand(null)}
+            wakeWordEnabled={wakeWord.enabled}
+            onToggleWakeWord={wakeWord.toggle}
+            onOpenChat={(prompt) => {
+              setShowVoiceHud(false);
+              setPendingVoiceCommand(null);
+              if (prompt) setPendingChatPrompt(prompt);
+              navigate('chat');
+            }}
+            onNavigate={(tab) => navigate(tab)}
+          />
+        </Suspense>
+      )}
 
       {/* Navegação Inferior Mobile PWA (visível apenas abaixo de 768px) */}
       <nav className="jarvis-mobile-bottom-nav" aria-label="Navegação mobile rápida">

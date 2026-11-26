@@ -38,6 +38,7 @@ import {
   pollStudioVideoApi,
   startStudioVideoApi,
 } from '../../services/api/creativeStudio';
+import { fetchModels } from '../../services/api/models';
 import { notify } from '../../shared/common/Toast';
 
 type StudioTab = 'spreadsheets' | 'images' | 'videos';
@@ -76,9 +77,8 @@ export const CreativeMediaStudioView: React.FC = () => {
   // --- Estúdio de Imagens ---
   const [images, setImages] = useState<StudioImageAsset[]>([]);
   const [imagePrompt, setImagePrompt] = useState('');
-  const [imageModel, setImageModel] = useState<'gemini-3.1-flash-lite-image' | 'gemini-nano-banana-2.1'>(
-    'gemini-3.1-flash-lite-image'
-  );
+  const [imageModel, setImageModel] = useState<string>('gemini-3.1-flash-lite-image');
+  const [externalImageModels, setExternalImageModels] = useState<Array<{ name: string; provider: string }>>([]);
   const [imageAspect, setImageAspect] = useState<'1:1' | '16:9' | '9:16' | '4:3' | '3:4'>('1:1');
   const [imageSize, setImageSize] = useState<'1K' | '2K' | '4K'>('1K');
   const [imageRef, setImageRef] = useState<{ name: string; base64: string; mimeType: string; dataUrl: string } | null>(
@@ -91,6 +91,7 @@ export const CreativeMediaStudioView: React.FC = () => {
   // --- Diretor de Vídeos ---
   const [videos, setVideos] = useState<StudioVideoJob[]>([]);
   const [videoPrompt, setVideoPrompt] = useState('');
+  const [videoModel, setVideoModel] = useState<string>('gemini-omni-1.2-flash');
   const [videoAspect, setVideoAspect] = useState<'16:9' | '9:16'>('16:9');
   const [videoDuration, setVideoDuration] = useState<'5s' | '8s' | '10s'>('8s');
   const [videoResolution, setVideoResolution] = useState<'720p' | '1080p'>('720p');
@@ -105,7 +106,11 @@ export const CreativeMediaStudioView: React.FC = () => {
 
   const loadAll = async () => {
     try {
-      const [sheetData, mediaData] = await Promise.all([fetchSpreadsheets(), fetchMediaGallery()]);
+      const [sheetData, mediaData, modelsData] = await Promise.all([
+        fetchSpreadsheets(),
+        fetchMediaGallery(),
+        fetchModels().catch(() => null),
+      ]);
       if (sheetData.presets?.length) setPresets(sheetData.presets);
       setSpreadsheets(sheetData.items || []);
       if (!activeSheetDoc && sheetData.items?.length) {
@@ -113,6 +118,13 @@ export const CreativeMediaStudioView: React.FC = () => {
       }
       setImages(mediaData.images || []);
       setVideos(mediaData.videos || []);
+      if (Array.isArray(modelsData?.online_models)) {
+        const nonGemini = modelsData.online_models.filter(
+          (m: { name?: string; provider?: string }) =>
+            m?.name && !String(m.provider || '').toLowerCase().includes('gemini online')
+        );
+        setExternalImageModels(nonGemini);
+      }
     } catch (err: any) {
       setSheetError(err?.message || 'Não foi possível sincronizar o histórico do Estúdio Criativo.');
     }
@@ -290,6 +302,7 @@ export const CreativeMediaStudioView: React.FC = () => {
     try {
       const job = await startStudioVideoApi({
         prompt: videoPrompt.trim(),
+        model: videoModel,
         aspectRatio: videoAspect,
         duration: videoDuration,
         resolution: videoResolution,
@@ -822,8 +835,19 @@ export const CreativeMediaStudioView: React.FC = () => {
                     value={imageModel}
                     onChange={(e) => setImageModel(e.target.value as any)}
                   >
-                    <option value="gemini-3.1-flash-lite-image">Rápido (Gemini Flash Image)</option>
-                    <option value="gemini-nano-banana-2.1">Alta Resolução 1K–4K (Nano Banana 2.1)</option>
+                    <optgroup label="Google Gemini">
+                      <option value="gemini-3.1-flash-lite-image">Rápido (Gemini Flash Image)</option>
+                      <option value="gemini-nano-banana-2.1">Alta Resolução 1K–4K (Nano Banana 2.1)</option>
+                    </optgroup>
+                    {externalImageModels.length > 0 && (
+                      <optgroup label="Suas Chaves de API (OpenCode)">
+                        {externalImageModels.map((m) => (
+                          <option key={`${m.provider}:${m.name}`} value={m.name}>
+                            {m.name} ({m.provider})
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
                 </label>
 
@@ -1063,6 +1087,28 @@ export const CreativeMediaStudioView: React.FC = () => {
 
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center' }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  Modelo de Vídeo
+                  <select
+                    className="jarvis-input"
+                    value={videoModel}
+                    onChange={(e) => setVideoModel(e.target.value)}
+                  >
+                    <optgroup label="Google Gemini">
+                      <option value="gemini-omni-1.2-flash">Gemini Omni 1.2 Flash</option>
+                    </optgroup>
+                    {externalImageModels.length > 0 && (
+                      <optgroup label="Suas Chaves de API (OpenCode)">
+                        {externalImageModels.map((m) => (
+                          <option key={`vid:${m.provider}:${m.name}`} value={m.name}>
+                            {m.name} ({m.provider})
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
+                </label>
+
                 <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                   Formato
                   <select

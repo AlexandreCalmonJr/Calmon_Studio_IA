@@ -57,6 +57,45 @@ export function parseGitHubRepoRef(raw?: string | null): { owner: string; repo: 
   return null;
 }
 
+export function parseGitHubSkillInput(
+  raw?: string | null,
+  explicitSkill?: string | null
+): { owner: string; repo: string; skillName?: string } | null {
+  const clean = (raw || '').trim();
+  if (!clean) return null;
+
+  let skillName = (explicitSkill || '').trim() || undefined;
+
+  // Suporta comandos CLI: `npx skills add NVIDIA/skills --skill rag-blueprint`
+  const cliSkillMatch = clean.match(/(?:--skill|-s)(?:=|\s+)["']?([a-zA-Z0-9_.-]+)["']?/i);
+  if (cliSkillMatch && !skillName) {
+    skillName = cliSkillMatch[1];
+  }
+
+  // Suporta URL com subpasta `/tree/<branch>/skills/<name>`
+  const treeSkillMatch = clean.match(/github\.com\/([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+)\/tree\/[^/]+\/(?:skills\/)?([^/\s?#]+)/i);
+  if (treeSkillMatch) {
+    return {
+      owner: treeSkillMatch[1],
+      repo: treeSkillMatch[2].replace(/\.git$/i, ''),
+      skillName: skillName || treeSkillMatch[3],
+    };
+  }
+
+  // Extrai owner/repo de comandos como `npx skills add owner/repo ...`
+  const cliRepoMatch = clean.match(/(?:skills\s+add\s+)([a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+|https?:\/\/github\.com\/[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+)/i);
+  const repoTarget = cliRepoMatch ? cliRepoMatch[1] : clean.split(/\s+/)[0];
+
+  const base = parseGitHubRepoRef(repoTarget) || parseGitHubRepoRef(clean);
+  if (!base) return null;
+
+  return {
+    owner: base.owner,
+    repo: base.repo,
+    ...(skillName ? { skillName } : {}),
+  };
+}
+
 export function parseFigmaFileKey(raw?: string | null): string | null {
   const clean = (raw || '').trim();
   if (!clean) return null;

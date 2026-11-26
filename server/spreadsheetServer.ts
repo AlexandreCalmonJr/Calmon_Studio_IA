@@ -1,6 +1,10 @@
 import ExcelJS from 'exceljs';
 import { GoogleGenAI, Type } from '@google/genai';
 import {
+  runExternalProviderChat,
+  type ResolvedExternalCredential,
+} from './providerEngine.ts';
+import {
   SpreadsheetCellValue,
   SpreadsheetColumn,
   SpreadsheetPresetInfo,
@@ -69,6 +73,7 @@ export async function generateSpreadsheetSpec(input: {
   presetId?: SpreadsheetPresetInfo['id'];
   title?: string;
   useAi?: boolean;
+  externalCredential?: ResolvedExternalCredential | null;
 }): Promise<SpreadsheetSpec> {
   const prompt = (input.prompt || '').trim();
 
@@ -82,66 +87,83 @@ export async function generateSpreadsheetSpec(input: {
   }
 
   const ai = getGeminiClient();
-  if (!ai) {
-    throw new Error(
-      'Chave GEMINI_API_KEY não configurada no servidor. Configure em Settings > Secrets ou gere usando um Modelo Pronto Instantâneo.'
-    );
-  }
-
-  const response = await ai.models.generateContent({
-    model: 'gemini-4-hydrogen',
-    contents: `Você é a Iris, especialista em planilhas Excel em português do Brasil.
+  const spreadsheetPrompt = `Você é a Iris, especialista em planilhas Excel em português do Brasil.
 Crie uma estrutura completa e prática de planilha Excel para o pedido: "${prompt || input.title || 'Controle Financeiro Mensal'}".
 Regras obrigatórias:
 1. Gere entre 2 e 3 abas (sheets) bem organizadas com nomes curtos (máx 25 caracteres).
 2. Cada aba deve ter entre 4 e 6 colunas tipadas (type: "text" | "currency" | "number" | "percent" | "date") e 4 a 7 linhas de exemplo realistas em português do Brasil.
 3. Para valores numéricos de moeda (currency) ou número (number), devolva números puros como string numérica (ex: "1250.50"). Para percentual (percent), devolva decimal (ex: "0.25" para 25%).
-4. Inclua uma linha de resumo (summaryCells) com fórmulas Excel reais no formato "=SUM(D5:D9)|12500" (fórmula sem erro + barra vertical + valor numérico calculado para prévia). Lembre que os dados começam na linha 5 do Excel (linhas 1-3 são título/subtítulo/espaço e linha 4 é o cabeçalho).`,
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          title: { type: Type.STRING },
-          subtitle: { type: Type.STRING },
-          sheets: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING },
-                description: { type: Type.STRING },
-                columns: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      key: { type: Type.STRING },
-                      header: { type: Type.STRING },
-                      type: { type: Type.STRING },
+4. Inclua uma linha de resumo (summaryCells) com fórmulas Excel reais no formato "=SUM(D5:D9)|12500" (fórmula sem erro + barra vertical + valor numérico calculado para prévia). Lembre que os dados começam na linha 5 do Excel (linhas 1-3 são título/subtítulo/espaço e linha 4 é o cabeçalho).`;
+
+  let rawJsonText = '{}';
+  if (input.externalCredential && !ai) {
+    const extRes = await runExternalProviderChat({
+      credential: input.externalCredential,
+      systemInstruction:
+        'Responda APENAS com um objeto JSON válido (sem markdown nem texto extra) com as chaves: title, subtitle, sheets (array com name, description, columns, rows, summaryCells).',
+      prompt: spreadsheetPrompt,
+      timeoutMs: 30000,
+    });
+    const trimmed = extRes.text.trim();
+    const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    rawJsonText = fenceMatch ? fenceMatch[1].trim() : trimmed;
+  } else {
+    if (!ai) {
+      throw new Error(
+        'Nenhuma chave de API configurada (GEMINI_API_KEY ou provedor externo em Configurações > Chaves de API). Você também pode gerar usando um Modelo Pronto Instantâneo.'
+      );
+    }
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-4-hydrogen',
+      contents: spreadsheetPrompt,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING },
+            subtitle: { type: Type.STRING },
+            sheets: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  columns: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        key: { type: Type.STRING },
+                        header: { type: Type.STRING },
+                        type: { type: Type.STRING },
+                      },
                     },
                   },
-                },
-                rows: {
-                  type: Type.ARRAY,
-                  items: {
+                  rows: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.ARRAY,
+                      items: { type: Type.STRING },
+                    },
+                  },
+                  summaryCells: {
                     type: Type.ARRAY,
                     items: { type: Type.STRING },
                   },
-                },
-                summaryCells: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
                 },
               },
             },
           },
         },
       },
-    },
-  });
+    });
+    rawJsonText = (response.text || '{}').trim();
+  }
 
-  const parsed = JSON.parse((response.text || '{}').trim()) as {
+  const parsed = JSON.parse(rawJsonText) as {
     title?: string;
     subtitle?: string;
     sheets?: Array<{

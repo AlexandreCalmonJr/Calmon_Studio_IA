@@ -16,6 +16,9 @@ import {
   Brain,
   AlertTriangle,
   Wrench,
+  Download,
+  Film,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { TaskStateResponse, getAgentLabel, getModelLabel, humanizeLabel } from '../../types';
 import { CanvasArtifact } from './ArtifactCanvas';
@@ -778,6 +781,143 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
                   {feedbackError}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Mídias Geradas Inline (Imagens, Vídeos e Planilhas) */}
+          {isJarvis && Array.isArray(task?.media_assets) && task.media_assets.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '14px' }}>
+              {task.media_assets.map((asset) => {
+                if (asset.kind === 'image') {
+                  return (
+                    <div
+                      key={asset.id}
+                      style={{
+                        borderRadius: 'var(--radius-lg)',
+                        border: '1px solid var(--border-accent)',
+                        backgroundColor: 'var(--bg-secondary)',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <img
+                        src={asset.url}
+                        alt={asset.title}
+                        style={{
+                          width: '100%',
+                          maxHeight: '420px',
+                          objectFit: 'contain',
+                          display: 'block',
+                          backgroundColor: '#07090d',
+                        }}
+                      />
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '10px',
+                          padding: '10px 14px',
+                          fontSize: '0.78rem',
+                        }}
+                      >
+                        <span style={{ color: 'var(--text-secondary)' }}>
+                          {asset.title}
+                          {asset.model_used ? ` · ${asset.model_used}` : ''}
+                        </span>
+                        <a
+                          href={asset.url}
+                          download={`calmon-studio-${asset.id}.png`}
+                          className="btn btn-primary btn-xs"
+                        >
+                          <Download size={13} />
+                          <span>Baixar Imagem</span>
+                        </a>
+                      </div>
+                    </div>
+                  );
+                }
+
+                if (asset.kind === 'video') {
+                  return (
+                    <div
+                      key={asset.id}
+                      style={{
+                        borderRadius: 'var(--radius-lg)',
+                        border: '1px solid var(--border-accent)',
+                        backgroundColor: 'var(--bg-secondary)',
+                        padding: '12px 14px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.84rem', fontWeight: 600 }}>
+                          <Film size={15} />
+                          <span>{asset.title}</span>
+                        </div>
+                        {asset.model_used && (
+                          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                            {asset.model_used}
+                          </span>
+                        )}
+                      </div>
+                      {asset.status === 'completed' ? (
+                        <video
+                          src={asset.url}
+                          controls
+                          style={{ width: '100%', maxHeight: '360px', borderRadius: '8px', backgroundColor: '#000' }}
+                        />
+                      ) : (
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                          Geração de vídeo iniciada em segundo plano. Acompanhe e reproduza no <strong>Estúdio Criativo</strong>.
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+
+                return (
+                  <div
+                    key={asset.id}
+                    style={{
+                      padding: '12px 16px',
+                      borderRadius: 'var(--radius-lg)',
+                      backgroundColor: 'var(--bg-secondary)',
+                      border: '1px solid var(--border-accent)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: '10px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <FileSpreadsheet size={18} />
+                      <div>
+                        <div style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                          {asset.title}
+                        </div>
+                        <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                          Planilha pronta para download (.XLSX / .CSV)
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <a href={asset.url} download className="btn btn-primary btn-xs">
+                        <Download size={13} />
+                        <span>.XLSX</span>
+                      </a>
+                      {asset.secondary_url && (
+                        <a href={asset.secondary_url} download className="btn btn-secondary btn-xs">
+                          <Download size={13} />
+                          <span>.CSV</span>
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
 

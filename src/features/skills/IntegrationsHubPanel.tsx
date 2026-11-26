@@ -68,6 +68,7 @@ export const IntegrationsHubPanel: React.FC<IntegrationsHubPanelProps> = ({
 
   // GitHub live inspector
   const [githubRepoInput, setGithubRepoInput] = useState('vercel/next.js');
+  const [githubSkillInput, setGithubSkillInput] = useState('');
   const [githubTokenInput, setGithubTokenInput] = useState('');
   const [githubInspecting, setGithubInspecting] = useState(false);
   const [githubImporting, setGithubImporting] = useState(false);
@@ -140,8 +141,15 @@ export const IntegrationsHubPanel: React.FC<IntegrationsHubPanelProps> = ({
         });
         setGithubTokenInput('');
       }
-      const res = await inspectGitHubRepo(githubRepoInput.trim());
+      const res = await inspectGitHubRepo(
+        githubRepoInput.trim(),
+        undefined,
+        githubSkillInput.trim() || undefined
+      );
       setGithubInspection(res);
+      if (res?.selected_skill_name && !githubSkillInput.trim()) {
+        setGithubSkillInput(res.selected_skill_name);
+      }
       notify(`Repositório ${res.full_name} inspecionado com sucesso.`, 'success');
       await loadHub();
     } catch (err: any) {
@@ -151,12 +159,14 @@ export const IntegrationsHubPanel: React.FC<IntegrationsHubPanelProps> = ({
     }
   };
 
-  const handleImportGitHubSkill = async () => {
+  const handleImportGitHubSkill = async (overrideSkill?: string) => {
     if (!githubRepoInput.trim()) return;
+    const targetSkill = (overrideSkill ?? githubSkillInput).trim() || undefined;
     setGithubImporting(true);
     try {
       const res = await importGitHubSkillPack({
         repo: githubRepoInput.trim(),
+        skill: targetSkill,
         allowed_agents: githubConnector?.allowed_agents || ['software_architect', 'frontend_mobile_developer', 'sentinel_security'],
         as_context_set: true,
       });
@@ -393,14 +403,22 @@ export const IntegrationsHubPanel: React.FC<IntegrationsHubPanelProps> = ({
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <label htmlFor="gh-repo-input" style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-              Repositório (owner/repo ou URL)
+              Repositório, URL ou comando (<code>npx skills add ...</code>)
             </label>
             <input
               id="gh-repo-input"
               type="text"
               value={githubRepoInput}
               onChange={(e) => setGithubRepoInput(e.target.value)}
-              placeholder="ex.: anthropics/skills ou vercel/next.js"
+              placeholder="ex.: NVIDIA/skills ou npx skills add NVIDIA/skills --skill rag-blueprint"
+              className="jarvis-input"
+            />
+            <input
+              type="text"
+              value={githubSkillInput}
+              onChange={(e) => setGithubSkillInput(e.target.value)}
+              placeholder="Skill específica opcional (ex.: rag-blueprint)"
+              aria-label="Skill específica opcional"
               className="jarvis-input"
             />
             <input
@@ -427,7 +445,7 @@ export const IntegrationsHubPanel: React.FC<IntegrationsHubPanelProps> = ({
             <button
               type="button"
               disabled={githubImporting}
-              onClick={handleImportGitHubSkill}
+              onClick={() => handleImportGitHubSkill()}
               className="btn btn-primary btn-sm"
               style={{ whiteSpace: 'nowrap' }}
             >
@@ -448,16 +466,52 @@ export const IntegrationsHubPanel: React.FC<IntegrationsHubPanelProps> = ({
                 color: 'var(--text-secondary)',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '4px',
+                gap: '6px',
               }}
             >
               <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                 {githubInspection.full_name} · {githubInspection.language || 'Multi-stack'}
+                {githubInspection.selected_skill_name ? ` · ${githubInspection.selected_skill_name}` : ''}
               </div>
               <div>{githubInspection.description}</div>
               <div className="jarvis-tabular" style={{ color: 'var(--text-muted)' }}>
-                {githubInspection.stars ?? 0} estrelas · {githubInspection.has_skill_md ? 'SKILL.md detectado' : 'README pronto para destilação'}
+                {githubInspection.stars ?? 0} estrelas ·{' '}
+                {githubInspection.has_skill_md
+                  ? `SKILL.md detectado${githubInspection.selected_skill_path ? ` (${githubInspection.selected_skill_path})` : ''}`
+                  : 'README pronto para destilação'}
               </div>
+              {Array.isArray(githubInspection.available_skills) && githubInspection.available_skills.length > 1 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' }}>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                    {githubInspection.available_skills.length} skills encontradas neste repositório (clique para selecionar):
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', maxHeight: '96px', overflowY: 'auto' }}>
+                    {githubInspection.available_skills
+                      .filter((s: any) =>
+                        !githubSkillInput.trim() ||
+                        String(s.name).toLowerCase().includes(githubSkillInput.trim().toLowerCase())
+                      )
+                      .slice(0, 24)
+                      .map((s: any) => {
+                        const isSelected = githubSkillInput.trim().toLowerCase() === String(s.name).toLowerCase();
+                        return (
+                          <button
+                            key={s.path}
+                            type="button"
+                            onClick={() => setGithubSkillInput(s.name)}
+                            className={`btn btn-xs ${isSelected ? 'btn-primary' : 'btn-ghost'}`}
+                            style={{
+                              border: isSelected ? '1px solid var(--border-accent)' : '1px solid var(--border-subtle)',
+                              fontSize: '0.7rem',
+                            }}
+                          >
+                            {s.name}
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

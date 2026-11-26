@@ -43,10 +43,13 @@ import {
   ProviderConnectionHealthStrip,
   ProviderInlineHealthBar,
 } from './ProviderConnectionHealthStrip';
+import { ProviderModelSelector } from './ProviderModelSelector';
+import { AgentModelRecommendationsPanel } from './AgentModelRecommendationsPanel';
 
 interface ProviderDraft {
   apiKey: string;
   defaultModel: string;
+  enabledModels: string[];
   baseUrl: string;
   showKey: boolean;
   showAdvancedUrl: boolean;
@@ -87,6 +90,7 @@ export const ThirdPartyApiKeysCard: React.FC = () => {
         next[item.provider] = {
           apiKey: current?.apiKey ?? '',
           defaultModel: current?.defaultModel || item.default_model || '',
+          enabledModels: current?.enabledModels ?? item.enabled_models ?? [],
           baseUrl: current?.baseUrl || item.base_url || '',
           showKey: current?.showKey ?? false,
           showAdvancedUrl: current?.showAdvancedUrl ?? item.provider === 'custom',
@@ -133,6 +137,7 @@ export const ThirdPartyApiKeysCard: React.FC = () => {
       [provider]: {
         apiKey: prev[provider]?.apiKey ?? '',
         defaultModel: prev[provider]?.defaultModel ?? '',
+        enabledModels: prev[provider]?.enabledModels ?? [],
         baseUrl: prev[provider]?.baseUrl ?? '',
         showKey: prev[provider]?.showKey ?? false,
         showAdvancedUrl: prev[provider]?.showAdvancedUrl ?? provider === 'custom',
@@ -178,6 +183,23 @@ export const ThirdPartyApiKeysCard: React.FC = () => {
       };
 
       setPingMap((prev) => ({ ...prev, [item.provider]: record }));
+      if (res.ok && record.modelsDetected.length > 0) {
+        setDrafts((prev) => {
+          const cur = prev[item.provider];
+          if (!cur || cur.enabledModels.length > 0) return prev;
+          const preferred = cur.defaultModel && record.modelsDetected.includes(cur.defaultModel)
+            ? cur.defaultModel
+            : record.modelsDetected[0];
+          return {
+            ...prev,
+            [item.provider]: {
+              ...cur,
+              defaultModel: cur.defaultModel || preferred,
+              enabledModels: preferred ? [preferred] : [],
+            },
+          };
+        });
+      }
       return record;
     },
     [persistEncryptedMeta]
@@ -305,20 +327,29 @@ export const ThirdPartyApiKeysCard: React.FC = () => {
         }
       }
 
+      const detectedForSave =
+        pingMap[item.provider]?.modelsDetected?.length
+          ? pingMap[item.provider]!.modelsDetected
+          : item.detected_models;
+
       const updated = await saveSessionProviderKey(item.provider, {
         api_key: cleanKey || undefined,
         default_model: (draft?.defaultModel || item.default_model).trim(),
+        detected_models: detectedForSave,
+        enabled_models: draft?.enabledModels ?? item.enabled_models ?? [],
         base_url: effectiveUrl || undefined,
         is_default: item.is_default,
       });
       setVaultState(updated);
       persistEncryptedMeta(updated);
       // Limpa imediatamente o segredo em texto claro do campo do formulário
+      const savedProvider = updated.providers.find((p) => p.provider === item.provider);
       setDrafts((prev) => ({
         ...prev,
         [item.provider]: {
           apiKey: '',
-          defaultModel: prev[item.provider]?.defaultModel || item.default_model,
+          defaultModel: prev[item.provider]?.defaultModel || savedProvider?.default_model || item.default_model,
+          enabledModels: savedProvider?.enabled_models ?? prev[item.provider]?.enabledModels ?? [],
           baseUrl: prev[item.provider]?.baseUrl || item.base_url,
           showKey: false,
           showAdvancedUrl: prev[item.provider]?.showAdvancedUrl ?? item.provider === 'custom',
@@ -794,6 +825,41 @@ export const ThirdPartyApiKeysCard: React.FC = () => {
                   Salvar mesmo assim
                 </button>
               </div>
+            )}
+          </div>
+        )}
+
+        {/* Seletor estilo OpenCode para modelos descobertos a partir da chave */}
+        {(ping?.modelsDetected?.length || item.detected_models?.length) ? (
+          <>
+            <ProviderModelSelector
+              provider={item.provider}
+              discoveredModels={
+                ping?.modelsDetected?.length ? ping.modelsDetected : item.detected_models || []
+              }
+              enabledModels={draft.enabledModels}
+              defaultModel={draft.defaultModel || item.default_model}
+              onChangeEnabledModels={(next) => updateDraft(item.provider, { enabledModels: next })}
+              onSelectDefaultModel={(modelId) => updateDraft(item.provider, { defaultModel: modelId })}
+            />
+            {(ping?.modelsDetected?.length || item.detected_models?.length || 0) > 1 && (
+              <AgentModelRecommendationsPanel
+                discoveredModels={
+                  ping?.modelsDetected?.length ? ping.modelsDetected : item.detected_models || []
+                }
+              />
+            )}
+          </>
+        ) : null}
+
+        {item.configured && typeof item.tokens_used_today === 'number' && (
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+            <span>
+              Consumo hoje: <strong style={{ color: 'var(--text-secondary)' }}>{item.tokens_used_today.toLocaleString('pt-BR')}</strong>
+              {item.daily_token_limit ? ` / ${item.daily_token_limit.toLocaleString('pt-BR')} tokens` : ' tokens (ilimitado)'}
+            </span>
+            {item.rate_limited_until && item.rate_limited_until > Date.now() && (
+              <span style={{ color: '#fca5a5' }}>Cooldown 429 ativo (balanceando para outra chave)</span>
             )}
           </div>
         )}

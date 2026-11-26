@@ -299,6 +299,11 @@ export interface SessionProviderKeyRecord {
   masked_key: string;
   base_url: string;
   default_model: string;
+  detected_models?: string[];
+  enabled_models?: string[];
+  tokens_used_today?: number;
+  daily_token_limit?: number;
+  rate_limited_until?: number | null;
   is_active: boolean;
   is_default: boolean;
   last_tested_at: string | null;
@@ -376,6 +381,8 @@ export async function saveSessionProviderKey(
     api_key?: string;
     base_url?: string;
     default_model?: string;
+    detected_models?: string[];
+    enabled_models?: string[];
     is_default?: boolean;
     label?: string;
   }
@@ -388,6 +395,20 @@ export async function saveSessionProviderKey(
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: 'Falha ao salvar chave de API.' }));
     throw new Error(err.detail || 'Falha ao salvar chave de API.');
+  }
+  return res.json();
+}
+
+export async function applyAgentModelRecommendations(
+  assignments: Array<{ role: string; model: string }>
+): Promise<{ updated_count: number }> {
+  const res = await apiFetch(`${API_BASE}/agents/apply-model-recommendations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assignments }),
+  });
+  if (!res.ok) {
+    throw new Error('Não foi possível aplicar as sugestões de modelos aos agentes.');
   }
   return res.json();
 }

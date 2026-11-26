@@ -754,6 +754,8 @@ CREATE TABLE IF NOT EXISTS provider_vault_keys (
   masked_key TEXT NOT NULL,
   base_url TEXT NOT NULL DEFAULT '',
   default_model TEXT NOT NULL DEFAULT '',
+  detected_models_json TEXT NOT NULL DEFAULT '[]',
+  enabled_models_json TEXT NOT NULL DEFAULT '[]',
   is_active INTEGER NOT NULL DEFAULT 1,
   is_default INTEGER NOT NULL DEFAULT 0,
   last_tested_at TEXT,

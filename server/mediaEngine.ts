@@ -1,9 +1,25 @@
 import crypto from 'node:crypto';
 import { GoogleGenAI } from '@google/genai';
+import {
+  EXTERNAL_PROVIDERS,
+  validateProviderBaseUrl,
+  type ResolvedExternalCredential,
+} from './providerEngine.ts';
+import { extractProviderHttpError, fetchWithTimeout } from './providerHttpHelpers.ts';
 
-export type ImageModelId = 'gemini-3.1-flash-lite-image' | 'gemini-nano-banana-2.1';
+export type ImageModelId = string;
 export type ImageAspectRatio = '1:1' | '16:9' | '9:16' | '4:3' | '3:4';
 export type ImageResolution = '1K' | '2K' | '4K';
+
+const GEMINI_IMAGE_MODELS = new Set(['gemini-3.1-flash-lite-image', 'gemini-nano-banana-2.1']);
+
+const ASPECT_TO_SIZE: Record<ImageAspectRatio, string> = {
+  '1:1': '1024x1024',
+  '16:9': '1792x1024',
+  '9:16': '1024x1792',
+  '4:3': '1024x768',
+  '3:4': '768x1024',
+};
 
 export interface GeneratedImageAsset {
   id: string;
@@ -23,7 +39,7 @@ export interface VideoGenerationJob {
   id: string;
   kind: 'video';
   prompt: string;
-  model: 'gemini-omni-1.2-flash';
+  model: string;
   aspectRatio: '16:9' | '9:16';
   duration: '5s' | '8s' | '10s';
   resolution: '720p' | '1080p';
@@ -66,6 +82,82 @@ export function formatGeminiMediaError(err: unknown): string {
   return raw;
 }
 
+async function generateExternalProviderImage(input: {
+  prompt: string;
+  model: string;
+  aspectRatio: ImageAspectRatio;
+  credential: ResolvedExternalCredential;
+}): Promise<GeneratedImageAsset> {
+  const { credential } = input;
+  const meta = EXTERNAL_PROVIDERS[credential.provider];
+  const urlCheck = validateProviderBaseUrl(credential.provider, credential.baseUrl);
+  if (!urlCheck.valid) {
+    throw new Error(urlCheck.error || `Endpoint inválido para ${meta.name}.`);
+  }
+
+  const chosenModel = input.model && !GEMINI_IMAGE_MODELS.has(input.model)
+    ? input.model
+    : credential.model || 'dall-e-3';
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${credential.apiKey}`,
+    'User-Agent': 'jarvis-ai-hub',
+  };
+  if (credential.provider === 'openrouter') {
+    headers['X-Title'] = 'Calmon Studio';
+  }
+
+  const response = await fetchWithTimeout(
+    `${urlCheck.normalizedUrl}/images/generations`,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: chosenModel,
+        prompt: input.prompt,
+        n: 1,
+        size: ASPECT_TO_SIZE[input.aspectRatio] || '1024x1024',
+        response_format: 'b64_json',
+      }),
+    },
+    60000
+  );
+
+  if (!response.ok) {
+    const detail = await extractProviderHttpError(response, credential.apiKey, 200);
+    throw new Error(`${meta.shortLabel} (${chosenModel}) falhou ao gerar imagem: ${detail}`);
+  }
+
+  const json = (await response.json()) as {
+    data?: Array<{ b64_json?: string; url?: string; revised_prompt?: string }>;
+  };
+  const first = json?.data?.[0];
+  let dataUrl = '';
+  if (first?.b64_json) {
+    dataUrl = `data:image/png;base64,${first.b64_json}`;
+  } else if (first?.url) {
+    dataUrl = first.url;
+  }
+
+  if (!dataUrl) {
+    throw new Error(`O modelo ${chosenModel} (${meta.shortLabel}) não retornou dados de imagem.`);
+  }
+
+  return {
+    id: `img_${crypto.randomBytes(5).toString('hex')}`,
+    kind: 'image',
+    prompt: input.prompt,
+    model: chosenModel,
+    aspectRatio: input.aspectRatio,
+    mimeType: 'image/png',
+    dataUrl,
+    caption: first?.revised_prompt || `Gerado via ${meta.shortLabel} (${chosenModel})`,
+    editedFromReference: false,
+    createdAt: new Date().toISOString(),
+  };
+}
+
 export async function generateStudioImage(input: {
   prompt: string;
   model?: ImageModelId;
@@ -73,10 +165,38 @@ export async function generateStudioImage(input: {
   imageSize?: ImageResolution;
   referenceImageBase64?: string;
   referenceMimeType?: string;
+  externalCredential?: ResolvedExternalCredential | null;
 }): Promise<GeneratedImageAsset> {
   const prompt = (input.prompt || '').trim();
   if (!prompt) {
     throw new Error('Descreva a imagem ou a edição desejada antes de gerar.');
+  }
+
+  const aspectRatio: ImageAspectRatio = ['1:1', '16:9', '9:16', '4:3', '3:4'].includes(
+    input.aspectRatio || ''
+  )
+    ? (input.aspectRatio as ImageAspectRatio)
+    : '1:1';
+
+  const hasGeminiKey = Boolean((process.env.GEMINI_API_KEY || '').trim());
+  const requestedModel = String(input.model || '').trim();
+  const wantsExternal =
+    Boolean(input.externalCredential) &&
+    ((requestedModel && !GEMINI_IMAGE_MODELS.has(requestedModel)) || !hasGeminiKey);
+
+  if (wantsExternal && input.externalCredential) {
+    return generateExternalProviderImage({
+      prompt,
+      model: requestedModel || input.externalCredential.model,
+      aspectRatio,
+      credential: input.externalCredential,
+    });
+  }
+
+  if (!hasGeminiKey) {
+    throw new Error(
+      'Nenhuma chave de API com suporte a imagem configurada. Configure GEMINI_API_KEY ou salve uma chave de provedor (OpenAI, xAI, Custom) em Configurações > Chaves de API.'
+    );
   }
 
   const ai = getGeminiClient();
@@ -84,12 +204,6 @@ export async function generateStudioImage(input: {
     input.model === 'gemini-nano-banana-2.1'
       ? 'gemini-nano-banana-2.1'
       : 'gemini-3.1-flash-lite-image';
-
-  const aspectRatio: ImageAspectRatio = ['1:1', '16:9', '9:16', '4:3', '3:4'].includes(
-    input.aspectRatio || ''
-  )
-    ? (input.aspectRatio as ImageAspectRatio)
-    : '1:1';
 
   const imageSize: ImageResolution | undefined =
     model === 'gemini-nano-banana-2.1'
@@ -170,12 +284,14 @@ export function startStudioVideoJob(
   store: Map<string, VideoJobStoreEntry>,
   input: {
     prompt: string;
+    model?: string;
     aspectRatio?: '16:9' | '9:16';
     duration?: '5s' | '8s' | '10s';
     resolution?: '720p' | '1080p';
     referenceImageBase64?: string;
     referenceMimeType?: string;
     previousInteractionId?: string;
+    externalCredential?: ResolvedExternalCredential | null;
   }
 ): VideoGenerationJob {
   const prompt = (input.prompt || '').trim();
@@ -183,7 +299,22 @@ export function startStudioVideoJob(
     throw new Error('Descreva a cena do vídeo antes de iniciar a geração.');
   }
 
-  const ai = getGeminiClient();
+  const hasGeminiKey = Boolean((process.env.GEMINI_API_KEY || '').trim());
+  const requestedModel = String(input.model || '').trim();
+  const wantsExternal =
+    Boolean(input.externalCredential) &&
+    ((requestedModel && requestedModel !== 'gemini-omni-1.2-flash') || !hasGeminiKey);
+
+  if (!wantsExternal && !hasGeminiKey) {
+    throw new Error(
+      'Nenhuma chave de API configurada para vídeo. Salve uma chave de provedor em Configurações > Chaves de API ou configure GEMINI_API_KEY.'
+    );
+  }
+
+  const effectiveModel = wantsExternal
+    ? requestedModel || input.externalCredential!.model || 'sora-2'
+    : 'gemini-omni-1.2-flash';
+
   const id = `vid_${crypto.randomBytes(5).toString('hex')}`;
   const aspectRatio: '16:9' | '9:16' = input.aspectRatio === '9:16' ? '9:16' : '16:9';
   const duration: '5s' | '8s' | '10s' =
@@ -196,19 +327,102 @@ export function startStudioVideoJob(
     id,
     kind: 'video',
     prompt,
-    model: 'gemini-omni-1.2-flash',
+    model: effectiveModel,
     aspectRatio,
     duration,
     resolution,
     status: 'running',
-    progressMessage: input.previousInteractionId
-      ? 'Estendendo cena anterior no Diretor de Vídeos (Gemini Omni Flash)...'
-      : 'Renderizando vídeo em alta fluidez com Gemini Omni Flash...',
+    progressMessage: wantsExternal
+      ? `Enviando geração de vídeo para ${input.externalCredential!.label || input.externalCredential!.provider} (${effectiveModel})...`
+      : input.previousInteractionId
+        ? 'Estendendo cena anterior no Diretor de Vídeos (Gemini Omni Flash)...'
+        : 'Renderizando vídeo em alta fluidez com Gemini Omni Flash...',
     previousInteractionId: input.previousInteractionId,
     createdAt: new Date().toISOString(),
   };
 
   store.set(id, { job });
+
+  if (wantsExternal && input.externalCredential) {
+    const cred = input.externalCredential;
+    void (async () => {
+      try {
+        const meta = EXTERNAL_PROVIDERS[cred.provider];
+        const urlCheck = validateProviderBaseUrl(cred.provider, cred.baseUrl);
+        if (!urlCheck.valid) {
+          throw new Error(urlCheck.error || `Endpoint inválido para ${meta.name}.`);
+        }
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${cred.apiKey}`,
+          'User-Agent': 'jarvis-ai-hub',
+        };
+        if (cred.provider === 'openrouter') headers['X-Title'] = 'Calmon Studio';
+
+        const response = await fetchWithTimeout(
+          `${urlCheck.normalizedUrl}/videos/generations`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              model: effectiveModel,
+              prompt,
+              aspect_ratio: aspectRatio,
+              duration: Number(duration.replace('s', '')) || 8,
+              resolution,
+            }),
+          },
+          120_000
+        );
+
+        if (!response.ok) {
+          const detail = await extractProviderHttpError(response, cred.apiKey, 200);
+          throw new Error(`${meta.shortLabel} (${effectiveModel}) retornou ${detail} em /videos/generations.`);
+        }
+
+        const json = (await response.json()) as {
+          data?: Array<{ b64_json?: string; url?: string }>;
+          url?: string;
+        };
+        const b64 = json?.data?.[0]?.b64_json;
+        const remoteUrl = json?.data?.[0]?.url || json?.url;
+
+        let videoBuffer: Buffer | undefined;
+        if (b64) {
+          videoBuffer = Buffer.from(b64, 'base64');
+        } else if (remoteUrl) {
+          const fileRes = await fetchWithTimeout(remoteUrl, { method: 'GET' }, 60_000);
+          if (!fileRes.ok) {
+            throw new Error(`Não foi possível baixar o vídeo gerado (${fileRes.status}).`);
+          }
+          videoBuffer = Buffer.from(await fileRes.arrayBuffer());
+        } else {
+          throw new Error(`O modelo ${effectiveModel} não retornou dados de vídeo.`);
+        }
+
+        const entry = store.get(id);
+        if (entry) {
+          entry.buffer = videoBuffer;
+          entry.job.status = 'completed';
+          entry.job.mimeType = 'video/mp4';
+          entry.job.videoUrl = `/api/v1/media/videos/${id}/file`;
+          entry.job.progressMessage = `Vídeo pronto via ${meta.shortLabel} (${effectiveModel}).`;
+          entry.job.completedAt = new Date().toISOString();
+        }
+      } catch (err) {
+        const entry = store.get(id);
+        if (entry) {
+          entry.job.status = 'failed';
+          entry.job.error = err instanceof Error ? err.message : 'Falha ao gerar vídeo no provedor externo.';
+          entry.job.progressMessage = entry.job.error;
+          entry.job.completedAt = new Date().toISOString();
+        }
+      }
+    })();
+    return job;
+  }
+
+  const ai = getGeminiClient();
 
   // Run Omni Flash via Interactions API asynchronously so the HTTP route returns immediately for live progress polling
   void (async () => {

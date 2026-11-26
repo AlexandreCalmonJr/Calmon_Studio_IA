@@ -320,7 +320,7 @@ export function createPacksRouter(deps: PacksRouterDeps): Router {
       const cached = source === 'offline_cache'
         ? store.loadStateNamespace<{ fetched_at: string; registry_url: string; packs: Array<Record<string, unknown>> }>('pack_registry_cache')
         : null;
-      const catalogPacks = listAllModulePacks(customPacks).map((p) => ({
+      const catalogPacks = mergeCatalogWithCustomPacks(customPacks).map((p) => ({
         id: p.id,
         name: p.name,
         version: p.version,

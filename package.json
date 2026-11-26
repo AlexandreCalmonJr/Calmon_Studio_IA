@@ -1,7 +1,7 @@
 {
   "name": "jarvis-dashboard",
   "private": true,
-  "version": "3.0.1",
+  "version": "3.1.0",
   "description": "Calmon Studio — Plataforma de IA Local-First e Multi-Agentes",
   "author": "Alexandre Calmon",
   "type": "module",
@@ -17,6 +17,7 @@
     "desktop:mac": "npm run build && npm run build:server && electron-builder --mac dmg zip",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "typecheck:server": "tsc -p tsconfig.server.json --noEmit",
     "lint": "tsc --noEmit",
     "test": "tsx --test server/*.test.ts server/brain/*.test.ts src/router.test.ts src/services/*.test.ts src/shared/state/*.test.ts firestore.rules.test.ts",
     "test:unit": "tsx --test server/*.test.ts server/brain/*.test.ts src/router.test.ts src/services/*.test.ts firestore.rules.test.ts",
@@ -37,34 +38,34 @@
   },
   "dependencies": {
     "@google/genai": "^3.6.1",
-    "@types/express": "^5.0.6",
-    "@types/pg": "^8.23.1",
-    "@types/qrcode": "^1.5.6",
-    "@types/ws": "^8.18.2",
     "exceljs": "^4.4.0",
     "express": "^5.3.0",
-    "firebase": "^13.4.0",
-    "jspdf": "^4.2.1",
     "jszip": "^3.10.2",
-    "lucide-react": "^1.16.0",
     "msedge-tts": "^2.1.1",
     "pg": "^8.23.1",
-    "pptxgenjs": "^4.0.1",
-    "qrcode": "^1.5.4",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "recharts": "^3.10.1",
     "tsx": "^4.23.15",
     "ws": "^8.23.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.1",
+    "@types/express": "^5.0.6",
     "@types/node": "^22.10.0",
+    "@types/pg": "^8.23.1",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/ws": "^8.18.2",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^45.5.0",
     "electron-builder": "^26.18.0",
+    "firebase": "^13.4.0",
+    "jspdf": "^4.2.1",
+    "lucide-react": "^1.16.0",
+    "pptxgenjs": "^4.0.1",
+    "qrcode": "^1.5.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "recharts": "^3.10.1",
     "typescript": "^5.7.2",
     "vite": "^6.0.1",
     "vite-plugin-pwa": "^2.0.0"
@@ -72,6 +73,7 @@
   "build": {
     "appId": "com.calmonstudio.hub",
     "productName": "Calmon Studio",
+    "icon": "build/icon.png",
     "directories": {
       "output": "release"
     },
@@ -113,6 +115,9 @@
         "AppImage"
       ],
       "category": "Utility",
+      "executableArgs": [
+        "--no-sandbox"
+      ],
       "artifactName": "Calmon-Studio-${version}-${arch}.${ext}"
     },
     "mac": {

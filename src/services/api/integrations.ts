@@ -34,17 +34,18 @@ export async function saveIntegrationConnector(
   return handleApiResponse<IntegrationConnectorRecord>(res, 'Falha ao salvar configuração da integração.');
 }
 
-export async function inspectGitHubRepo(repo: string, token?: string): Promise<any> {
+export async function inspectGitHubRepo(repo: string, token?: string, skill?: string): Promise<any> {
   const res = await apiFetch(`${API_BASE}/integrations/github/inspect`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ repo, token }),
+    body: JSON.stringify({ repo, token, skill }),
   });
   return handleApiResponse(res, 'Falha ao inspecionar repositório no GitHub.');
 }
 
 export async function importGitHubSkillPack(payload: {
   repo: string;
+  skill?: string;
   allowed_agents?: string[];
   as_context_set?: boolean;
 }): Promise<{ skill?: any; context_set?: ContextSetRecord; inspection: any }> {

@@ -780,6 +780,26 @@ export function createAgentsRouter(deps: AgentsRouterDeps): Router {
     }
   });
 
+  router.post('/agents/apply-model-recommendations', requireAuth, (req: Request, res: Response) => {
+    const raw = Array.isArray(req.body?.assignments) ? req.body.assignments : [];
+    let updatedCount = 0;
+    for (const item of raw) {
+      const role = String(item?.role || '').trim();
+      const model = String(item?.model || '').trim();
+      if (!role || !model) continue;
+      const agent = serverState.agentsList.find((a) => a.role === role);
+      if (agent) {
+        agent.preferred_model = model;
+        agent.updated_at = nowIso();
+        updatedCount += 1;
+      }
+    }
+    if (updatedCount > 0) {
+      persistStateNamespace(store, 'agents_list', serverState.agentsList);
+    }
+    res.json({ updated_count: updatedCount });
+  });
+
   router.get('/agents/:role/history', requireAuth, (req: Request, res: Response) => {
     const sessionId = String(req.query.session_id || 'default');
     const messages = store.listAgentHistoryMessages(req.params.role, sessionId);

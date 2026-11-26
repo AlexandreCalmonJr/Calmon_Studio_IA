@@ -2,7 +2,21 @@
  * Repositório SQLite para o cofre criptografado de chaves de provedores (`provider_vault_keys`).
  */
 import type { DatabaseSync } from 'node:sqlite';
-import { nowIso } from './repoUtils.ts';
+import { nowIso, safeJsonParse } from './repoUtils.ts';
+
+function sanitizeModelList(list: unknown, maxItems = 250): string[] {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of list) {
+    const clean = String(item || '').trim().slice(0, 160);
+    if (!clean || seen.has(clean)) continue;
+    seen.add(clean);
+    result.push(clean);
+    if (result.length >= maxItems) break;
+  }
+  return result;
+}
 
 export type AuditLogAppender = (entry: {
   action: string;
@@ -24,6 +38,7 @@ export class VaultRepository {
     const rows = this.db
       .prepare(
         `SELECT id, owner_user_id, provider, label, masked_key, base_url, default_model,
+                detected_models_json, enabled_models_json,
                 is_active, is_default, last_tested_at, last_test_status, last_test_message,
                 last_latency_ms, last_status_code, created_at, updated_at
          FROM provider_vault_keys
@@ -40,6 +55,8 @@ export class VaultRepository {
       masked_key: String(r.masked_key),
       base_url: String(r.base_url || ''),
       default_model: String(r.default_model || ''),
+      detected_models: sanitizeModelList(safeJsonParse<string[]>(r.detected_models_json, [])),
+      enabled_models: sanitizeModelList(safeJsonParse<string[]>(r.enabled_models_json, [])),
       is_active: Boolean(r.is_active),
       is_default: Boolean(r.is_default),
       last_tested_at: r.last_tested_at ? String(r.last_tested_at) : null,
@@ -67,6 +84,8 @@ export class VaultRepository {
     masked_key?: string;
     base_url: string;
     default_model: string;
+    detected_models?: string[];
+    enabled_models?: string[];
     is_active: boolean;
     is_default: boolean;
   }) {
@@ -81,6 +100,17 @@ export class VaultRepository {
       throw new Error('Informe a chave de API para salvar este provedor no cofre da sessão.');
     }
 
+    const detectedModelsJson = JSON.stringify(
+      input.detected_models !== undefined
+        ? sanitizeModelList(input.detected_models)
+        : safeJsonParse<string[]>(existing?.detected_models_json, [])
+    );
+    const enabledModelsJson = JSON.stringify(
+      input.enabled_models !== undefined
+        ? sanitizeModelList(input.enabled_models)
+        : safeJsonParse<string[]>(existing?.enabled_models_json, [])
+    );
+
     this.db.exec('BEGIN IMMEDIATE');
     try {
       if (input.is_default) {
@@ -94,7 +124,8 @@ export class VaultRepository {
           .prepare(
             `UPDATE provider_vault_keys
              SET provider = ?, label = ?, encrypted_api_key = ?, masked_key = ?,
-                 base_url = ?, default_model = ?, is_active = ?, is_default = ?, updated_at = ?
+                 base_url = ?, default_model = ?, detected_models_json = ?, enabled_models_json = ?,
+                 is_active = ?, is_default = ?, updated_at = ?
              WHERE id = ? AND owner_user_id = ?`
           )
           .run(
@@ -104,6 +135,8 @@ export class VaultRepository {
             masked,
             input.base_url,
             input.default_model,
+            detectedModelsJson,
+            enabledModelsJson,
             input.is_active ? 1 : 0,
             input.is_default ? 1 : 0,
             now,
@@ -115,8 +148,9 @@ export class VaultRepository {
           .prepare(
             `INSERT INTO provider_vault_keys
               (id, owner_user_id, provider, label, encrypted_api_key, masked_key, base_url, default_model,
+               detected_models_json, enabled_models_json,
                is_active, is_default, last_tested_at, last_test_status, last_test_message, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?)`
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?)`
           )
           .run(
             input.key_id,
@@ -127,6 +161,8 @@ export class VaultRepository {
             masked,
             input.base_url,
             input.default_model,
+            detectedModelsJson,
+            enabledModelsJson,
             input.is_active ? 1 : 0,
             input.is_default ? 1 : 0,
             now,
@@ -169,6 +205,7 @@ export class VaultRepository {
       masked_key: String(row.masked_key),
       base_url: String(row.base_url || ''),
       default_model: String(row.default_model || ''),
+      enabled_models: sanitizeModelList(safeJsonParse<string[]>(row.enabled_models_json, [])),
       is_active: Boolean(row.is_active),
       is_default: Boolean(row.is_default),
     };
@@ -192,6 +229,7 @@ export class VaultRepository {
       masked_key: String(row.masked_key),
       base_url: String(row.base_url || ''),
       default_model: String(row.default_model || ''),
+      enabled_models: sanitizeModelList(safeJsonParse<string[]>(row.enabled_models_json, [])),
       is_active: Boolean(row.is_active),
       is_default: Boolean(row.is_default),
     }));
@@ -217,6 +255,7 @@ export class VaultRepository {
       masked_key: String(row.masked_key),
       base_url: String(row.base_url || ''),
       default_model: String(row.default_model || ''),
+      enabled_models: sanitizeModelList(safeJsonParse<string[]>(row.enabled_models_json, [])),
       is_active: Boolean(row.is_active),
       is_default: Boolean(row.is_default),
     };
@@ -228,7 +267,8 @@ export class VaultRepository {
     status: 'ok' | 'error',
     message: string,
     latencyMs?: number | null,
-    statusCode?: number | null
+    statusCode?: number | null,
+    detectedModels?: string[]
   ): void {
     const cleanLatency =
       typeof latencyMs === 'number' && Number.isFinite(latencyMs) && latencyMs >= 0
@@ -239,6 +279,27 @@ export class VaultRepository {
         ? Math.round(statusCode)
         : null;
     const now = nowIso();
+    if (Array.isArray(detectedModels) && detectedModels.length > 0) {
+      this.db
+        .prepare(
+          `UPDATE provider_vault_keys
+           SET last_tested_at = ?, last_test_status = ?, last_test_message = ?,
+               last_latency_ms = ?, last_status_code = ?, detected_models_json = ?, updated_at = ?
+           WHERE id = ? AND owner_user_id = ?`
+        )
+        .run(
+          now,
+          status,
+          message.slice(0, 280),
+          cleanLatency,
+          cleanStatusCode,
+          JSON.stringify(sanitizeModelList(detectedModels)),
+          now,
+          keyId,
+          ownerUserId
+        );
+      return;
+    }
     this.db
       .prepare(
         `UPDATE provider_vault_keys

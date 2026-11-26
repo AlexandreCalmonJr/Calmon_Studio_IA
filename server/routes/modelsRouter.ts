@@ -32,6 +32,8 @@ import {
   validateProviderBaseUrl,
 } from '../providerEngine.ts';
 import { NotebookHardwareProfile } from '../../src/services/hardwareAdvisor.ts';
+import { buildModelsInventoryPayload } from '../services/modelsInventoryService.ts';
+import { setKeyDailyTokenLimit } from '../state/tokenQuotaManager.ts';
 import type { LocalSqliteBrainStore } from '../brain/sqliteBrainStore.ts';
 
 export interface ModelsRouterDeps {
@@ -43,61 +45,7 @@ export function createModelsRouter(deps: ModelsRouterDeps): Router {
   const { store } = deps;
 
   router.get('/models', requireAuth, async (req: Request, res: Response) => {
-    const ownerUserId = getOwnerUserId(req);
-    const activeHw = getActiveHardwareProfile();
-    const ollamaProbe = serverState.providerConnectivity.ollama_connected
-      ? await fetchOllamaLocalModels(activeHw.ollama_url)
-      : { reachable: false, latencyMs: 0, models: [] };
-
-    const realLocalModels = ollamaProbe.reachable ? ollamaProbe.models : [];
-    const providerState = buildSessionProviderKeysPayload(req, store, ownerUserId);
-
-    const onlineModels: Array<{ name: string; provider: string; role: string }> = [];
-    if (serverState.providerConnectivity.gemini_connected && isGeminiApiConfigured()) {
-      onlineModels.push(
-        { name: 'gemini-4-hydrogen', provider: 'Gemini Online · Web', role: 'Híbrido + Pesquisa Web' },
-        { name: 'gemini-3.1-flash-lite', provider: 'Gemini Online · Rápido', role: 'Respostas Instantâneas' }
-      );
-    }
-    for (const p of providerState.providers) {
-      if (p.configured && p.default_model) {
-        onlineModels.push({
-          name: p.default_model,
-          provider: `${p.name}${p.is_default ? ' · Padrão' : ''}`,
-          role: p.source === 'env' ? 'Variável de Ambiente' : 'Cofre Protegido da Sessão',
-        });
-      }
-    }
-
-    const defaultExternal = providerState.providers.find((p) => p.configured && p.is_default);
-    const resolvedActiveModel = defaultExternal
-      ? defaultExternal.default_model
-      : isGeminiApiConfigured()
-        ? 'gemini-4-hydrogen'
-        : realLocalModels[0]?.name || serverState.hybridConfig.default_model;
-
-    res.json({
-      runtime: serverState.providerConnectivity.ollama_connected && ollamaProbe.reachable ? 'hybrid' : 'online',
-      status: 'online',
-      active_model: resolvedActiveModel,
-      hybrid_gateway: {
-        enabled: serverState.providerConnectivity.gemini_connected || Boolean(defaultExternal),
-        provider: defaultExternal ? defaultExternal.name : 'Gemini Online',
-        model: resolvedActiveModel,
-        current_spend_usd: serverState.hybridConfig.current_spend_usd,
-        max_budget_usd: serverState.hybridConfig.max_budget_usd,
-      },
-      online_models: onlineModels,
-      local_models: realLocalModels.map((m: any) => ({
-        name: m.name,
-        size_gb: Number(((m.size || 0) / 1e9).toFixed(1)),
-        quantization: 'Local',
-        family: m.family || 'ollama',
-        status: 'online',
-      })),
-      models: realLocalModels,
-      ollama_reachable: ollamaProbe.reachable,
-    });
+    res.json(await buildModelsInventoryPayload(req, store));
   });
 
   router.get('/models/hardware', requireAuth, async (_req: Request, res: Response) => {
@@ -488,6 +436,12 @@ export function createModelsRouter(deps: ModelsRouterDeps): Router {
     const defaultModel = String(req.body?.default_model || '').trim() || meta.defaultModel;
     const isDefault = Boolean(req.body?.is_default);
     const label = String(req.body?.label || meta.name).trim().slice(0, 64) || meta.name;
+    const detectedModels = Array.isArray(req.body?.detected_models)
+      ? req.body.detected_models.map((m: unknown) => String(m || '').trim()).filter(Boolean)
+      : undefined;
+    const enabledModels = Array.isArray(req.body?.enabled_models)
+      ? req.body.enabled_models.map((m: unknown) => String(m || '').trim()).filter(Boolean)
+      : undefined;
 
     const urlCheck = validateProviderBaseUrl(providerId, baseUrl);
     if (!urlCheck.valid) {
@@ -512,10 +466,15 @@ export function createModelsRouter(deps: ModelsRouterDeps): Router {
         masked_key: rawKey ? maskApiKey(rawKey) : undefined,
         base_url: urlCheck.normalizedUrl,
         default_model: defaultModel,
+        detected_models: detectedModels,
+        enabled_models: enabledModels,
         is_active: true,
         is_default: isDefault || Boolean(existing?.is_default),
       });
       syncVaultHttpOnlyCookie(req, res, ownerUserId, store);
+      if (typeof req.body?.daily_token_limit === 'number' && Number.isFinite(req.body.daily_token_limit)) {
+        setKeyDailyTokenLimit(keyId, req.body.daily_token_limit);
+      }
       res.json(buildSessionProviderKeysPayload(req, store, ownerUserId));
     } catch (err: any) {
       res.status(400).json({ detail: err?.message || 'Não foi possível salvar a chave de API.' });
@@ -549,7 +508,8 @@ export function createModelsRouter(deps: ModelsRouterDeps): Router {
         result.ok ? 'ok' : 'error',
         result.message,
         result.latency_ms,
-        result.status_code
+        result.status_code,
+        result.models_detected
       );
     }
 
@@ -582,7 +542,8 @@ export function createModelsRouter(deps: ModelsRouterDeps): Router {
           result.ok ? 'ok' : 'error',
           result.message,
           result.latency_ms,
-          result.status_code
+          result.status_code,
+          result.models_detected
         );
       }
 

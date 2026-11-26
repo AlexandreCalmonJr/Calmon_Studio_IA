@@ -1,25 +1,27 @@
 # Calmon Studio
 
-**Calmon Studio** é uma plataforma **Local-First** de IA e orquestração multi-agente com workspace estilo Manus, banco SQLite WAL embarcado (com opção de escala para PostgreSQL + `pgvector` e Redis), suporte a modelos locais via **Ollama** (incluindo a persona **Calmon IA**) e provedores em nuvem (**Google Gemini, OpenAI, Anthropic, DeepSeek, Groq, OpenRouter**).
+**Calmon Studio** é uma plataforma **Local-First** de IA e orquestração multi-agente com workspace estilo Manus, banco SQLite WAL embarcado (com opção de escala para PostgreSQL + `pgvector` e Redis), suporte a modelos locais via **Ollama** (incluindo a persona **Calmon IA**) e provedores em nuvem (**NVIDIA NIM, Google Gemini, OpenAI, Anthropic, DeepSeek, Groq, OpenRouter**).
 
 ---
 
 ## Principais Recursos
 
-- **Chat & Workspace Vivo:** Painel lateral com linha do tempo por etapa, checkpoints duráveis, retomada pós-queda, replay e visualização/download de artefatos.
-- **Multi-Provedor & Local-First:** Alterne entre modelos locais no Ollama (`calmon-ia:latest`, `llama3.2:3b`, etc.) e APIs externas com cofre criptografado **AES-256-GCM**.
+- **Assistente de Setup & Modo Local/Híbrido:** Na inicialização, escolha entre modo **100% Local (Ollama)** ou **Híbrido (Nuvem + Local)**, importe chaves de API com descoberta automática de catálogo e receba recomendações do melhor modelo por agente e mídia.
+- **Gestão de Cotas Multi-Chave:** Cadastre múltiplas chaves do mesmo provedor com limite diário de tokens persistido em SQLite e rotação automática em caso de rate limit (`429`) ou esgotamento.
+- **Chat & Workspace Vivo:** Painel lateral com linha do tempo por etapa, checkpoints duráveis, retomada pós-queda, replay, renderização inline de mídia e visualização/download de artefatos.
+- **Estúdio Criativo Multi-Provedor:** Geração de imagens, vídeos, áudio/TTS, documentos e apresentações sem exclusividade de provedor — compatível com **NVIDIA NIM**, **Google Gemini**, **OpenAI** e endpoints configurados.
 - **Geração Real de Documentos:**
   - Planilhas **`.xlsx`** (ExcelJS com fórmulas reais) e **`.csv`** (100% offline).
   - Apresentações **`.pptx`** e relatórios **`.pdf`** (pptxgenjs / jsPDF).
-  - Imagens e vídeos via **Google Gemini** (quando `GEMINI_API_KEY` configurada).
-- **Segurança & Multi-Usuário:** Sessões persistentes em SQLite com cookies `HttpOnly`, proteção CSRF, RBAC (`admin`, `developer`, `auditor`), rate limiting e auditoria.
+- **Importador de Skills Multi-Skill (`npx skills add`):** Importe pacotes `SKILL.md` de repositórios GitHub simples ou multi-skill (ex.: `npx skills add NVIDIA/skills --skill rag-blueprint`) direto para seus agentes e Context Sets.
+- **Segurança & Multi-Usuário:** Sessões persistentes em SQLite com cookies `HttpOnly`, cofre **AES-256-GCM**, proteção CSRF, RBAC (`admin`, `developer`, `auditor`), rate limiting e auditoria.
 - **Ecossistema Extensível:** Pacotes modulares, registry remoto (`PACK_REGISTRY_URL`), supervisor MCP (`stdio` / HTTP), agendador persistente e conectores de canais (Telegram, Discord, Slack, WhatsApp).
 
 ---
 
 ## Para Testers — Como usar o `.exe` no Windows
 
-1. Baixe **`Calmon-Studio-3.0.1-x64-nsis.exe`** (instalador) ou **`Calmon-Studio-3.0.1-x64-portable.exe`** na aba **Actions / Releases** do repositório.
+1. Baixe **`Calmon-Studio-3.1.0-x64-nsis.exe`** (instalador) ou **`Calmon-Studio-3.1.0-x64-portable.exe`** na aba **Releases** do repositório.
 2. Abra o aplicativo (não precisa instalar Node.js, Docker ou Git).
 3. Na tela inicial, clique em **"Criar conta pessoal"** para criar seu usuário local em segundos.
 4. Para conversar com a IA, escolha uma das opções em **Modelos & Provedores**:

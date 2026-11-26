@@ -1419,9 +1419,9 @@ export const AGENT_TEMPLATE_LIBRARY: AgentTemplate[] = [
   },
 ];
 
-export function canUninstallAgent(agent: Pick<AgentInfo, 'role'>): boolean {
-  return agent.role !== 'jarvis_master';
-}
+import { canUninstallAgent } from './agentRules';
+
+export { canUninstallAgent };
 
 export function isTemplateInstalled(
   template: AgentTemplate,

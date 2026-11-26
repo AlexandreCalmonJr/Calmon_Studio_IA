@@ -111,7 +111,7 @@ export function buildApiRouter(options?: { store?: LocalSqliteBrainStore }) {
   api.use(createSecurityRouter({ store: localBrainStore }));
   api.use(createVoiceCompanionRouter({ store: localBrainStore }));
   api.use(createStudiosRouter({ store: localBrainStore }));
-  api.use(createMediaRouter());
+  api.use(createMediaRouter({ store: localBrainStore }));
 
   // Roteador dedicado do Segundo Cérebro (Brain)
   api.use(

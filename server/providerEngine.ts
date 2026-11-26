@@ -1,4 +1,13 @@
 import crypto from 'node:crypto';
+import {
+  extractProviderHttpError,
+  fetchWithTimeout,
+  formatProviderNetworkError,
+} from './providerHttpHelpers.ts';
+import {
+  markKeyRateLimited,
+  recordKeyTokenUsage,
+} from './state/tokenQuotaManager.ts';
 import net from 'node:net';
 
 export type ExternalProviderId =
@@ -468,8 +477,6 @@ export async function testExternalProviderConnection(input: {
 
   const meta = EXTERNAL_PROVIDERS[input.provider];
   const start = Date.now();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), input.timeoutMs || 8000);
 
   try {
     const endpoint =
@@ -492,29 +499,15 @@ export async function testExternalProviderConnection(input: {
       }
     }
 
-    const response = await fetch(endpoint, {
-      method: 'GET',
-      headers,
-      signal: controller.signal,
-      redirect: 'error',
-    });
+    const response = await fetchWithTimeout(
+      endpoint,
+      { method: 'GET', headers },
+      input.timeoutMs || 8000
+    );
 
     const latency_ms = Date.now() - start;
     if (!response.ok) {
-      let detail = `HTTP ${response.status}`;
-      try {
-        const errJson = (await response.json()) as any;
-        const rawMsg = errJson?.error?.message || errJson?.message || errJson?.detail;
-        if (rawMsg) {
-          const sanitized = String(rawMsg)
-            .split(apiKey)
-            .join('[chave oculta]')
-            .slice(0, 180);
-          detail = `${detail}: ${sanitized}`;
-        }
-      } catch {
-        // sem corpo JSON
-      }
+      const detail = await extractProviderHttpError(response, apiKey);
       const friendly =
         response.status === 401 || response.status === 403
           ? `Credencial recusada por ${meta.shortLabel} (${detail}). Verifique se a chave está ativa e sem espaços extras.`
@@ -532,10 +525,15 @@ export async function testExternalProviderConnection(input: {
 
     const payload = (await response.json().catch(() => ({}))) as { data?: Array<{ id?: string }> };
     const detected = Array.isArray(payload?.data)
-      ? payload.data
-          .map((item) => String(item?.id || '').trim())
-          .filter(Boolean)
-          .slice(0, 12)
+      ? Array.from(
+          new Set(
+            payload.data
+              .map((item) => String(item?.id || '').trim())
+              .filter(Boolean)
+          )
+        )
+          .sort((a, b) => a.localeCompare(b))
+          .slice(0, 250)
       : [];
 
     return {
@@ -551,22 +549,15 @@ export async function testExternalProviderConnection(input: {
           : `Conexão autenticada com ${meta.shortLabel} em ${latency_ms} ms.`,
     };
   } catch (err: any) {
-    const latency_ms = Date.now() - start;
-    const msg =
-      err?.name === 'AbortError'
-        ? `Tempo limite excedido ao conectar com ${meta.shortLabel}.`
-        : `Não foi possível alcançar ${meta.shortLabel}: ${String(err?.message || 'erro de rede').slice(0, 160)}`;
     return {
       ok: false,
       provider: input.provider,
       status_code: 0,
-      latency_ms,
+      latency_ms: Date.now() - start,
       endpoint_host: endpointHost,
       models_detected: [],
-      message: msg,
+      message: formatProviderNetworkError(err, meta.shortLabel),
     };
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -601,20 +592,20 @@ export async function testGeminiServerConnection(timeoutMs = 8000): Promise<Gemi
   }
 
   const start = Date.now();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-        'x-goog-api-key': apiKey,
-        'User-Agent': 'jarvis-ai-hub',
+    const response = await fetchWithTimeout(
+      'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1',
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          'x-goog-api-key': apiKey,
+          'User-Agent': 'jarvis-ai-hub',
+        },
       },
-      signal: controller.signal,
-      redirect: 'error',
-    });
+      timeoutMs
+    );
 
     const latency_ms = Date.now() - start;
     if (!response.ok) {
@@ -641,23 +632,16 @@ export async function testGeminiServerConnection(timeoutMs = 8000): Promise<Gemi
       message: `Google Gemini operacional em ${latency_ms} ms.`,
     };
   } catch (err: any) {
-    const latency_ms = Date.now() - start;
-    const message =
-      err?.name === 'AbortError'
-        ? 'Tempo limite excedido ao consultar Google Gemini.'
-        : `Falha de rede ao consultar Google Gemini: ${String(err?.message || 'erro desconhecido').slice(0, 140)}`;
     return {
       configured: true,
       ok: false,
       status_code: 0,
-      latency_ms,
+      latency_ms: Date.now() - start,
       endpoint_host,
       model,
       checked_at,
-      message,
+      message: formatProviderNetworkError(err, 'Google Gemini'),
     };
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -684,20 +668,18 @@ export async function runExternalProviderChat(input: {
 
   const modelUsed = (input.requestedModel || credential.model || meta.defaultModel).trim();
   const start = Date.now();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), input.timeoutMs || 45000);
+  const timeoutMs = input.timeoutMs || 45000;
   const historyTurns = Array.isArray(input.history)
     ? input.history
         .filter((h) => h && (h.role === 'user' || h.role === 'assistant') && String(h.content || '').trim())
         .map((h) => ({ role: h.role, content: String(h.content) }))
     : [];
 
-  try {
-    if (meta.protocol === 'anthropic') {
-      const response = await fetch(`${urlCheck.normalizedUrl}/v1/messages`, {
+  if (meta.protocol === 'anthropic') {
+    const response = await fetchWithTimeout(
+      `${urlCheck.normalizedUrl}/v1/messages`,
+      {
         method: 'POST',
-        signal: controller.signal,
-        redirect: 'error',
         headers: {
           'Content-Type': 'application/json',
           'x-api-key': credential.apiKey,
@@ -710,51 +692,63 @@ export async function runExternalProviderChat(input: {
           system: input.systemInstruction,
           messages: [...historyTurns, { role: 'user', content: input.prompt }],
         }),
-      });
+      },
+      timeoutMs
+    );
 
-      if (!response.ok) {
-        const errBody = (await response.json().catch(() => ({}))) as any;
-        const errMsg = errBody?.error?.message || `HTTP ${response.status}`;
-        throw new Error(`Anthropic retornou erro: ${String(errMsg).slice(0, 220)}`);
+    if (!response.ok) {
+      if (response.status === 429 && credential.keyId) {
+        markKeyRateLimited(credential.keyId);
       }
-
-      const data = (await response.json()) as {
-        content?: Array<{ type?: string; text?: string; thinking?: string }>;
-      };
-      const blocks = Array.isArray(data?.content) ? data.content : [];
-      const thinking = blocks
-        .filter((b) => b.type === 'thinking' && b.thinking)
-        .map((b) => String(b.thinking))
-        .join('\n\n')
-        .trim();
-      const text = blocks
-        .filter((b) => b.type === 'text' && b.text)
-        .map((b) => String(b.text))
-        .join('\n')
-        .trim();
-
-      return {
-        text: text || 'O modelo Anthropic concluiu sem conteúdo textual.',
-        reasoning: thinking || `Roteamento concluído em ${meta.name} (${modelUsed}).`,
-        latencyMs: Date.now() - start,
-        modelUsed,
-        provider: credential.provider,
-      };
+      const detail = await extractProviderHttpError(response, credential.apiKey, 220);
+      throw new Error(`Anthropic retornou erro: ${detail}`);
     }
 
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${credential.apiKey}`,
-      'User-Agent': 'jarvis-ai-hub',
+    const data = (await response.json()) as {
+      content?: Array<{ type?: string; text?: string; thinking?: string }>;
     };
-    if (credential.provider === 'openrouter') {
-      headers['X-Title'] = 'Calmon Studio';
+    const blocks = Array.isArray(data?.content) ? data.content : [];
+    const thinking = blocks
+      .filter((b) => b.type === 'thinking' && b.thinking)
+      .map((b) => String(b.thinking))
+      .join('\n\n')
+      .trim();
+    const text = blocks
+      .filter((b) => b.type === 'text' && b.text)
+      .map((b) => String(b.text))
+      .join('\n')
+      .trim();
+
+    const outText = text || 'O modelo Anthropic concluiu sem conteúdo textual.';
+    if (credential.keyId) {
+      recordKeyTokenUsage(
+        credential.keyId,
+        Math.ceil((input.prompt.length + input.systemInstruction.length + outText.length) / 4)
+      );
     }
 
-    const response = await fetch(`${urlCheck.normalizedUrl}/chat/completions`, {
+    return {
+      text: outText,
+      reasoning: thinking || `Roteamento concluído em ${meta.name} (${modelUsed}).`,
+      latencyMs: Date.now() - start,
+      modelUsed,
+      provider: credential.provider,
+    };
+  }
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${credential.apiKey}`,
+    'User-Agent': 'jarvis-ai-hub',
+  };
+  if (credential.provider === 'openrouter') {
+    headers['X-Title'] = 'Calmon Studio';
+  }
+
+  const response = await fetchWithTimeout(
+    `${urlCheck.normalizedUrl}/chat/completions`,
+    {
       method: 'POST',
-      signal: controller.signal,
-      redirect: 'error',
       headers,
       body: JSON.stringify({
         model: modelUsed,
@@ -764,36 +758,45 @@ export async function runExternalProviderChat(input: {
           { role: 'user', content: input.prompt },
         ],
       }),
-    });
+    },
+    timeoutMs
+  );
 
-    if (!response.ok) {
-      const errBody = (await response.json().catch(() => ({}))) as any;
-      const errMsg = errBody?.error?.message || errBody?.message || `HTTP ${response.status}`;
-      throw new Error(`${meta.shortLabel} retornou erro: ${String(errMsg).slice(0, 220)}`);
+  if (!response.ok) {
+    if (response.status === 429 && credential.keyId) {
+      markKeyRateLimited(credential.keyId);
     }
-
-    const data = (await response.json()) as {
-      choices?: Array<{
-        message?: { content?: string; reasoning_content?: string };
-      }>;
-    };
-    const msg = data?.choices?.[0]?.message;
-    const rawContent = String(msg?.content || '').trim();
-    const thinkMatch = rawContent.match(/<think>([\s\S]*?)<\/think>/i);
-    const reasoning =
-      String(msg?.reasoning_content || '').trim() ||
-      (thinkMatch?.[1] || '').trim() ||
-      `Roteamento concluído em ${meta.name} (${modelUsed}).`;
-    const text = rawContent.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-
-    return {
-      text: text || `O modelo ${meta.shortLabel} concluiu sem conteúdo textual.`,
-      reasoning,
-      latencyMs: Date.now() - start,
-      modelUsed,
-      provider: credential.provider,
-    };
-  } finally {
-    clearTimeout(timeout);
+    const detail = await extractProviderHttpError(response, credential.apiKey, 220);
+    throw new Error(`${meta.shortLabel} retornou erro: ${detail}`);
   }
+
+  const data = (await response.json()) as {
+    choices?: Array<{
+      message?: { content?: string; reasoning_content?: string };
+    }>;
+  };
+  const msg = data?.choices?.[0]?.message;
+  const rawContent = String(msg?.content || '').trim();
+  const thinkMatch = rawContent.match(/<think>([\s\S]*?)<\/think>/i);
+  const reasoning =
+    String(msg?.reasoning_content || '').trim() ||
+    (thinkMatch?.[1] || '').trim() ||
+    `Roteamento concluído em ${meta.name} (${modelUsed}).`;
+  const text = rawContent.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+  const outText = text || `O modelo ${meta.shortLabel} concluiu sem conteúdo textual.`;
+  if (credential.keyId) {
+    recordKeyTokenUsage(
+      credential.keyId,
+      Math.ceil((input.prompt.length + input.systemInstruction.length + outText.length) / 4)
+    );
+  }
+
+  return {
+    text: outText,
+    reasoning,
+    latencyMs: Date.now() - start,
+    modelUsed,
+    provider: credential.provider,
+  };
 }

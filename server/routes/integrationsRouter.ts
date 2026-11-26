@@ -95,16 +95,19 @@ export function createIntegrationsRouter(deps: IntegrationsRouterDeps = {}): Rou
 
   router.post('/integrations/github/inspect', requireAuth, async (req: Request, res: Response) => {
     const repo = String(req.body?.repo || '').trim();
+    const skill = typeof req.body?.skill === 'string' && req.body.skill.trim() ? req.body.skill.trim() : undefined;
     const token =
       typeof req.body?.token === 'string' && req.body.token.trim()
         ? req.body.token.trim()
         : serverState.integrationSecrets.get('github');
     try {
-      const inspection = await inspectGitHubRepository(repo, token);
+      const inspection = await inspectGitHubRepository(repo, token, skill);
       const gh = serverState.integrationConnectors.find((c) => c.id === 'github');
       if (gh) {
         gh.connected = true;
-        gh.target_ref = inspection.full_name;
+        gh.target_ref = inspection.selected_skill_name
+          ? `${inspection.full_name} (${inspection.selected_skill_name})`
+          : inspection.full_name;
         gh.last_synced_at = nowIso();
         gh.last_sync_summary = `${inspection.full_name} · ${inspection.language} · ★ ${inspection.stars}`;
         persistIntegrations();
@@ -117,18 +120,22 @@ export function createIntegrationsRouter(deps: IntegrationsRouterDeps = {}): Rou
 
   router.post('/integrations/github/import-skill', requireAuth, async (req: Request, res: Response) => {
     const repo = String(req.body?.repo || '').trim();
+    const skill = typeof req.body?.skill === 'string' && req.body.skill.trim() ? req.body.skill.trim() : undefined;
     const allowedAgents = Array.isArray(req.body?.allowed_agents) && req.body.allowed_agents.length
       ? req.body.allowed_agents.map((r: unknown) => String(r))
       : ['software_architect', 'frontend_mobile_developer', 'backend_developer'];
     const token = serverState.integrationSecrets.get('github');
     try {
-      const inspection = await inspectGitHubRepository(repo, token);
+      const inspection = await inspectGitHubRepository(repo, token, skill);
       const parsedSkill = buildImportedSkillFromGitHub(inspection);
+      const skillSlug = inspection.selected_skill_name ? `_${inspection.selected_skill_name}` : '';
       const newSkill = {
-        id: `gh_${inspection.owner}_${inspection.repo}_${Date.now()}`.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
+        id: `gh_${inspection.owner}_${inspection.repo}${skillSlug}_${Date.now()}`.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
         name: parsedSkill.name,
         version: '1.0.0',
-        origin: `github:${inspection.full_name}`,
+        origin: inspection.selected_skill_path
+          ? `github:${inspection.full_name}/${inspection.selected_skill_path}`
+          : `github:${inspection.full_name}`,
         license: 'Repository',
         description: parsedSkill.description,
         domain: parsedSkill.domain,
@@ -146,14 +153,23 @@ export function createIntegrationsRouter(deps: IntegrationsRouterDeps = {}): Rou
 
       const ctx: ContextSetRecord = {
         id: `ctx_gh_${crypto.randomBytes(4).toString('hex')}`,
-        name: `GitHub · ${inspection.full_name}`,
-        description: inspection.description,
+        name: inspection.selected_skill_name
+          ? `GitHub · ${inspection.full_name} (${inspection.selected_skill_name})`
+          : `GitHub · ${inspection.full_name}`,
+        description: parsedSkill.description || inspection.description,
         source_type: 'github',
-        source_ref: `https://github.com/${inspection.full_name}`,
+        source_ref: inspection.selected_skill_path
+          ? `https://github.com/${inspection.full_name}/blob/${inspection.default_branch}/${inspection.selected_skill_path}`
+          : `https://github.com/${inspection.full_name}`,
         content: parsedSkill.instructions.slice(0, 2400),
         token_estimate: Math.max(80, Math.round(parsedSkill.instructions.length / 4)),
         allowed_agents: allowedAgents,
-        tags: ['github', inspection.language.toLowerCase(), inspection.repo.toLowerCase()],
+        tags: [
+          'github',
+          inspection.language.toLowerCase(),
+          inspection.repo.toLowerCase(),
+          ...(inspection.selected_skill_name ? [inspection.selected_skill_name.toLowerCase()] : []),
+        ],
         created_at: nowIso(),
         updated_at: nowIso(),
       };

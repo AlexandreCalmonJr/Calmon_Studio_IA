@@ -1,18 +1,16 @@
 import React, { useState } from 'react';
-import {
-  Zap,
-  ShieldCheck,
-  ArrowRight,
-  ArrowLeft,
-  CheckCircle2,
-  RefreshCw,
-  Cpu,
-  AlertCircle,
-  X,
-  Server,
-} from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, CheckCircle2, Cpu, RefreshCw, Server, ShieldCheck, Zap } from 'lucide-react';
+import { Modal } from './Modal';
 import { API_BASE } from '../../services/api/client';
-import { registerVaultKey } from '../../services/api/models';
+import {
+  applyAgentModelRecommendations,
+  registerVaultKey,
+  saveSessionProviderKey,
+  testSessionProviderKey,
+  type ExternalProviderSlug,
+} from '../../services/api/models';
+import { ProviderModelSelector } from '../../features/settings/ProviderModelSelector';
+import { AgentModelRecommendationsPanel } from '../../features/settings/AgentModelRecommendationsPanel';
 
 interface SetupWizardModalProps {
   isOpen: boolean;
@@ -20,15 +18,17 @@ interface SetupWizardModalProps {
   onCompleted?: () => void;
 }
 
-type CloudProvider = 'gemini' | 'openai' | 'groq' | 'deepseek' | 'anthropic' | 'custom';
+type CloudProvider = 'gemini' | 'openai' | 'groq' | 'deepseek' | 'anthropic' | 'openrouter' | 'xai' | 'custom';
 
 const CLOUD_PRESETS: Record<CloudProvider, { model: string; baseUrl: string }> = {
   gemini: { model: 'gemini-2.5-flash', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai' },
   openai: { model: 'gpt-4o-mini', baseUrl: 'https://api.openai.com/v1' },
-  groq: { model: 'openai/gpt-oss-120b', baseUrl: 'https://api.groq.com/openai/v1' },
+  groq: { model: 'llama-3.3-70b-versatile', baseUrl: 'https://api.groq.com/openai/v1' },
   deepseek: { model: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1' },
   anthropic: { model: 'claude-3-5-haiku-20241022', baseUrl: 'https://api.anthropic.com/v1' },
-  custom: { model: '', baseUrl: '' },
+  openrouter: { model: 'openai/gpt-4o-mini', baseUrl: 'https://openrouter.ai/api/v1' },
+  xai: { model: 'grok-2-latest', baseUrl: 'https://api.x.ai/v1' },
+  custom: { model: '', baseUrl: 'https://integrate.api.nvidia.com/v1' },
 };
 
 export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onClose, onCompleted }) => {
@@ -43,6 +43,11 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
   const [finishError, setFinishError] = useState<string | null>(null);
   const [environmentStatus, setEnvironmentStatus] = useState<any>(null);
   const [checkingEnvironment, setCheckingEnvironment] = useState(false);
+  const [probingModels, setProbingModels] = useState(false);
+  const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
+  const [enabledModels, setEnabledModels] = useState<string[]>([]);
+  const [probeMessage, setProbeMessage] = useState<string | null>(null);
+  const [agentAssignments, setAgentAssignments] = useState<Array<{ role: string; model: string }>>([]);
 
   React.useEffect(() => {
     if (!isOpen) return;
@@ -63,6 +68,46 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
     setCloudProvider(provider);
     setCloudModel(CLOUD_PRESETS[provider].model);
     setCloudBaseUrl(CLOUD_PRESETS[provider].baseUrl);
+    setDiscoveredModels([]);
+    setEnabledModels([]);
+    setProbeMessage(null);
+  };
+
+  const handleProbeModels = async () => {
+    const apiKey = cloudApiKey.trim();
+    if (!apiKey) {
+      setFinishError('Cole sua chave de API antes de descobrir os modelos.');
+      return;
+    }
+    if (cloudProvider === 'gemini') {
+      setProbeMessage('Chave Gemini pronta para salvar.');
+      return;
+    }
+    setProbingModels(true);
+    setFinishError(null);
+    setProbeMessage(null);
+    try {
+      const res = await testSessionProviderKey(cloudProvider as ExternalProviderSlug, {
+        api_key: apiKey,
+        base_url: cloudBaseUrl.trim() || undefined,
+      });
+      if (!res.ok) {
+        setFinishError(res.message || 'Falha ao validar a chave de API.');
+        return;
+      }
+      const list = res.models_detected || [];
+      setDiscoveredModels(list);
+      if (list.length > 0) {
+        const initialDefault = cloudModel.trim() && list.includes(cloudModel.trim()) ? cloudModel.trim() : list[0];
+        setCloudModel(initialDefault);
+        setEnabledModels([initialDefault]);
+      }
+      setProbeMessage(res.message);
+    } catch (e: any) {
+      setFinishError(e?.message || 'Erro ao consultar modelos da chave.');
+    } finally {
+      setProbingModels(false);
+    }
   };
 
   const handleFinish = async () => {
@@ -74,17 +119,31 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
         if (!apiKey) {
           throw new Error('Informe a chave de API do provedor escolhido.');
         }
-        await registerVaultKey({
-          key_id: 'account_primary',
-          label: `${cloudProvider.toUpperCase()} — chave da minha conta`,
-          provider: cloudProvider,
-          api_key: apiKey,
-          base_url: cloudBaseUrl.trim() || undefined,
-          default_model: cloudModel.trim() || undefined,
-          is_active: true,
-          is_default: true,
-          scope: 'account',
-        });
+        if (cloudProvider === 'gemini') {
+          await registerVaultKey({
+            key_id: 'account_primary',
+            label: `${cloudProvider.toUpperCase()} — chave da minha conta`,
+            provider: cloudProvider,
+            api_key: apiKey,
+            base_url: cloudBaseUrl.trim() || undefined,
+            default_model: cloudModel.trim() || undefined,
+            is_active: true,
+            is_default: true,
+            scope: 'account',
+          });
+        } else {
+          await saveSessionProviderKey(cloudProvider as ExternalProviderSlug, {
+            api_key: apiKey,
+            base_url: cloudBaseUrl.trim() || undefined,
+            default_model: cloudModel.trim() || enabledModels[0] || undefined,
+            detected_models: discoveredModels,
+            enabled_models: enabledModels.length > 0 ? enabledModels : cloudModel.trim() ? [cloudModel.trim()] : [],
+            is_default: true,
+          });
+          if (agentAssignments.length > 0) {
+            await applyAgentModelRecommendations(agentAssignments).catch(() => {});
+          }
+        }
         setCloudApiKey('');
       }
       const response = await fetch(`${API_BASE}/system/onboarding/complete`, { method: 'POST', credentials: 'include' });
@@ -100,116 +159,101 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
 
   if (!isOpen) return null;
 
+  const wizardFooter = (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+      {step > 1 ? (
+        <button
+          type="button"
+          onClick={() => setStep((s) => (s - 1) as any)}
+          className="btn btn-secondary"
+        >
+          <ArrowLeft size={15} />
+          <span>Voltar</span>
+        </button>
+      ) : (
+        <div />
+      )}
+
+      {step < 3 ? (
+        <button
+          type="button"
+          onClick={() => setStep((s) => (s + 1) as any)}
+          className="btn btn-primary"
+        >
+          <span>Avançar</span>
+          <ArrowRight size={15} />
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={handleFinish}
+          disabled={saving}
+          className="btn btn-primary"
+        >
+          {saving ? <RefreshCw size={15} className="spin" /> : <CheckCircle2 size={16} />}
+          <span>Concluir e Iniciar Calmon Studio</span>
+        </button>
+      )}
+    </div>
+  );
+
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 1100,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'rgba(0, 0, 0, 0.75)',
-        backdropFilter: 'blur(8px)',
-        padding: '20px',
-        animation: 'fadeIn 0.2s ease-out',
-      }}
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Assistente de Configuração Inicial"
+      subtitle="Configure o modo Local ou Híbrido e conecte suas chaves de IA"
+      icon={<Zap size={18} />}
+      maxWidth="lg"
+      footer={wizardFooter}
     >
+      {/* Steps Progress Bar */}
       <div
-        className="glass-card"
         style={{
-          width: '100%',
-          maxWidth: '740px',
-          backgroundColor: 'var(--bg-secondary)',
-          borderRadius: '18px',
-          border: '1px solid var(--border-accent)',
-          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.7), 0 0 40px var(--accent-glow)',
-          overflow: 'hidden',
           display: 'flex',
-          flexDirection: 'column',
-          maxHeight: '92vh',
+          alignItems: 'center',
+          paddingBottom: '16px',
+          marginBottom: '18px',
+          borderBottom: '1px solid var(--border-subtle)',
+          gap: '8px',
         }}
       >
-        {/* Header do Wizard */}
         <div
           style={{
-            padding: '20px 26px',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            background: 'linear-gradient(135deg, var(--accent-glow) 0%, var(--bg-secondary) 100%)',
+            flex: 1,
+            height: '4px',
+            borderRadius: '2px',
+            backgroundColor: step >= 1 ? 'var(--accent-light)' : 'var(--border-subtle)',
+            transition: 'background-color 0.3s',
           }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div>
-              <h2 style={{ fontSize: '1.15rem', fontWeight: 600, color: '#f8fafc', margin: 0 }}>
-                Assistente de Configuração Inicial
-              </h2>
-              <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                Configure o ambiente local e conheça as opções de segurança da Calmon IA
-              </span>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="btn btn-ghost btn-icon"
-            title="Fechar assistente"
-            aria-label="Fechar assistente"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Steps Progress Bar */}
+        />
         <div
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            padding: '14px 26px',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
-            backgroundColor: 'rgba(0, 0, 0, 0.25)',
-            gap: '8px',
+            flex: 1,
+            height: '4px',
+            borderRadius: '2px',
+            backgroundColor: step >= 2 ? 'var(--accent-light)' : 'var(--border-subtle)',
+            transition: 'background-color 0.3s',
           }}
-        >
-          <div
-            style={{
-              flex: 1,
-              height: '4px',
-              borderRadius: '2px',
-              backgroundColor: step >= 1 ? 'var(--accent-color)' : 'rgba(255, 255, 255, 0.1)',
-              transition: 'background-color 0.3s',
-            }}
-          />
-          <div
-            style={{
-              flex: 1,
-              height: '4px',
-              borderRadius: '2px',
-              backgroundColor: step >= 2 ? 'var(--accent-color)' : 'rgba(255, 255, 255, 0.1)',
-              transition: 'background-color 0.3s',
-            }}
-          />
-          <div
-            style={{
-              flex: 1,
-              height: '4px',
-              borderRadius: '2px',
-              backgroundColor: step >= 3 ? '#10b981' : 'rgba(255, 255, 255, 0.1)',
-              transition: 'background-color 0.3s',
-            }}
-          />
-        </div>
+        />
+        <div
+          style={{
+            flex: 1,
+            height: '4px',
+            borderRadius: '2px',
+            backgroundColor: step >= 3 ? '#10b981' : 'var(--border-subtle)',
+            transition: 'background-color 0.3s',
+          }}
+        />
+      </div>
 
-        {/* Body do Wizard */}
-        <div style={{ padding: '24px 26px', flex: 1, overflowY: 'auto' }}>
+      {/* Body do Wizard */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {/* PASSO 1: Escolha do Modo */}
           {step === 1 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div>
-                <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#f8fafc', marginBottom: '6px' }}>
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>
                   Passo 1: Como você deseja rodar a inteligência da Calmon IA?
                 </h3>
                 <p style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', margin: 0 }}>
@@ -231,7 +275,7 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
                     borderRadius: '14px',
                     cursor: 'pointer',
                     backgroundColor: mode === 'cloud' ? 'var(--accent-glow)' : 'rgba(255, 255, 255, 0.03)',
-                    border: mode === 'cloud' ? '2px solid var(--accent-color)' : '1px solid rgba(255, 255, 255, 0.08)',
+                    border: mode === 'cloud' ? '2px solid var(--accent-light)' : '1px solid rgba(255, 255, 255, 0.08)',
                     boxShadow: mode === 'cloud' ? '0 8px 24px var(--accent-glow)' : 'none',
                     transition: 'all 0.2s ease',
                     display: 'flex',
@@ -249,7 +293,7 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        color: 'var(--accent-color)',
+                        color: 'var(--accent-light)',
                       }}
                     >
                       <Zap size={20} />
@@ -260,7 +304,7 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
                   </div>
 
                   <div>
-                    <h4 style={{ fontSize: '0.98rem', fontWeight: 700, color: '#f8fafc', marginBottom: '4px' }}>
+                    <h4 style={{ fontSize: '0.98rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>
                       Modo Nuvem Híbrido
                     </h4>
                     <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: '1.45', margin: 0 }}>
@@ -282,7 +326,7 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
                     borderRadius: '14px',
                     cursor: 'pointer',
                     backgroundColor: mode === 'local' ? 'var(--accent-glow)' : 'rgba(255, 255, 255, 0.03)',
-                    border: mode === 'local' ? '2px solid var(--accent-color)' : '1px solid rgba(255, 255, 255, 0.08)',
+                    border: mode === 'local' ? '2px solid var(--accent-light)' : '1px solid rgba(255, 255, 255, 0.08)',
                     boxShadow: mode === 'local' ? '0 8px 24px var(--accent-glow)' : 'none',
                     transition: 'all 0.2s ease',
                     display: 'flex',
@@ -300,7 +344,7 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        color: 'var(--accent-color)',
+                        color: 'var(--accent-light)',
                       }}
                     >
                       <Cpu size={20} />
@@ -311,7 +355,7 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
                   </div>
 
                   <div>
-                    <h4 style={{ fontSize: '0.98rem', fontWeight: 700, color: '#f8fafc', marginBottom: '4px' }}>
+                    <h4 style={{ fontSize: '0.98rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>
                       Modo Ollama Local
                     </h4>
                     <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: '1.45', margin: 0 }}>
@@ -332,7 +376,7 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
           {step === 2 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div>
-                <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#f8fafc', marginBottom: '6px' }}>
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>
                   {mode === 'cloud'
                     ? 'Passo 2: Escolha seu provedor e conecte sua Chave de API'
                     : 'Passo 2: Verificação do Ollama Local'}
@@ -367,7 +411,7 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <Zap size={20} color="#fbbf24" />
-                    <span style={{ fontSize: '0.94rem', fontWeight: 600, color: '#f8fafc' }}>
+                    <span style={{ fontSize: '0.94rem', fontWeight: 600, color: 'var(--text-primary)' }}>
                       Cofre Privado por Conta
                     </span>
                   </div>
@@ -389,7 +433,9 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
                       <option value="groq">Groq</option>
                       <option value="deepseek">DeepSeek</option>
                       <option value="anthropic">Anthropic</option>
-                      <option value="custom">Endpoint compatível (personalizado)</option>
+                      <option value="openrouter">OpenRouter</option>
+                      <option value="xai">xAI (Grok)</option>
+                      <option value="custom">NVIDIA NIM / Endpoint compatível (Custom)</option>
                     </select>
                   </label>
 
@@ -426,6 +472,44 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
                     </label>
                   </div>
 
+                  {cloudProvider !== 'gemini' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={probingModels || !cloudApiKey.trim()}
+                        onClick={() => void handleProbeModels()}
+                      >
+                        <RefreshCw size={14} className={probingModels ? 'animate-spin' : undefined} />
+                        {probingModels ? 'Buscando catálogo…' : 'Testar & Descobrir Modelos'}
+                      </button>
+                      {probeMessage && (
+                        <span style={{ fontSize: '0.76rem', color: '#4ade80' }}>{probeMessage}</span>
+                      )}
+                    </div>
+                  )}
+
+                  {discoveredModels.length > 0 && (
+                    <>
+                      <ProviderModelSelector
+                        provider={cloudProvider}
+                        discoveredModels={discoveredModels}
+                        enabledModels={enabledModels}
+                        defaultModel={cloudModel}
+                        onChangeEnabledModels={setEnabledModels}
+                        onSelectDefaultModel={setCloudModel}
+                      />
+                      {discoveredModels.length > 1 && (
+                        <AgentModelRecommendationsPanel
+                          discoveredModels={discoveredModels}
+                          compact
+                          showApplyButton={false}
+                          onSelectionChange={setAgentAssignments}
+                        />
+                      )}
+                    </>
+                  )}
+
                   <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
                     Pode alterar, testar ou remover a chave mais tarde em Modelos → Cofre de Chaves. Nenhum segredo é devolvido ao navegador.
                   </span>
@@ -461,7 +545,7 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
                       borderRadius: '8px',
                       fontFamily: "'JetBrains Mono', monospace",
                       fontSize: '0.78rem',
-                      color: 'var(--accent-color)',
+                      color: 'var(--accent-light)',
                       border: '1px solid var(--border-color)',
                     }}
                   >
@@ -480,7 +564,7 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
           {step === 3 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div>
-                <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#f8fafc', marginBottom: '6px' }}>
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>
                   Passo 3: Garantia de Segurança & Conclusão
                 </h3>
                 <p style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', margin: 0 }}>
@@ -529,7 +613,7 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
                   <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', display: 'block' }}>
                     Modo Configurado:
                   </span>
-                  <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#f8fafc' }}>
+                  <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-primary)' }}>
                     {mode === 'cloud' ? `Nuvem Híbrida (${cloudProvider})` : '100% Offline (Ollama)'}
                   </span>
                 </div>
@@ -538,62 +622,20 @@ export const SetupWizardModal: React.FC<SetupWizardModalProps> = ({ isOpen, onCl
                   <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', display: 'block' }}>
                     Especialistas Ativos:
                   </span>
-                  <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--accent-color)' }}>
+                  <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--accent-light)' }}>
                     Agentes disponíveis no servidor
                   </span>
                 </div>
               </div>
             </div>
           )}
-        </div>
-
-        {finishError && <div role="alert" style={{ padding: '10px 20px', color: '#f87171', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '8px' }}><AlertCircle size={15} />{finishError}</div>}
-                {/* Footer do Wizard: Botões de Navegação */}
-        <div
-          style={{
-            padding: '16px 26px',
-            borderTop: '1px solid var(--border-color)',
-            backgroundColor: 'var(--bg-tertiary)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-          }}
-        >
-          {step > 1 ? (
-            <button
-              type="button"
-              onClick={() => setStep((s) => (s - 1) as any)}
-              className="btn btn-secondary"
-            >
-              <ArrowLeft size={15} />
-              <span>Voltar</span>
-            </button>
-          ) : (
-            <div />
-          )}
-
-          {step < 3 ? (
-            <button
-              type="button"
-              onClick={() => setStep((s) => (s + 1) as any)}
-              className="btn btn-primary"
-            >
-              <span>Avançar</span>
-              <ArrowRight size={15} />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleFinish}
-              disabled={saving}
-              className="btn btn-primary btn-lg"
-            >
-              {saving ? <RefreshCw size={15} className="spin" /> : <CheckCircle2 size={16} />}
-              <span>Concluir e Iniciar Calmon Studio</span>
-            </button>
-          )}
-        </div>
+        {finishError && (
+          <div className="jarvis-callout jarvis-callout--danger" role="alert" style={{ fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <AlertCircle size={15} />
+            <span>{finishError}</span>
+          </div>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 };

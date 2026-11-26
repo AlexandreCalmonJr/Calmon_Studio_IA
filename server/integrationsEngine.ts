@@ -1,9 +1,14 @@
 import {
   FigmaDesignTokenPack,
   parseFigmaFileKey,
-  parseGitHubRepoRef,
+  parseGitHubSkillInput,
   parseSkillMarkdown,
 } from '../src/services/integrationsCatalog';
+
+export interface GitHubSkillCandidate {
+  name: string;
+  path: string;
+}
 
 export interface GitHubInspectionResult {
   owner: string;
@@ -15,17 +20,28 @@ export interface GitHubInspectionResult {
   language: string;
   files: Array<{ name: string; path: string; type: string; size?: number }>;
   skill_md_content: string | null;
+  has_skill_md: boolean;
+  selected_skill_name?: string;
+  selected_skill_path?: string;
+  available_skills?: GitHubSkillCandidate[];
   readme_excerpt: string;
   synced_live: boolean;
 }
 
+function extractSkillNameFromPath(skillPath: string, repoName: string): string {
+  const parts = skillPath.split('/').filter(Boolean);
+  if (parts.length <= 1) return repoName;
+  return parts[parts.length - 2] || repoName;
+}
+
 export async function inspectGitHubRepository(
   repoInput: string,
-  token?: string
+  token?: string,
+  explicitSkillName?: string
 ): Promise<GitHubInspectionResult> {
-  const parsed = parseGitHubRepoRef(repoInput);
+  const parsed = parseGitHubSkillInput(repoInput, explicitSkillName);
   if (!parsed) {
-    throw new Error('Informe um repositório válido no formato usuario/repositorio ou URL do GitHub.');
+    throw new Error('Informe um repositório válido (owner/repo, URL do GitHub ou comando npx skills add).');
   }
 
   const headers: Record<string, string> = {
@@ -53,7 +69,11 @@ export async function inspectGitHubRepository(
 
     let files: Array<{ name: string; path: string; type: string; size?: number }> = [];
     let skillMdContent: string | null = null;
+    let selectedSkillName: string | undefined = parsed.skillName;
+    let selectedSkillPath: string | undefined;
+    let availableSkills: GitHubSkillCandidate[] = [];
     let readmeExcerpt = repoJson.description || '';
+    const defaultBranch = String(repoJson.default_branch || 'main');
 
     try {
       const treeRes = await fetch(
@@ -73,10 +93,11 @@ export async function inspectGitHubRepository(
           const skillFile = treeJson.find(
             (e: any) => typeof e.name === 'string' && e.name.toLowerCase() === 'skill.md'
           );
-          if (skillFile?.download_url) {
+          if (skillFile?.download_url && !parsed.skillName) {
             const rawRes = await fetch(skillFile.download_url);
             if (rawRes.ok) {
               skillMdContent = (await rawRes.text()).slice(0, 12000);
+              selectedSkillPath = String(skillFile.path || 'SKILL.md');
             }
           }
 
@@ -95,16 +116,99 @@ export async function inspectGitHubRepository(
       // Contents lookup is optional
     }
 
+    // Descobre múltiplas skills em subpastas (ex.: skills/rag-blueprint/SKILL.md)
+    try {
+      const recursiveRes = await fetch(
+        `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/git/trees/${encodeURIComponent(defaultBranch)}?recursive=1`,
+        { headers }
+      );
+      if (recursiveRes.ok) {
+        const recursiveJson: any = await recursiveRes.json();
+        if (Array.isArray(recursiveJson?.tree)) {
+          const skillPaths: string[] = recursiveJson.tree
+            .filter((node: any) => node?.type === 'blob' && typeof node?.path === 'string' && /(^|\/)skill\.md$/i.test(node.path))
+            .map((node: any) => String(node.path));
+
+          const byName = new Map<string, GitHubSkillCandidate>();
+          // Prioriza caminhos diretos em `skills/<nome>/SKILL.md` sobre `plugins/...`
+          const sortedPaths = [...skillPaths].sort((a, b) => {
+            const aDirect = a.startsWith('skills/') ? 0 : 1;
+            const bDirect = b.startsWith('skills/') ? 0 : 1;
+            if (aDirect !== bDirect) return aDirect - bDirect;
+            return a.length - b.length;
+          });
+          for (const p of sortedPaths) {
+            const name = extractSkillNameFromPath(p, parsed.repo);
+            const key = name.toLowerCase();
+            if (!byName.has(key)) {
+              byName.set(key, { name, path: p });
+            }
+          }
+          availableSkills = Array.from(byName.values());
+
+          let targetCandidate: GitHubSkillCandidate | undefined;
+          if (parsed.skillName) {
+            const needle = parsed.skillName.toLowerCase();
+            targetCandidate =
+              availableSkills.find((s) => s.name.toLowerCase() === needle) ||
+              availableSkills.find((s) => s.path.toLowerCase().includes(`/${needle}/`)) ||
+              availableSkills.find((s) => s.name.toLowerCase().includes(needle));
+          } else if (!skillMdContent && availableSkills.length === 1) {
+            targetCandidate = availableSkills[0];
+          }
+
+          if (targetCandidate) {
+            const rawUrl = `https://raw.githubusercontent.com/${parsed.owner}/${parsed.repo}/${encodeURIComponent(defaultBranch)}/${targetCandidate.path}`;
+            const rawRes = await fetch(rawUrl);
+            if (rawRes.ok) {
+              skillMdContent = (await rawRes.text()).slice(0, 12000);
+              selectedSkillName = targetCandidate.name;
+              selectedSkillPath = targetCandidate.path;
+            }
+          }
+        }
+      }
+    } catch {
+      // Recursive tree lookup is optional
+    }
+
+    // Fallback direto quando a tree API não retornou, mas o usuário pediu uma skill específica
+    if (parsed.skillName && !skillMdContent) {
+      const candidatePaths = [
+        `skills/${parsed.skillName}/SKILL.md`,
+        `.claude/skills/${parsed.skillName}/SKILL.md`,
+        `${parsed.skillName}/SKILL.md`,
+      ];
+      for (const candidatePath of candidatePaths) {
+        try {
+          const rawUrl = `https://raw.githubusercontent.com/${parsed.owner}/${parsed.repo}/${encodeURIComponent(defaultBranch)}/${candidatePath}`;
+          const rawRes = await fetch(rawUrl);
+          if (rawRes.ok) {
+            skillMdContent = (await rawRes.text()).slice(0, 12000);
+            selectedSkillName = parsed.skillName;
+            selectedSkillPath = candidatePath;
+            break;
+          }
+        } catch {
+          // Try next candidate
+        }
+      }
+    }
+
     return {
       owner: parsed.owner,
       repo: parsed.repo,
       full_name: String(repoJson.full_name || `${parsed.owner}/${parsed.repo}`),
       description: String(repoJson.description || 'Repositório conectado via GitHub API.'),
-      default_branch: String(repoJson.default_branch || 'main'),
+      default_branch: defaultBranch,
       stars: Number(repoJson.stargazers_count || 0),
       language: String(repoJson.language || 'TypeScript'),
       files,
       skill_md_content: skillMdContent,
+      has_skill_md: Boolean(skillMdContent),
+      ...(selectedSkillName ? { selected_skill_name: selectedSkillName } : {}),
+      ...(selectedSkillPath ? { selected_skill_path: selectedSkillPath } : {}),
+      ...(availableSkills.length > 0 ? { available_skills: availableSkills } : {}),
       readme_excerpt: readmeExcerpt,
       synced_live: true,
     };
@@ -124,7 +228,7 @@ export function buildImportedSkillFromGitHub(
     inspection.skill_md_content ||
     `---\nname: Contexto ${inspection.repo}\ndescription: ${inspection.description}\ndomain: engineering\n---\n\n# Repositório ${inspection.full_name}\n\nLinguagem principal: ${inspection.language} · Branch padrão: ${inspection.default_branch}\n\n${inspection.readme_excerpt || 'Use os padrões arquiteturais deste repositório ao responder.'}`;
 
-  return parseSkillMarkdown(sourceMd, `GitHub · ${inspection.repo}`);
+  return parseSkillMarkdown(sourceMd, `GitHub · ${inspection.selected_skill_name || inspection.repo}`);
 }
 
 function rgbToHex(r: number, g: number, b: number): string {

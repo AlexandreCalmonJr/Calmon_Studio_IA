@@ -1,5 +1,5 @@
 import type { AgentInfo } from '../types';
-import { canUninstallAgent } from './agentTemplates';
+import { canUninstallAgent } from './agentRules';
 
 export interface UnifiedDockAgent {
   id: string;

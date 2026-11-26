@@ -1,4 +1,5 @@
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
+import { fetchWithTimeout } from './providerHttpHelpers.ts';
 import {
   NotebookHardwareProfile,
   estimateVramGbFromModelName,
@@ -326,15 +327,16 @@ export async function fetchOllamaLocalModels(ollamaBaseUrl: string): Promise<{
 }> {
   const start = Date.now();
   const base = (ollamaBaseUrl || 'http://127.0.0.1:11434').replace(/\/+$/, '');
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 6000);
 
   try {
-    const res = await fetch(`${base}/api/tags`, {
-      method: 'GET',
-      signal: controller.signal,
-      headers: { Accept: 'application/json' },
-    });
+    const res = await fetchWithTimeout(
+      `${base}/api/tags`,
+      {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      },
+      6000
+    );
     if (!res.ok) {
       return {
         reachable: false,
@@ -361,8 +363,6 @@ export async function fetchOllamaLocalModels(ollamaBaseUrl: string): Promise<{
       models: [],
       error: err?.name === 'AbortError' ? 'Timeout ao contactar nó Ollama local' : String(err?.message || 'Offline'),
     };
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -536,7 +536,13 @@ export async function runHybridInference(req: HybridInferenceRequest): Promise<H
     );
 
   if (shouldUseExternal) {
-    if (req.externalProvider && (!inferredExternal || req.externalProvider.provider === inferredExternal)) {
+    if (
+      req.externalProvider &&
+      (!inferredExternal ||
+        req.externalProvider.provider === inferredExternal ||
+        req.externalProvider.provider === 'custom' ||
+        req.externalProvider.model === requested)
+    ) {
       try {
         const extResult = await runExternalProviderChat({
           credential: req.externalProvider,
@@ -895,17 +901,18 @@ export async function searchRealHuggingFace(
 ): Promise<{ live: boolean; items: CuratedHfModel[] }> {
   const safeLimit = Math.min(20, Math.max(1, limit || 10));
   const cleanQuery = query.trim();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3500);
 
   try {
     const url = `https://huggingface.co/api/models?search=${encodeURIComponent(
       cleanQuery || 'instruct'
     )}&pipeline_tag=text-generation&sort=downloads&direction=-1&limit=${safeLimit}`;
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: { Accept: 'application/json', 'User-Agent': 'jarvis-ai-hub' },
-    });
+    const res = await fetchWithTimeout(
+      url,
+      {
+        headers: { Accept: 'application/json', 'User-Agent': 'jarvis-ai-hub' },
+      },
+      3500
+    );
     if (!res.ok) throw new Error(`HF HTTP ${res.status}`);
     const data = (await res.json()) as any[];
     if (!Array.isArray(data) || data.length === 0) {
@@ -937,7 +944,5 @@ export async function searchRealHuggingFace(
       live: false,
       items: filtered.map((m) => enrichHfModel(m, hardware)),
     };
-  } finally {
-    clearTimeout(timeout);
   }
 }

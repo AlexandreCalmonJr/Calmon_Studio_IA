@@ -6,7 +6,7 @@ export interface StudioImageAsset {
   id: string;
   kind: 'image';
   prompt: string;
-  model: 'gemini-3.1-flash-lite-image' | 'gemini-nano-banana-2.1';
+  model: string;
   aspectRatio: '1:1' | '16:9' | '9:16' | '4:3' | '3:4';
   imageSize?: '1K' | '2K' | '4K';
   mimeType: string;
@@ -20,7 +20,7 @@ export interface StudioVideoJob {
   id: string;
   kind: 'video';
   prompt: string;
-  model: 'gemini-omni-1.2-flash';
+  model: string;
   aspectRatio: '16:9' | '9:16';
   duration: '5s' | '8s' | '10s';
   resolution: '720p' | '1080p';
@@ -110,7 +110,7 @@ export async function fetchMediaGallery(): Promise<{
 
 export async function generateStudioImageApi(input: {
   prompt: string;
-  model: 'gemini-3.1-flash-lite-image' | 'gemini-nano-banana-2.1';
+  model: string;
   aspectRatio: '1:1' | '16:9' | '9:16' | '4:3' | '3:4';
   imageSize?: '1K' | '2K' | '4K';
   referenceImageBase64?: string;
@@ -130,6 +130,7 @@ export async function generateStudioImageApi(input: {
 
 export async function startStudioVideoApi(input: {
   prompt: string;
+  model?: string;
   aspectRatio: '16:9' | '9:16';
   duration: '5s' | '8s' | '10s';
   resolution: '720p' | '1080p';

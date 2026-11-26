@@ -71,6 +71,7 @@ function resolveVoiceNavigationAction(command: string): { tab: string; label: st
 
 export function createVoiceCompanionRouter(deps?: { store?: LocalSqliteBrainStore }): Router {
   const router = express.Router();
+  const store = deps?.store;
 
   // --- VOZ "EI [NOME]" & BRIEFING DIÁRIO ---
   router.get('/voice/briefing', requireAuth, (req: Request, res: Response) => {
@@ -156,14 +157,27 @@ export function createVoiceCompanionRouter(deps?: { store?: LocalSqliteBrainStor
       reply = `${assistantName} na escuta! Entendi seu pedido: "${effectiveCommand}". ${attachmentNote ? `${attachmentNote} Já registrei o contexto para análise.` : 'Tudo pronto para executar no seu workspace assim que desejar.'}`;
     }
 
-    // Tenta enriquecer com motor híbrido (prioriza Calmon IA local quando Ollama estiver ativo sem Gemini)
-    if (!navAction && (serverState.providerConnectivity.gemini_connected || serverState.providerConnectivity.ollama_connected)) {
+    // Tenta enriquecer com motor híbrido (inclui provedor externo salvo do usuário, Gemini ou Calmon IA local)
+    const ownerUserId = getOwnerUserId(req);
+    const requestedVoiceModel = typeof req.body?.model === 'string' && req.body.model.trim()
+      ? req.body.model.trim()
+      : undefined;
+    const externalCredential = store
+      ? resolveExternalCredentialForRequest(req, store, ownerUserId, requestedVoiceModel)
+      : null;
+
+    if (
+      !navAction &&
+      (externalCredential || serverState.providerConnectivity.gemini_connected || serverState.providerConnectivity.ollama_connected)
+    ) {
       try {
         const activeHw = getActiveHardwareProfile();
         const preferLocalCalmon =
-          serverState.providerConnectivity.ollama_connected && !serverState.providerConnectivity.gemini_connected;
-        const targetVoiceModel = preferLocalCalmon ? 'calmon-ia:latest' : 'gemini-3.1-flash-lite';
-        const voiceTimeoutMs = preferLocalCalmon ? 18_000 : 6_000;
+          !externalCredential &&
+          serverState.providerConnectivity.ollama_connected &&
+          !serverState.providerConnectivity.gemini_connected;
+        const targetVoiceModel = requestedVoiceModel || externalCredential?.model || (preferLocalCalmon ? 'calmon-ia:latest' : 'gemini-3.1-flash-lite');
+        const voiceTimeoutMs = preferLocalCalmon ? 18_000 : 12_000;
         const voicePrompt =
           practiceMode === 'english'
             ? `You are ${assistantName}, a friendly English voice tutor. Reply in 2 short spoken sentences in English with a gentle tip and a follow-up question. User said: "${effectiveCommand}". ${attachmentNote}`
@@ -178,6 +192,7 @@ export function createVoiceCompanionRouter(deps?: { store?: LocalSqliteBrainStor
             ollamaBaseUrl: activeHw.ollama_url,
             ollamaConnected: serverState.providerConnectivity.ollama_connected,
             geminiConnected: serverState.providerConnectivity.gemini_connected,
+            externalProvider: externalCredential || undefined,
             enableWebSearch: false,
             assistantName,
             agentName: 'Assistente de Voz',

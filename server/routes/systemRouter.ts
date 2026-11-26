@@ -8,7 +8,9 @@ import {
   BOOT_TIME,
   nowIso,
   persistStateNamespace,
+  getActiveHardwareProfile,
 } from '../serverState.ts';
+import { isGeminiApiConfigured } from '../hybridAiEngine.ts';
 import { requireRole, validateSafeExternalUrl } from '../serverHardening.ts';
 import type { LocalSqliteBrainStore } from '../brain/sqliteBrainStore.ts';
 
