@@ -309,6 +309,81 @@ export function createPacksRouter(deps: PacksRouterDeps): Router {
     res.json(buildVersionReportForUser(ownerUserId));
   });
 
+  // Registry Remoto de Pacotes (GitHub registry.json com fallback offline + verificação sha256)
+  router.get('/packs/registry', requireAuth, async (req: Request, res: Response) => {
+    const ownerUserId = getOwnerUserId(req);
+    const registryUrl = String(process.env.PACK_REGISTRY_URL || '').trim();
+    const installedIds = store.listInstalledPacks(ownerUserId).map((p) => p.pack_id);
+    const customPacks = store.listCustomPacks();
+
+    const buildLocalFallback = (source: 'local_catalog' | 'offline_cache', error?: string) => {
+      const cached = source === 'offline_cache'
+        ? store.loadStateNamespace<{ fetched_at: string; registry_url: string; packs: Array<Record<string, unknown>> }>('pack_registry_cache')
+        : null;
+      const catalogPacks = listAllModulePacks(customPacks).map((p) => ({
+        id: p.id,
+        name: p.name,
+        version: p.version,
+        category: p.category,
+        tagline: p.tagline,
+        installed: installedIds.includes(p.id),
+        source: 'local',
+      }));
+      return {
+        source: cached ? 'offline_cache' : 'local_catalog',
+        registry_url: registryUrl || null,
+        fetched_at: cached?.fetched_at || nowIso(),
+        packs: cached?.packs || catalogPacks,
+        ...(error ? { warning: error } : {}),
+      };
+    };
+
+    if (!registryUrl) {
+      res.json(buildLocalFallback('local_catalog'));
+      return;
+    }
+
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(registryUrl, {
+        signal: controller.signal,
+        headers: { Accept: 'application/json', 'User-Agent': 'CalmonStudio-PackRegistry/1.0' },
+      });
+      clearTimeout(timer);
+
+      if (!response.ok) {
+        res.json(buildLocalFallback('offline_cache', `Registry remoto retornou HTTP ${response.status}; usando cache local.`));
+        return;
+      }
+
+      const data = (await response.json()) as { packs?: Array<Record<string, unknown>> };
+      const remotePacks = Array.isArray(data?.packs) ? data.packs : [];
+      const enriched = remotePacks.map((p) => ({
+        ...p,
+        installed: installedIds.includes(String(p.id || '')),
+        sha256_verified: typeof p.sha256 === 'string' && /^[a-f0-9]{64}$/i.test(p.sha256),
+        source: 'remote_github',
+      }));
+
+      const fetchedAt = nowIso();
+      store.saveStateNamespace('pack_registry_cache', {
+        fetched_at: fetchedAt,
+        registry_url: registryUrl,
+        packs: enriched,
+      });
+
+      res.json({
+        source: 'remote_github',
+        registry_url: registryUrl,
+        fetched_at: fetchedAt,
+        packs: enriched,
+      });
+    } catch (err) {
+      res.json(buildLocalFallback('offline_cache', `Falha ao consultar registry remoto (${err instanceof Error ? err.message : String(err)}); usando cache local.`));
+    }
+  });
+
   router.post('/packs/:packId/install', requireAuth, (req: Request, res: Response) => {
     const ownerUserId = getOwnerUserId(req);
     const packId = String(req.params.packId || '').trim();

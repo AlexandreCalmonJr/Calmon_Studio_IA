@@ -70,6 +70,11 @@ import {
   sanitizeWorkspaceSlug,
   WorkspaceMemoryStore,
 } from './workspaceMemoryStore.ts';
+import { AuthRepository, type AuthSessionRow, type AuthUserRow } from './repos/authRepo.ts';
+import { ChatRepository } from './repos/chatRepo.ts';
+import { VaultRepository } from './repos/vaultRepo.ts';
+import { PacksRepository } from './repos/packsRepo.ts';
+import { AgentsRepository } from './repos/agentsRepo.ts';
 
 export interface LocalSqliteStoreOptions {
   dataDir?: string;
@@ -130,6 +135,11 @@ export class LocalSqliteBrainStore {
   private readonly workspaceStores = new Map<string, WorkspaceMemoryStore>();
   private readonly startedAtMs: number;
   private closed = false;
+  private readonly authRepo: AuthRepository;
+  private readonly chatRepo: ChatRepository;
+  private readonly vaultRepo: VaultRepository;
+  private readonly packsRepo: PacksRepository;
+  private readonly agentsRepo: AgentsRepository;
 
   private static isSqliteCorruptionError(err: unknown): boolean {
     if (!err || typeof err !== 'object') return false;
@@ -231,6 +241,14 @@ export class LocalSqliteBrainStore {
 
     this.db = this.openAndInitializeDatabase();
     this.runSchemaMigrations();
+
+    const auditLogger = (entry: { action: string; actor?: string; resource: string; detail?: string }) =>
+      this.appendAuditLog(entry);
+    this.authRepo = new AuthRepository(this.db);
+    this.chatRepo = new ChatRepository(this.db, () => this.closed);
+    this.vaultRepo = new VaultRepository(this.db, auditLogger);
+    this.packsRepo = new PacksRepository(this.db, auditLogger);
+    this.agentsRepo = new AgentsRepository(this.db, this.workspacesDir, auditLogger);
 
     this.ensureInitialRecords(options);
     this.ensureDefaultWorkspaceAndMcp();
@@ -1523,275 +1541,24 @@ export class LocalSqliteBrainStore {
   }
 
   // ==================== COFRE CRIPTOGRAFADO DE CHAVES DE PROVEDORES (SESSÃO) ====================
-  public listProviderVaultKeys(ownerUserId: string): Array<{
-    key_id: string;
-    owner_user_id: string;
-    provider: string;
-    label: string;
-    masked_key: string;
-    base_url: string;
-    default_model: string;
-    is_active: boolean;
-    is_default: boolean;
-    last_tested_at: string | null;
-    last_test_status: string | null;
-    last_test_message: string | null;
-    created_at: string;
-    updated_at: string;
-  }> {
-    const rows = this.db
-      .prepare(
-        `SELECT id, owner_user_id, provider, label, masked_key, base_url, default_model,
-                is_active, is_default, last_tested_at, last_test_status, last_test_message,
-                last_latency_ms, last_status_code, created_at, updated_at
-         FROM provider_vault_keys
-         WHERE owner_user_id = ?
-         ORDER BY is_default DESC, updated_at DESC`
-      )
-      .all(ownerUserId) as Array<Record<string, any>>;
-
-    return rows.map((r) => ({
-      key_id: String(r.id),
-      owner_user_id: String(r.owner_user_id),
-      provider: String(r.provider),
-      label: String(r.label),
-      masked_key: String(r.masked_key),
-      base_url: String(r.base_url || ''),
-      default_model: String(r.default_model || ''),
-      is_active: Boolean(r.is_active),
-      is_default: Boolean(r.is_default),
-      last_tested_at: r.last_tested_at ? String(r.last_tested_at) : null,
-      last_test_status: r.last_test_status ? String(r.last_test_status) : null,
-      last_test_message: r.last_test_message ? String(r.last_test_message) : null,
-      last_latency_ms:
-        typeof r.last_latency_ms === 'number' && Number.isFinite(r.last_latency_ms)
-          ? Math.round(r.last_latency_ms)
-          : null,
-      last_status_code:
-        typeof r.last_status_code === 'number' && Number.isFinite(r.last_status_code)
-          ? Math.round(r.last_status_code)
-          : null,
-      created_at: String(r.created_at),
-      updated_at: String(r.updated_at),
-    }));
+  public listProviderVaultKeys(ownerUserId: string) {
+    return this.vaultRepo.listProviderVaultKeys(ownerUserId);
   }
 
-  public upsertProviderVaultKey(input: {
-    key_id: string;
-    owner_user_id: string;
-    provider: string;
-    label: string;
-    encrypted_api_key?: string;
-    masked_key?: string;
-    base_url: string;
-    default_model: string;
-    is_active: boolean;
-    is_default: boolean;
-  }): {
-    key_id: string;
-    owner_user_id: string;
-    provider: string;
-    label: string;
-    masked_key: string;
-    base_url: string;
-    default_model: string;
-    is_active: boolean;
-    is_default: boolean;
-    last_tested_at: string | null;
-    last_test_status: string | null;
-    last_test_message: string | null;
-    last_latency_ms: number | null;
-    last_status_code: number | null;
-    created_at: string;
-    updated_at: string;
-  } {
-    const now = nowIso();
-    const existing = this.db
-      .prepare('SELECT * FROM provider_vault_keys WHERE id = ? AND owner_user_id = ?')
-      .get(input.key_id, input.owner_user_id) as Record<string, any> | undefined;
-
-    const encrypted = input.encrypted_api_key || (existing ? String(existing.encrypted_api_key) : '');
-    const masked = input.masked_key || (existing ? String(existing.masked_key) : '');
-    if (!encrypted || !masked) {
-      throw new Error('Informe a chave de API para salvar este provedor no cofre da sessão.');
-    }
-
-    this.db.exec('BEGIN IMMEDIATE');
-    try {
-      if (input.is_default) {
-        this.db
-          .prepare('UPDATE provider_vault_keys SET is_default = 0 WHERE owner_user_id = ?')
-          .run(input.owner_user_id);
-      }
-
-      if (existing) {
-        this.db
-          .prepare(
-            `UPDATE provider_vault_keys
-             SET provider = ?, label = ?, encrypted_api_key = ?, masked_key = ?,
-                 base_url = ?, default_model = ?, is_active = ?, is_default = ?, updated_at = ?
-             WHERE id = ? AND owner_user_id = ?`
-          )
-          .run(
-            input.provider,
-            input.label,
-            encrypted,
-            masked,
-            input.base_url,
-            input.default_model,
-            input.is_active ? 1 : 0,
-            input.is_default ? 1 : 0,
-            now,
-            input.key_id,
-            input.owner_user_id
-          );
-      } else {
-        this.db
-          .prepare(
-            `INSERT INTO provider_vault_keys
-              (id, owner_user_id, provider, label, encrypted_api_key, masked_key, base_url, default_model,
-               is_active, is_default, last_tested_at, last_test_status, last_test_message, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?)`
-          )
-          .run(
-            input.key_id,
-            input.owner_user_id,
-            input.provider,
-            input.label,
-            encrypted,
-            masked,
-            input.base_url,
-            input.default_model,
-            input.is_active ? 1 : 0,
-            input.is_default ? 1 : 0,
-            now,
-            now
-          );
-      }
-      this.db.exec('COMMIT');
-    } catch (err) {
-      this.db.exec('ROLLBACK');
-      throw err;
-    }
-
-    this.appendAuditLog({
-      action: 'vault.provider_key.saved',
-      actor: input.owner_user_id,
-      resource: `${input.provider}:${input.key_id}`,
-      detail: `Credencial ${input.provider} (${masked}) salva criptografada na sessão protegida.`,
-    });
-
-    const saved = this.listProviderVaultKeys(input.owner_user_id).find((k) => k.key_id === input.key_id)!;
-    return saved;
+  public upsertProviderVaultKey(input: Parameters<VaultRepository['upsertProviderVaultKey']>[0]) {
+    return this.vaultRepo.upsertProviderVaultKey(input);
   }
 
-  public getEncryptedProviderVaultRecord(
-    ownerUserId: string,
-    keyIdOrProvider: string
-  ): {
-    key_id: string;
-    owner_user_id: string;
-    provider: string;
-    label: string;
-    encrypted_api_key: string;
-    masked_key: string;
-    base_url: string;
-    default_model: string;
-    is_active: boolean;
-    is_default: boolean;
-  } | null {
-    const row = this.db
-      .prepare(
-        `SELECT * FROM provider_vault_keys
-         WHERE owner_user_id = ? AND (id = ? OR provider = ?)
-         ORDER BY is_default DESC, updated_at DESC
-         LIMIT 1`
-      )
-      .get(ownerUserId, keyIdOrProvider, keyIdOrProvider) as Record<string, any> | undefined;
-
-    if (!row) return null;
-    return {
-      key_id: String(row.id),
-      owner_user_id: String(row.owner_user_id),
-      provider: String(row.provider),
-      label: String(row.label),
-      encrypted_api_key: String(row.encrypted_api_key),
-      masked_key: String(row.masked_key),
-      base_url: String(row.base_url || ''),
-      default_model: String(row.default_model || ''),
-      is_active: Boolean(row.is_active),
-      is_default: Boolean(row.is_default),
-    };
+  public getEncryptedProviderVaultRecord(ownerUserId: string, keyIdOrProvider: string) {
+    return this.vaultRepo.getEncryptedProviderVaultRecord(ownerUserId, keyIdOrProvider);
   }
 
-  public listAllEncryptedProviderVaultRecords(ownerUserId: string): Array<{
-    key_id: string;
-    owner_user_id: string;
-    provider: string;
-    label: string;
-    encrypted_api_key: string;
-    masked_key: string;
-    base_url: string;
-    default_model: string;
-    is_active: boolean;
-    is_default: boolean;
-  }> {
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM provider_vault_keys
-         WHERE owner_user_id = ? AND is_active = 1
-         ORDER BY is_default DESC, updated_at DESC`
-      )
-      .all(ownerUserId) as Array<Record<string, any>>;
-
-    return rows.map((row) => ({
-      key_id: String(row.id),
-      owner_user_id: String(row.owner_user_id),
-      provider: String(row.provider),
-      label: String(row.label),
-      encrypted_api_key: String(row.encrypted_api_key),
-      masked_key: String(row.masked_key),
-      base_url: String(row.base_url || ''),
-      default_model: String(row.default_model || ''),
-      is_active: Boolean(row.is_active),
-      is_default: Boolean(row.is_default),
-    }));
+  public listAllEncryptedProviderVaultRecords(ownerUserId: string) {
+    return this.vaultRepo.listAllEncryptedProviderVaultRecords(ownerUserId);
   }
 
-  public getDefaultEncryptedProviderVaultRecord(ownerUserId: string): {
-    key_id: string;
-    owner_user_id: string;
-    provider: string;
-    label: string;
-    encrypted_api_key: string;
-    masked_key: string;
-    base_url: string;
-    default_model: string;
-    is_active: boolean;
-    is_default: boolean;
-  } | null {
-    const row = this.db
-      .prepare(
-        `SELECT * FROM provider_vault_keys
-         WHERE owner_user_id = ? AND is_active = 1 AND is_default = 1
-         ORDER BY updated_at DESC
-         LIMIT 1`
-      )
-      .get(ownerUserId) as Record<string, any> | undefined;
-
-    if (!row) return null;
-    return {
-      key_id: String(row.id),
-      owner_user_id: String(row.owner_user_id),
-      provider: String(row.provider),
-      label: String(row.label),
-      encrypted_api_key: String(row.encrypted_api_key),
-      masked_key: String(row.masked_key),
-      base_url: String(row.base_url || ''),
-      default_model: String(row.default_model || ''),
-      is_active: Boolean(row.is_active),
-      is_default: Boolean(row.is_default),
-    };
+  public getDefaultEncryptedProviderVaultRecord(ownerUserId: string) {
+    return this.vaultRepo.getDefaultEncryptedProviderVaultRecord(ownerUserId);
   }
 
   public recordProviderVaultTestResult(
@@ -1802,275 +1569,45 @@ export class LocalSqliteBrainStore {
     latencyMs?: number | null,
     statusCode?: number | null
   ): void {
-    const cleanLatency =
-      typeof latencyMs === 'number' && Number.isFinite(latencyMs) && latencyMs >= 0
-        ? Math.round(latencyMs)
-        : null;
-    const cleanStatusCode =
-      typeof statusCode === 'number' && Number.isFinite(statusCode) && statusCode > 0
-        ? Math.round(statusCode)
-        : null;
-    const now = nowIso();
-    this.db
-      .prepare(
-        `UPDATE provider_vault_keys
-         SET last_tested_at = ?, last_test_status = ?, last_test_message = ?,
-             last_latency_ms = ?, last_status_code = ?, updated_at = ?
-         WHERE id = ? AND owner_user_id = ?`
-      )
-      .run(now, status, message.slice(0, 280), cleanLatency, cleanStatusCode, now, keyId, ownerUserId);
+    this.vaultRepo.recordProviderVaultTestResult(ownerUserId, keyId, status, message, latencyMs, statusCode);
   }
 
   public setDefaultProviderVaultKey(ownerUserId: string, keyIdOrProvider: string): boolean {
-    const target = this.getEncryptedProviderVaultRecord(ownerUserId, keyIdOrProvider);
-    if (!target) return false;
-    const now = nowIso();
-    this.db.exec('BEGIN IMMEDIATE');
-    try {
-      this.db.prepare('UPDATE provider_vault_keys SET is_default = 0 WHERE owner_user_id = ?').run(ownerUserId);
-      this.db
-        .prepare(
-          'UPDATE provider_vault_keys SET is_default = 1, is_active = 1, updated_at = ? WHERE id = ? AND owner_user_id = ?'
-        )
-        .run(now, target.key_id, ownerUserId);
-      this.db.exec('COMMIT');
-    } catch (err) {
-      this.db.exec('ROLLBACK');
-      throw err;
-    }
-
-    this.appendAuditLog({
-      action: 'vault.provider_key.default_set',
-      actor: ownerUserId,
-      resource: `${target.provider}:${target.key_id}`,
-      detail: `Provedor ${target.provider} definido como padrão de inferência na sessão.`,
-    });
-    return true;
+    return this.vaultRepo.setDefaultProviderVaultKey(ownerUserId, keyIdOrProvider);
   }
 
   public clearDefaultProviderVaultKey(ownerUserId: string): void {
-    this.db
-      .prepare('UPDATE provider_vault_keys SET is_default = 0, updated_at = ? WHERE owner_user_id = ?')
-      .run(nowIso(), ownerUserId);
+    this.vaultRepo.clearDefaultProviderVaultKey(ownerUserId);
   }
 
   public deleteProviderVaultKey(ownerUserId: string, keyIdOrProvider: string): boolean {
-    const target = this.getEncryptedProviderVaultRecord(ownerUserId, keyIdOrProvider);
-    if (!target) return false;
-    this.db
-      .prepare('DELETE FROM provider_vault_keys WHERE id = ? AND owner_user_id = ?')
-      .run(target.key_id, ownerUserId);
-    this.appendAuditLog({
-      action: 'vault.provider_key.deleted',
-      actor: ownerUserId,
-      resource: `${target.provider}:${target.key_id}`,
-      detail: `Credencial ${target.provider} (${target.masked_key}) removida do cofre da sessão.`,
-    });
-    return true;
+    return this.vaultRepo.deleteProviderVaultKey(ownerUserId, keyIdOrProvider);
   }
 
   // ==================== PACOTES MODULARES (MODULE PACK ENGINE) ====================
 
-  private ensureDefaultPacksSeeded(ownerUserId: string): void {
-    const existingCount = (
-      this.db
-        .prepare('SELECT COUNT(*) AS total FROM installed_packs WHERE owner_user_id = ?')
-        .get(ownerUserId) as { total: number }
-    ).total;
-
-    if (existingCount > 0) return;
-
-    const now = nowIso();
-    const stmt = this.db.prepare(
-      `INSERT OR IGNORE INTO installed_packs (owner_user_id, pack_id, version, is_installed, installed_at, updated_at)
-       VALUES (?, ?, ?, 1, ?, ?)`
-    );
-
-    for (const packId of DEFAULT_PREINSTALLED_PACK_IDS) {
-      const def = getModulePackById(packId);
-      stmt.run(ownerUserId, packId, def?.version || '1.0.0', now, now);
-    }
+  public listInstalledPacks(ownerUserId: string) {
+    return this.packsRepo.listInstalledPacks(ownerUserId);
   }
 
-  public listInstalledPacks(ownerUserId: string): Array<{
-    pack_id: string;
-    version: string;
-    installed_at: string;
-  }> {
-    this.ensureDefaultPacksSeeded(ownerUserId);
-    const rows = this.db
-      .prepare(
-        `SELECT pack_id, version, installed_at
-         FROM installed_packs
-         WHERE owner_user_id = ? AND is_installed = 1
-         ORDER BY installed_at ASC`
-      )
-      .all(ownerUserId) as Array<Record<string, unknown>>;
-
-    return rows.map((row) => ({
-      pack_id: String(row.pack_id),
-      version: String(row.version || '1.0.0'),
-      installed_at: String(row.installed_at),
-    }));
-  }
-
-  public installPackRecord(
-    ownerUserId: string,
-    packId: string,
-    version = '1.0.0'
-  ): { pack_id: string; version: string; installed_at: string } {
-    this.ensureDefaultPacksSeeded(ownerUserId);
-    const now = nowIso();
-    this.db
-      .prepare(
-        `INSERT INTO installed_packs (owner_user_id, pack_id, version, is_installed, installed_at, updated_at)
-         VALUES (?, ?, ?, 1, ?, ?)
-         ON CONFLICT(owner_user_id, pack_id) DO UPDATE SET
-           version = excluded.version,
-           is_installed = 1,
-           installed_at = excluded.installed_at,
-           updated_at = excluded.updated_at`
-      )
-      .run(ownerUserId, packId, version, now, now);
-
-    this.appendAuditLog({
-      action: 'module_pack.installed',
-      actor: ownerUserId,
-      resource: packId,
-      detail: `Pacote modular ${packId} v${version} instalado.`,
-    });
-
-    return { pack_id: packId, version, installed_at: now };
+  public installPackRecord(ownerUserId: string, packId: string, version = '1.0.0') {
+    return this.packsRepo.installPackRecord(ownerUserId, packId, version);
   }
 
   public uninstallPackRecord(ownerUserId: string, packId: string): boolean {
-    this.ensureDefaultPacksSeeded(ownerUserId);
-    const now = nowIso();
-    const existing = this.db
-      .prepare('SELECT pack_id FROM installed_packs WHERE owner_user_id = ? AND pack_id = ?')
-      .get(ownerUserId, packId);
-
-    if (existing) {
-      this.db
-        .prepare(
-          `UPDATE installed_packs
-           SET is_installed = 0, updated_at = ?
-           WHERE owner_user_id = ? AND pack_id = ?`
-        )
-        .run(now, ownerUserId, packId);
-    } else {
-      this.db
-        .prepare(
-          `INSERT INTO installed_packs (owner_user_id, pack_id, version, is_installed, installed_at, updated_at)
-           VALUES (?, ?, '1.0.0', 0, ?, ?)`
-        )
-        .run(ownerUserId, packId, now, now);
-    }
-
-    this.appendAuditLog({
-      action: 'module_pack.uninstalled',
-      actor: ownerUserId,
-      resource: packId,
-      detail: `Pacote modular ${packId} removido da navegação ativa.`,
-    });
-    return true;
+    return this.packsRepo.uninstallPackRecord(ownerUserId, packId);
   }
 
   public listCustomPacks(): ModulePackDefinition[] {
-    const rows = this.db
-      .prepare(
-        `SELECT id, name, tagline, description, category, version, definition_json, created_by, updated_at
-         FROM custom_packs
-         ORDER BY updated_at DESC`
-      )
-      .all() as Array<Record<string, unknown>>;
-
-    const result: ModulePackDefinition[] = [];
-    for (const row of rows) {
-      const parsed = safeJsonParse<Partial<ModulePackDefinition> | null>(row.definition_json, null);
-      if (!parsed) continue;
-      const tabs = Array.isArray(parsed.tabs) ? parsed.tabs : [];
-      result.push({
-        id: String(row.id),
-        name: String(row.name || parsed.name || row.id),
-        tagline: String(row.tagline || parsed.tagline || ''),
-        description: String(row.description || parsed.description || ''),
-        category: (String(row.category || parsed.category || 'engineering') as ModulePackDefinition['category']),
-        category_label: String(parsed.category_label || 'Engenharia & Arquitetura'),
-        version: String(row.version || parsed.version || '1.0.0'),
-        tabs,
-        tab_labels: parsed.tab_labels && typeof parsed.tab_labels === 'object' ? parsed.tab_labels : {},
-        agents: Array.isArray(parsed.agents) ? parsed.agents : [],
-        skills: Array.isArray(parsed.skills) ? parsed.skills : [],
-        mcp_presets: Array.isArray(parsed.mcp_presets) ? parsed.mcp_presets : [],
-        workflows: Array.isArray(parsed.workflows) ? parsed.workflows : [],
-        study_tracks: Array.isArray(parsed.study_tracks) ? parsed.study_tracks : [],
-        is_custom: true,
-        created_by: String(row.created_by || 'admin'),
-      });
-    }
-    return result;
+    return this.packsRepo.listCustomPacks();
   }
 
   public upsertCustomPack(createdBy: string, input: CustomPackDraftInput): ModulePackDefinition {
-    const normalized = sanitizeCustomPackInput(input, createdBy);
-    const now = nowIso();
-    this.db
-      .prepare(
-        `INSERT INTO custom_packs (
-          id, name, tagline, description, category, version, accent_color,
-          definition_json, created_by, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-          name = excluded.name,
-          tagline = excluded.tagline,
-          description = excluded.description,
-          category = excluded.category,
-          version = excluded.version,
-          definition_json = excluded.definition_json,
-          updated_at = excluded.updated_at`
-      )
-      .run(
-        normalized.id,
-        normalized.name,
-        normalized.tagline,
-        normalized.description,
-        normalized.category,
-        normalized.version,
-        '#f97316',
-        JSON.stringify(normalized),
-        createdBy,
-        now,
-        now
-      );
-
-    this.appendAuditLog({
-      action: 'custom_pack.saved',
-      actor: createdBy,
-      resource: normalized.id,
-      detail: `Pacote personalizado "${normalized.name}" v${normalized.version} salvo com ${normalized.tabs.length} módulo(s) e ${normalized.agents.length} agente(s).`,
-    });
-
-    return normalized;
+    return this.packsRepo.upsertCustomPack(createdBy, input);
   }
 
   public deleteCustomPack(actor: string, packId: string): boolean {
-    const cleanId = normalizePackSlug(packId);
-    const existing = this.db
-      .prepare('SELECT id FROM custom_packs WHERE id = ?')
-      .get(cleanId);
-    if (!existing) return false;
-
-    this.db.prepare('DELETE FROM custom_packs WHERE id = ?').run(cleanId);
-    this.db.prepare('DELETE FROM installed_packs WHERE pack_id = ?').run(cleanId);
-
-    this.appendAuditLog({
-      action: 'custom_pack.deleted',
-      actor,
-      resource: cleanId,
-      detail: `Pacote personalizado ${cleanId} removido do Estúdio de Pacotes.`,
-    });
-    return true;
+    return this.packsRepo.deleteCustomPack(actor, packId);
   }
 
   public upsertKnowledgeDocumentRecord(input: {
@@ -2079,154 +1616,17 @@ export class LocalSqliteBrainStore {
     content: string;
     fileType?: string;
   }): void {
-    const cleanName = String(input.name || '').trim().slice(0, 180);
-    if (!cleanName) return;
-    const content = String(input.content || '');
-    const now = nowIso();
-    this.db
-      .prepare(
-        `INSERT INTO knowledge_documents (name, category, file_type, content, chunks, size_bytes, indexed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(name) DO UPDATE SET
-           category = excluded.category,
-           content = excluded.content,
-           chunks = excluded.chunks,
-           size_bytes = excluded.size_bytes,
-           indexed_at = excluded.indexed_at`
-      )
-      .run(
-        cleanName,
-        String(input.category || 'estudos').slice(0, 64),
-        String(input.fileType || 'md').slice(0, 16),
-        content,
-        Math.max(1, Math.ceil(content.length / 650)),
-        Buffer.byteLength(content, 'utf8'),
-        now
-      );
+    this.packsRepo.upsertKnowledgeDocumentRecord(input);
   }
 
   // ==================== NÚCLEOS INDIVIDUAIS DE AGENTES (AGENT CORE SCHEMA) ====================
 
-  private hydrateAgentCoreRow(row: Record<string, unknown>): AgentCoreConfig {
-    return {
-      agent_role: String(row.agent_role),
-      workspace_slug: String(row.workspace_slug || deriveAgentWorkspaceSlug(String(row.agent_role))),
-      orchestration_mode: String(row.orchestration_mode || 'plan_execute_verify') as AgentCoreConfig['orchestration_mode'],
-      max_steps: Number(row.max_steps) || 8,
-      max_delegation_depth: Number(row.max_delegation_depth) || 2,
-      primary_provider: String(row.primary_provider || 'gemini'),
-      primary_model: String(row.primary_model || 'gemini-2.5-flash'),
-      fallback_provider: String(row.fallback_provider || 'openai'),
-      fallback_model: String(row.fallback_model || 'gpt-4.1-mini'),
-      autonomy_policy: String(row.autonomy_policy || 'auto_safe') as AgentCoreConfig['autonomy_policy'],
-      daily_budget_usd: Number.isFinite(Number(row.daily_budget_usd)) ? Number(row.daily_budget_usd) : 5,
-      allowed_mcp_servers: safeJsonParse<string[]>(row.allowed_mcp_servers_json, ['mcp_local_workspace']),
-      soul_markdown: String(row.soul_markdown || ''),
-      memory_markdown: String(row.memory_markdown || ''),
-      cron_schedule: row.cron_schedule ? String(row.cron_schedule) : null,
-      pack_id: row.pack_id ? String(row.pack_id) : null,
-      status: (row.status === 'paused' ? 'paused' : 'active') as AgentCoreConfig['status'],
-      updated_at: String(row.updated_at || nowIso()),
-    };
-  }
-
-  private syncAgentCoreWorkspaceFiles(core: AgentCoreConfig): void {
-    try {
-      const safeSlug = sanitizeWorkspaceSlug(core.workspace_slug || deriveAgentWorkspaceSlug(core.agent_role));
-      const agentWsRoot = resolveConfinedPath(this.workspacesDir, safeSlug);
-      fs.mkdirSync(agentWsRoot, { recursive: true });
-      const soulPath = resolveConfinedPath(agentWsRoot, 'SOUL.md');
-      const memoryPath = resolveConfinedPath(agentWsRoot, 'MEMORY.md');
-      fs.writeFileSync(soulPath, core.soul_markdown || '', 'utf8');
-      fs.writeFileSync(memoryPath, core.memory_markdown || '', 'utf8');
-    } catch {
-      // Non-fatal: SQLite remains source of truth even if filesystem sync is restricted
-    }
-  }
-
   public listAgentCores(ownerUserId: string): AgentCoreConfig[] {
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM agent_cores
-         WHERE owner_user_id = ?
-         ORDER BY updated_at DESC`
-      )
-      .all(ownerUserId) as Array<Record<string, unknown>>;
-
-    return rows.map((row) => this.hydrateAgentCoreRow(row));
+    return this.agentsRepo.listAgentCores(ownerUserId);
   }
 
-  public getAgentCore(
-    ownerUserId: string,
-    agentRole: string,
-    seedMeta?: AgentCoreSeedMeta
-  ): AgentCoreConfig {
-    const safeRole = normalizeAgentRoleSlug(agentRole);
-    const row = this.db
-      .prepare('SELECT * FROM agent_cores WHERE owner_user_id = ? AND agent_role = ?')
-      .get(ownerUserId, safeRole) as Record<string, unknown> | undefined;
-
-    if (row) {
-      return this.hydrateAgentCoreRow(row);
-    }
-
-    const seeded = buildDefaultAgentCore(safeRole, seedMeta, nowIso());
-    this.saveAgentCoreRecord(ownerUserId, seeded);
-    return seeded;
-  }
-
-  private saveAgentCoreRecord(ownerUserId: string, core: AgentCoreConfig): void {
-    this.db
-      .prepare(
-        `INSERT INTO agent_cores (
-          owner_user_id, agent_role, workspace_slug, orchestration_mode,
-          max_steps, max_delegation_depth, primary_provider, primary_model,
-          fallback_provider, fallback_model, autonomy_policy, daily_budget_usd,
-          allowed_mcp_servers_json, soul_markdown, memory_markdown, cron_schedule,
-          pack_id, status, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(owner_user_id, agent_role) DO UPDATE SET
-          workspace_slug = excluded.workspace_slug,
-          orchestration_mode = excluded.orchestration_mode,
-          max_steps = excluded.max_steps,
-          max_delegation_depth = excluded.max_delegation_depth,
-          primary_provider = excluded.primary_provider,
-          primary_model = excluded.primary_model,
-          fallback_provider = excluded.fallback_provider,
-          fallback_model = excluded.fallback_model,
-          autonomy_policy = excluded.autonomy_policy,
-          daily_budget_usd = excluded.daily_budget_usd,
-          allowed_mcp_servers_json = excluded.allowed_mcp_servers_json,
-          soul_markdown = excluded.soul_markdown,
-          memory_markdown = excluded.memory_markdown,
-          cron_schedule = excluded.cron_schedule,
-          pack_id = excluded.pack_id,
-          status = excluded.status,
-          updated_at = excluded.updated_at`
-      )
-      .run(
-        ownerUserId,
-        core.agent_role,
-        core.workspace_slug,
-        core.orchestration_mode,
-        core.max_steps,
-        core.max_delegation_depth,
-        core.primary_provider,
-        core.primary_model,
-        core.fallback_provider,
-        core.fallback_model,
-        core.autonomy_policy,
-        core.daily_budget_usd,
-        JSON.stringify(core.allowed_mcp_servers),
-        core.soul_markdown,
-        core.memory_markdown,
-        core.cron_schedule,
-        core.pack_id,
-        core.status,
-        core.updated_at
-      );
-
-    this.syncAgentCoreWorkspaceFiles(core);
+  public getAgentCore(ownerUserId: string, agentRole: string, seedMeta?: AgentCoreSeedMeta): AgentCoreConfig {
+    return this.agentsRepo.getAgentCore(ownerUserId, agentRole, seedMeta);
   }
 
   public upsertAgentCore(
@@ -2235,26 +1635,11 @@ export class LocalSqliteBrainStore {
     patch: AgentCorePatch,
     seedMeta?: AgentCoreSeedMeta
   ): AgentCoreConfig {
-    const current = this.getAgentCore(ownerUserId, agentRole, seedMeta);
-    const merged = sanitizeAgentCorePatch(current, patch, nowIso());
-    this.saveAgentCoreRecord(ownerUserId, merged);
-
-    this.appendAuditLog({
-      action: 'agent_core.updated',
-      actor: ownerUserId,
-      resource: merged.agent_role,
-      detail: `Núcleo atualizado (${merged.orchestration_mode}, ${merged.primary_provider}/${merged.primary_model}, max_steps=${merged.max_steps}).`,
-    });
-
-    return merged;
+    return this.agentsRepo.upsertAgentCore(ownerUserId, agentRole, patch, seedMeta);
   }
 
   public deleteAgentCore(ownerUserId: string, agentRole: string): boolean {
-    const safeRole = normalizeAgentRoleSlug(agentRole);
-    this.db
-      .prepare('DELETE FROM agent_cores WHERE owner_user_id = ? AND agent_role = ?')
-      .run(ownerUserId, safeRole);
-    return true;
+    return this.agentsRepo.deleteAgentCore(ownerUserId, agentRole);
   }
 
   // ==================== PERSISTÊNCIA OPERACIONAL UNIFICADA (SQLITE WAL) ====================
@@ -2284,50 +1669,19 @@ export class LocalSqliteBrainStore {
   }
 
   public upsertTaskRecord(task: Record<string, unknown>): void {
-    if (this.closed) return;
-    const taskId = String(task.task_id || task.id || `tsk_${Date.now()}`).slice(0, 128);
-    const sessionId = task.session_id ? String(task.session_id).slice(0, 128) : null;
-    const userPrompt = String(task.user_prompt || task.prompt || '').slice(0, 4000);
-    const status = String(task.status || (task.is_completed ? 'completed' : 'running')).slice(0, 32);
-    const createdAt = String(task.created_at || nowIso());
-    this.db
-      .prepare(
-        `INSERT INTO app_tasks (task_id, session_id, user_prompt, status, payload_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(task_id) DO UPDATE SET
-           session_id = excluded.session_id,
-           user_prompt = excluded.user_prompt,
-           status = excluded.status,
-           payload_json = excluded.payload_json`
-      )
-      .run(taskId, sessionId, userPrompt, status, JSON.stringify(task), createdAt);
+    this.chatRepo.upsertTaskRecord(task);
   }
 
   public listTaskRecords(limit = 200): Record<string, unknown>[] {
-    if (this.closed) return [];
-    const safeLimit = Math.max(1, Math.min(500, Math.floor(limit)));
-    const rows = this.db
-      .prepare('SELECT payload_json FROM app_tasks ORDER BY created_at DESC LIMIT ?')
-      .all(safeLimit) as Array<{ payload_json: string }>;
-    return rows
-      .map((r) => safeJsonParse<Record<string, unknown> | null>(r.payload_json, null))
-      .filter((item): item is Record<string, unknown> => Boolean(item));
+    return this.chatRepo.listTaskRecords(limit);
   }
 
   public deleteTaskRecord(taskId: string): boolean {
-    if (this.closed) return false;
-    const res = this.db.prepare('DELETE FROM app_tasks WHERE task_id = ?').run(String(taskId));
-    return Number(res.changes || 0) > 0;
+    return this.chatRepo.deleteTaskRecord(taskId);
   }
 
   public purgeOldTaskRecords(daysRetention: number): number {
-    if (this.closed) return 0;
-    const safeDays = Math.max(0, Math.min(3650, Number.isFinite(daysRetention) ? daysRetention : 30));
-    const cutoffIso = new Date(Date.now() - safeDays * 24 * 60 * 60 * 1000).toISOString();
-    const res = this.db
-      .prepare('DELETE FROM app_tasks WHERE created_at <= ?')
-      .run(cutoffIso);
-    return Number(res.changes || 0);
+    return this.chatRepo.purgeOldTaskRecords(daysRetention);
   }
 
   public upsertChatSessionRecord(session: {
@@ -2338,27 +1692,7 @@ export class LocalSqliteBrainStore {
     created_at?: string;
     updated_at?: string;
   }): void {
-    if (this.closed) return;
-    const id = String(session.id || '').slice(0, 128);
-    if (!id) return;
-    const now = nowIso();
-    this.db
-      .prepare(
-        `INSERT INTO chat_sessions (id, user_id, title, mode, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           title = excluded.title,
-           mode = excluded.mode,
-           updated_at = excluded.updated_at`
-      )
-      .run(
-        id,
-        String(session.user_id || 'admin').slice(0, 64),
-        String(session.title || 'Conversa').slice(0, 200),
-        String(session.mode || 'standard').slice(0, 32),
-        String(session.created_at || now),
-        String(session.updated_at || now)
-      );
+    this.chatRepo.upsertChatSessionRecord(session);
   }
 
   public appendChatMessageRecord(msg: {
@@ -2369,212 +1703,35 @@ export class LocalSqliteBrainStore {
     agent_role?: string | null;
     created_at?: string;
   }): void {
-    if (this.closed) return;
-    const sid = String(msg.session_id || '').slice(0, 128);
-    if (!sid) return;
-    const now = nowIso();
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO chat_sessions (id, user_id, title, mode, created_at, updated_at)
-         VALUES (?, 'admin', 'Conversa', 'standard', ?, ?)`
-      )
-      .run(sid, now, now);
-    this.db
-      .prepare(
-        `INSERT INTO chat_messages (id, session_id, role, content, agent_role, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO NOTHING`
-      )
-      .run(
-        String(msg.id || `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`).slice(0, 128),
-        sid,
-        String(msg.role || 'user').slice(0, 32),
-        String(msg.content || ''),
-        msg.agent_role ? String(msg.agent_role).slice(0, 64) : null,
-        String(msg.created_at || now)
-      );
+    this.chatRepo.appendChatMessageRecord(msg);
   }
 
-  public listChatSessionsRelational(limit = 100): Array<{
-    id: string;
-    user_id: string;
-    title: string;
-    mode: string;
-    created_at: string;
-    updated_at: string;
-  }> {
-    if (this.closed) return [];
-    const safeLimit = Math.max(1, Math.min(300, Math.floor(limit)));
-    return this.db
-      .prepare('SELECT id, user_id, title, mode, created_at, updated_at FROM chat_sessions ORDER BY updated_at DESC LIMIT ?')
-      .all(safeLimit) as Array<{
-      id: string;
-      user_id: string;
-      title: string;
-      mode: string;
-      created_at: string;
-      updated_at: string;
-    }>;
+  public listChatSessionsRelational(limit = 100) {
+    return this.chatRepo.listChatSessionsRelational(limit);
   }
 
-  public getChatSessionMessagesRelational(
-    sessionId: string,
-    limit = 250
-  ): Array<{
-    id: string;
-    session_id: string;
-    role: string;
-    content: string;
-    agent_role: string | null;
-    created_at: string;
-  }> {
-    if (this.closed) return [];
-    const safeLimit = Math.max(1, Math.min(1000, Math.floor(limit)));
-    return this.db
-      .prepare(
-        'SELECT id, session_id, role, content, agent_role, created_at FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC LIMIT ?'
-      )
-      .all(String(sessionId), safeLimit) as Array<{
-      id: string;
-      session_id: string;
-      role: string;
-      content: string;
-      agent_role: string | null;
-      created_at: string;
-    }>;
+  public getChatSessionMessagesRelational(sessionId: string, limit = 250) {
+    return this.chatRepo.getChatSessionMessagesRelational(sessionId, limit);
   }
 
   public deleteChatSessionRecord(sessionId: string): boolean {
-    if (this.closed) return false;
-    const res = this.db.prepare('DELETE FROM chat_sessions WHERE id = ?').run(String(sessionId));
-    return Number(res.changes || 0) > 0;
+    return this.chatRepo.deleteChatSessionRecord(sessionId);
   }
 
   public migrateLegacyChatSessionsSnapshotIfNeeded(): number {
-    if (this.closed) return 0;
-    const countRow = this.db.prepare('SELECT COUNT(*) as cnt FROM chat_sessions').get() as { cnt: number };
-    if (Number(countRow?.cnt || 0) > 0) return 0;
-
-    const legacy = this.loadStateNamespace<Array<[string, any]>>('chat_sessions');
-    if (!Array.isArray(legacy) || legacy.length === 0) return 0;
-
-    let migrated = 0;
-    this.db.exec('BEGIN IMMEDIATE');
-    try {
-      for (const [, sess] of legacy) {
-        if (!sess?.session_id) continue;
-        this.upsertChatSessionRecord({
-          id: String(sess.session_id),
-          title: String(sess.title || 'Conversa'),
-          mode: String(sess.first_intent || 'standard'),
-          created_at: String(sess.last_activity || nowIso()),
-          updated_at: String(sess.last_activity || nowIso()),
-        });
-        if (Array.isArray(sess.messages)) {
-          for (let i = 0; i < sess.messages.length; i += 1) {
-            const m = sess.messages[i];
-            this.appendChatMessageRecord({
-              id: `${sess.session_id}_m_${m.id ?? i}`,
-              session_id: String(sess.session_id),
-              role: String(m.role || 'user'),
-              content: String(m.content || ''),
-              created_at: String(m.created_at || nowIso()),
-            });
-          }
-        }
-        migrated += 1;
-      }
-      this.db.exec('COMMIT');
-    } catch (err) {
-      this.db.exec('ROLLBACK');
-      throw err;
-    }
-    return migrated;
+    return this.chatRepo.migrateLegacyChatSessionsSnapshotIfNeeded((ns) => this.loadStateNamespace(ns));
   }
 
-  public appendCodingMessage(input: {
-    session_id: string;
-    project_id?: string | null;
-    role: string;
-    content: string;
-    tool_calls?: unknown[];
-    tool_call_id?: string | null;
-    tool_name?: string | null;
-  }): {
-    id: number;
-    session_id: string;
-    project_id: string | null;
-    role: string;
-    content: string;
-    tool_calls?: unknown[];
-    tool_call_id?: string | null;
-    tool_name?: string | null;
-    created_at: string;
-  } {
-    const createdAt = nowIso();
-    const info = this.db
-      .prepare(
-        `INSERT INTO coding_session_messages
-          (session_id, project_id, role, content, tool_calls_json, tool_call_id, tool_name, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        input.session_id.slice(0, 128),
-        input.project_id ? String(input.project_id).slice(0, 128) : null,
-        String(input.role || 'user').slice(0, 32),
-        String(input.content || '').slice(0, 32000),
-        input.tool_calls ? JSON.stringify(input.tool_calls) : null,
-        input.tool_call_id ? String(input.tool_call_id).slice(0, 128) : null,
-        input.tool_name ? String(input.tool_name).slice(0, 128) : null,
-        createdAt
-      );
-    return {
-      id: Number(info.lastInsertRowid || Date.now()),
-      session_id: input.session_id,
-      project_id: input.project_id || null,
-      role: input.role,
-      content: input.content,
-      tool_calls: input.tool_calls,
-      tool_call_id: input.tool_call_id || null,
-      tool_name: input.tool_name || null,
-      created_at: createdAt,
-    };
+  public appendCodingMessage(input: Parameters<ChatRepository['appendCodingMessage']>[0]) {
+    return this.chatRepo.appendCodingMessage(input);
   }
 
-  public listCodingMessages(sessionId: string): Array<{
-    id: number;
-    session_id: string;
-    project_id: string | null;
-    role: string;
-    content: string;
-    tool_calls?: unknown[];
-    tool_call_id?: string | null;
-    tool_name?: string | null;
-    created_at: string;
-  }> {
-    if (this.closed) return [];
-    const rows = this.db
-      .prepare('SELECT * FROM coding_session_messages WHERE session_id = ? ORDER BY id ASC LIMIT 200')
-      .all(String(sessionId)) as Array<Record<string, unknown>>;
-    return rows.map((row) => ({
-      id: Number(row.id),
-      session_id: String(row.session_id),
-      project_id: row.project_id ? String(row.project_id) : null,
-      role: String(row.role),
-      content: String(row.content),
-      tool_calls: row.tool_calls_json ? safeJsonParse<unknown[]>(String(row.tool_calls_json), undefined as any) : undefined,
-      tool_call_id: row.tool_call_id ? String(row.tool_call_id) : null,
-      tool_name: row.tool_name ? String(row.tool_name) : null,
-      created_at: String(row.created_at),
-    }));
+  public listCodingMessages(sessionId: string) {
+    return this.chatRepo.listCodingMessages(sessionId);
   }
 
   public clearCodingMessages(sessionId: string): number {
-    if (this.closed) return 0;
-    const res = this.db
-      .prepare('DELETE FROM coding_session_messages WHERE session_id = ?')
-      .run(String(sessionId));
-    return Number(res.changes || 0);
+    return this.chatRepo.clearCodingMessages(sessionId);
   }
 
   public appendAgentHistoryMessage(
@@ -2582,50 +1739,12 @@ export class LocalSqliteBrainStore {
     sessionId: string,
     role: 'user' | 'assistant' | 'tool',
     content: string
-  ): { id: number; agent_role: string; session_id: string; role: string; content: string; created_at: string } {
-    const createdAt = nowIso();
-    const info = this.db
-      .prepare(
-        `INSERT INTO agent_conversation_history (agent_role, session_id, role, content, created_at)
-         VALUES (?, ?, ?, ?, ?)`
-      )
-      .run(
-        normalizeAgentRoleSlug(agentRole),
-        String(sessionId || 'default').slice(0, 128),
-        role,
-        String(content || '').slice(0, 32000),
-        createdAt
-      );
-    return {
-      id: Number(info.lastInsertRowid || Date.now()),
-      agent_role: normalizeAgentRoleSlug(agentRole),
-      session_id: String(sessionId || 'default'),
-      role,
-      content,
-      created_at: createdAt,
-    };
+  ) {
+    return this.chatRepo.appendAgentHistoryMessage(agentRole, sessionId, role, content);
   }
 
-  public listAgentHistoryMessages(
-    agentRole: string,
-    sessionId = 'default'
-  ): Array<{ id: number; agent_role: string; session_id: string; role: string; content: string; created_at: string }> {
-    if (this.closed) return [];
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM agent_conversation_history
-         WHERE agent_role = ? AND session_id = ?
-         ORDER BY id ASC LIMIT 200`
-      )
-      .all(normalizeAgentRoleSlug(agentRole), String(sessionId || 'default')) as Array<Record<string, unknown>>;
-    return rows.map((row) => ({
-      id: Number(row.id),
-      agent_role: String(row.agent_role),
-      session_id: String(row.session_id),
-      role: String(row.role),
-      content: String(row.content),
-      created_at: String(row.created_at),
-    }));
+  public listAgentHistoryMessages(agentRole: string, sessionId = 'default') {
+    return this.chatRepo.listAgentHistoryMessages(agentRole, sessionId);
   }
 
   public close(): void {
@@ -2640,178 +1759,44 @@ export class LocalSqliteBrainStore {
 
   // ==================== AUTH USERS & SESSIONS (SQLite persistente) ====================
 
-  /**
-   * Upsert de conta de usuário no SQLite.
-   * Preserva password_hash/salt se já existir e não forem enviados.
-   */
-  public upsertAuthUser(user: {
-    username: string;
-    display_name: string;
-    role: 'admin' | 'developer' | 'auditor';
-    is_active: boolean;
-    must_change_password: boolean;
-    salt: string;
-    password_hash: string;
-    created_at: string;
-  }): void {
-    const now = nowIso();
-    this.db.prepare(`
-      INSERT INTO auth_users (username, display_name, role, is_active, must_change_password, salt, password_hash, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(username) DO UPDATE SET
-        display_name = excluded.display_name,
-        role = excluded.role,
-        is_active = excluded.is_active,
-        must_change_password = excluded.must_change_password,
-        salt = excluded.salt,
-        password_hash = excluded.password_hash,
-        updated_at = excluded.updated_at
-    `).run(
-      user.username.slice(0, 64),
-      user.display_name.slice(0, 80),
-      user.role,
-      user.is_active ? 1 : 0,
-      user.must_change_password ? 1 : 0,
-      user.salt,
-      user.password_hash,
-      user.created_at,
-      now,
-    );
+  public upsertAuthUser(user: AuthUserRow): void {
+    this.authRepo.upsertAuthUser(user);
   }
 
-  public getAuthUser(username: string): {
-    username: string;
-    display_name: string;
-    role: 'admin' | 'developer' | 'auditor';
-    is_active: boolean;
-    must_change_password: boolean;
-    salt: string;
-    password_hash: string;
-    created_at: string;
-  } | null {
-    const row = this.db.prepare('SELECT * FROM auth_users WHERE username = ?').get(username) as Record<string, unknown> | undefined;
-    if (!row) return null;
-    return {
-      username: String(row.username),
-      display_name: String(row.display_name),
-      role: String(row.role) as 'admin' | 'developer' | 'auditor',
-      is_active: Boolean(row.is_active),
-      must_change_password: Boolean(row.must_change_password),
-      salt: String(row.salt),
-      password_hash: String(row.password_hash),
-      created_at: String(row.created_at),
-    };
+  public getAuthUser(username: string): AuthUserRow | null {
+    return this.authRepo.getAuthUser(username);
   }
 
-  public listAuthUsers(): Array<{
-    username: string;
-    display_name: string;
-    role: 'admin' | 'developer' | 'auditor';
-    is_active: boolean;
-    must_change_password: boolean;
-    salt: string;
-    password_hash: string;
-    created_at: string;
-  }> {
-    const rows = this.db.prepare('SELECT * FROM auth_users ORDER BY created_at ASC').all() as Array<Record<string, unknown>>;
-    return rows.map((row) => ({
-      username: String(row.username),
-      display_name: String(row.display_name),
-      role: String(row.role) as 'admin' | 'developer' | 'auditor',
-      is_active: Boolean(row.is_active),
-      must_change_password: Boolean(row.must_change_password),
-      salt: String(row.salt),
-      password_hash: String(row.password_hash),
-      created_at: String(row.created_at),
-    }));
+  public listAuthUsers(): AuthUserRow[] {
+    return this.authRepo.listAuthUsers();
   }
 
   public deleteAuthUser(username: string): void {
-    this.db.prepare('DELETE FROM auth_users WHERE username = ?').run(username);
+    this.authRepo.deleteAuthUser(username);
   }
 
-  /** Persiste uma sessão com TTL de 24h (86400000ms). */
-  public upsertAuthSession(session: {
-    session_id: string;
-    username: string;
-    role: 'admin' | 'developer' | 'auditor';
-    kind: 'human' | 'service';
-    created_at: number;
-  }): void {
-    const expiresAt = session.created_at + 86_400_000;
-    this.db.prepare(`
-      INSERT INTO auth_sessions (session_id, username, role, kind, created_at, expires_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(session_id) DO NOTHING
-    `).run(
-      session.session_id,
-      session.username,
-      session.role,
-      session.kind,
-      session.created_at,
-      expiresAt,
-    );
+  public upsertAuthSession(session: AuthSessionRow): void {
+    this.authRepo.upsertAuthSession(session);
   }
 
-  public getAuthSession(sessionId: string): {
-    session_id: string;
-    username: string;
-    role: 'admin' | 'developer' | 'auditor';
-    kind: 'human' | 'service';
-    created_at: number;
-  } | null {
-    const now = Date.now();
-    const row = this.db
-      .prepare('SELECT * FROM auth_sessions WHERE session_id = ? AND expires_at > ?')
-      .get(sessionId, now) as Record<string, unknown> | undefined;
-    if (!row) return null;
-    return {
-      session_id: String(row.session_id),
-      username: String(row.username),
-      role: String(row.role) as 'admin' | 'developer' | 'auditor',
-      kind: String(row.kind) as 'human' | 'service',
-      created_at: Number(row.created_at),
-    };
+  public getAuthSession(sessionId: string): AuthSessionRow | null {
+    return this.authRepo.getAuthSession(sessionId);
   }
 
   public deleteAuthSession(sessionId: string): void {
-    this.db.prepare('DELETE FROM auth_sessions WHERE session_id = ?').run(sessionId);
+    this.authRepo.deleteAuthSession(sessionId);
   }
 
-  /** Remove todas as sessões de um usuário (útil ao revogar ou trocar senha). */
   public deleteAuthSessionsByUser(username: string, exceptSessionId?: string): void {
-    if (exceptSessionId) {
-      this.db.prepare('DELETE FROM auth_sessions WHERE username = ? AND session_id != ?').run(username, exceptSessionId);
-    } else {
-      this.db.prepare('DELETE FROM auth_sessions WHERE username = ?').run(username);
-    }
+    this.authRepo.deleteAuthSessionsByUser(username, exceptSessionId);
   }
 
-  public listActiveAuthSessions(): Array<{
-    session_id: string;
-    username: string;
-    role: 'admin' | 'developer' | 'auditor';
-    kind: 'human' | 'service';
-    created_at: number;
-  }> {
-    const now = Date.now();
-    const rows = this.db
-      .prepare('SELECT * FROM auth_sessions WHERE expires_at > ? ORDER BY created_at DESC LIMIT 500')
-      .all(now) as Array<Record<string, unknown>>;
-    return rows.map((row) => ({
-      session_id: String(row.session_id),
-      username: String(row.username),
-      role: String(row.role) as 'admin' | 'developer' | 'auditor',
-      kind: String(row.kind) as 'human' | 'service',
-      created_at: Number(row.created_at),
-    }));
+  public listActiveAuthSessions(): AuthSessionRow[] {
+    return this.authRepo.listActiveAuthSessions();
   }
 
-  /** Limpeza periódica de sessões expiradas. */
   public purgeExpiredAuthSessions(): number {
-    const now = Date.now();
-    const result = this.db.prepare('DELETE FROM auth_sessions WHERE expires_at <= ?').run(now) as { changes: number };
-    return result.changes;
+    return this.authRepo.purgeExpiredAuthSessions();
   }
 
   // ==================== EXECUÇÃO DURÁVEL DE AGENTES (CHECKPOINTS & RETOMADA) ====================

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { subscribeAppEvent } from '../../shared/state/appBus';
 import { Code2, ShieldCheck, Users, Compass, ArrowUpRight } from 'lucide-react';
 import { fetchWorkspaceProjects, fetchModels, fetchChatSessionDetails, fetchAgents } from '../../api';
 import { FormattedChatModel, parseChatModelOptions } from '../../services/chatModels';
@@ -346,10 +347,10 @@ export const ChatMaster: React.FC<ChatMasterProps> = ({
         .catch(() => {});
     };
     loadAgents();
-    window.addEventListener('jarvis:agents-updated', loadAgents);
+    const unsubAgents = subscribeAppEvent('jarvis:agents-updated', loadAgents);
     return () => {
       active = false;
-      window.removeEventListener('jarvis:agents-updated', loadAgents);
+      unsubAgents();
     };
   }, []);
 

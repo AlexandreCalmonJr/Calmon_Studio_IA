@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { emitAppEvent, subscribeAppEvent } from '../state/appBus';
 import {
   Bot,
   ChevronDown,
@@ -102,10 +103,10 @@ export const AgentDock: React.FC<AgentDockProps> = ({
       void loadDockAgents();
     };
     window.addEventListener('jarvis:dock-updated', handleSync);
-    window.addEventListener('jarvis:agents-updated', handleSync);
+    const unsubAgents = subscribeAppEvent('jarvis:agents-updated', handleSync);
     return () => {
       window.removeEventListener('jarvis:dock-updated', handleSync);
-      window.removeEventListener('jarvis:agents-updated', handleSync);
+      unsubAgents();
     };
   }, [loadDockAgents]);
 
@@ -155,7 +156,7 @@ export const AgentDock: React.FC<AgentDockProps> = ({
       notify(`${pendingUninstall.properName} foi desinstalado da sua equipe.`, 'info');
       setPendingUninstall(null);
       await loadDockAgents();
-      window.dispatchEvent(new CustomEvent('jarvis:agents-updated'));
+      emitAppEvent('jarvis:agents-updated');
     } catch (err: any) {
       notify(err?.message || 'Não foi possível desinstalar este agente.', 'error');
     } finally {

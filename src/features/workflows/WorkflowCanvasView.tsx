@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { subscribeAppEvent } from '../../shared/state/appBus';
 import {
   Zap,
   Plus,
@@ -195,10 +196,10 @@ export const WorkflowCanvasView: React.FC = () => {
         .catch(() => {});
     };
     loadAgents();
-    window.addEventListener('jarvis:agents-updated', loadAgents);
+    const unsubAgents = subscribeAppEvent("jarvis:agents-updated", loadAgents);
     return () => {
       active = false;
-      window.removeEventListener('jarvis:agents-updated', loadAgents);
+      unsubAgents();
     };
   }, []);
 

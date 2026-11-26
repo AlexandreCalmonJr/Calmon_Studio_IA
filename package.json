@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
-    "test": "tsx --test server/*.test.ts server/brain/*.test.ts src/router.test.ts src/services/*.test.ts firestore.rules.test.ts",
+    "test": "tsx --test server/*.test.ts server/brain/*.test.ts src/router.test.ts src/services/*.test.ts src/shared/state/*.test.ts firestore.rules.test.ts",
     "test:unit": "tsx --test server/*.test.ts server/brain/*.test.ts src/router.test.ts src/services/*.test.ts firestore.rules.test.ts",
     "test:server": "tsx --test server/*.test.ts server/brain/*.test.ts firestore.rules.test.ts",
     "test:services": "tsx --test src/router.test.ts src/services/*.test.ts",

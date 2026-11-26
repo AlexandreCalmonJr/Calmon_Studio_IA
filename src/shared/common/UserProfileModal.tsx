@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { emitAppEvent } from '../state/appBus';
 import { Modal } from './Modal';
 import {
   Save,
@@ -803,7 +804,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    window.dispatchEvent(new CustomEvent('jarvis:open-android-pairing'));
+                    emitAppEvent("jarvis:open-android-pairing");
                     onClose();
                   }}
                   className="btn btn-primary btn-sm"
@@ -827,7 +828,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    window.dispatchEvent(new CustomEvent('jarvis:open-access-management'));
+                    emitAppEvent("jarvis:open-access-management");
                     onClose();
                   }}
                   className="btn btn-secondary btn-sm"

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { emitAppEvent } from '../../shared/state/appBus';
 import { BookOpen, Check, RefreshCw, Search, Sparkles, X } from 'lucide-react';
 import { Modal } from '../../shared/common/Modal';
 import { AgentInfo, SkillInfo } from '../../types';
@@ -77,7 +78,7 @@ export const AgentSkillsModal: React.FC<AgentSkillsModalProps> = ({
     try {
       await updateAgentSkills(agent.role, selectedSkillIds);
       notify(`Habilidades de ${displayName} atualizadas (${selectedSkillIds.length} ativas).`, 'success');
-      window.dispatchEvent(new CustomEvent('jarvis:agents-updated'));
+      emitAppEvent("jarvis:agents-updated");
       await onSaved();
       onClose();
     } catch (err: any) {

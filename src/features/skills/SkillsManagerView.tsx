@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { emitAppEvent, subscribeAppEvent } from '../../shared/state/appBus';
 import {
   LayoutGrid,
   Bot,
@@ -278,11 +279,11 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
       setConnectedApps(detail?.connectedAppIds ?? loadConnectedAppIds());
       setCustomApps(detail?.customApps ?? loadCustomStoreApps());
     };
-    window.addEventListener('jarvis:agents-updated', onAgentsUpdated);
+    const unsubAgents = subscribeAppEvent('jarvis:agents-updated', onAgentsUpdated);
     window.addEventListener(STORE_APPS_UPDATED_EVENT, onStoreAppsUpdated);
     return () => {
       cancelled = true;
-      window.removeEventListener('jarvis:agents-updated', onAgentsUpdated);
+      unsubAgents();
       window.removeEventListener(STORE_APPS_UPDATED_EVENT, onStoreAppsUpdated);
     };
   }, []);
@@ -648,11 +649,7 @@ export const SkillsManagerView: React.FC<SkillsManagerViewProps> = ({
               installedAgents={agents}
               onRefreshAgents={loadData}
               onOpenChat={(ag) => {
-                window.dispatchEvent(
-                  new CustomEvent('jarvis:open-agent-chat', {
-                    detail: { agentId: ag.role, agentName: ag.proper_name || ag.name },
-                  })
-                );
+                emitAppEvent("jarvis:open-agent-chat", { agentId: ag.role, agentName: ag.proper_name || ag.name });
               }}
             />
           </div>

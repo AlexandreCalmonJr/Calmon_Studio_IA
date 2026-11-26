@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { emitAppEvent, subscribeAppEvent } from '../../shared/state/appBus';
 import { BookOpen, Bot, Code2, Compass, Cpu, GitBranch, Package, Play, Plus, RefreshCw, Search, SlidersHorizontal, Sparkles, Store, Trash2, X } from 'lucide-react';
 import { AgentInfo, getAgentLabel, getModelLabel } from '../../types';
 import { deleteAgent, fetchAgents, updateAgentConfig } from '../../api';
@@ -65,7 +66,7 @@ export const AgentCenterView: React.FC<AgentCenterViewProps> = ({
       notify(`${label} foi desinstalado da sua equipe.`, 'info');
       setPendingUninstall(null);
       await loadAgents();
-      window.dispatchEvent(new CustomEvent('jarvis:agents-updated'));
+      emitAppEvent("jarvis:agents-updated");
     } catch (err: any) {
       notify(err?.message || 'Não foi possível desinstalar este agente.', 'error');
     } finally {
@@ -115,10 +116,10 @@ export const AgentCenterView: React.FC<AgentCenterViewProps> = ({
     const onAgentsUpdated = () => {
       void loadAgents();
     };
-    window.addEventListener('jarvis:agents-updated', onAgentsUpdated);
+    const unsubAgents = subscribeAppEvent('jarvis:agents-updated', onAgentsUpdated);
     window.addEventListener(PACKS_UPDATED_EVENT, onAgentsUpdated);
     return () => {
-      window.removeEventListener('jarvis:agents-updated', onAgentsUpdated);
+      unsubAgents();
       window.removeEventListener(PACKS_UPDATED_EVENT, onAgentsUpdated);
     };
   }, []);
@@ -265,11 +266,7 @@ export const AgentCenterView: React.FC<AgentCenterViewProps> = ({
           installedAgents={agents}
           onRefreshAgents={loadAgents}
           onOpenChat={(ag) => {
-            window.dispatchEvent(
-              new CustomEvent('jarvis:open-agent-chat', {
-                detail: { agentId: ag.role, agentName: ag.proper_name || ag.name },
-              })
-            );
+            emitAppEvent("jarvis:open-agent-chat", { agentId: ag.role, agentName: ag.proper_name || ag.name });
           }}
         />
       ) : section === 'schema' ? (

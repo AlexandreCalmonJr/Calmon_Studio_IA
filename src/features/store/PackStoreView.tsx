@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { emitAppEvent, subscribeAppEvent } from '../../shared/state/appBus';
 import {
   ArrowUpRight,
   BookOpen,
@@ -240,11 +241,11 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
       setConnectedAppIds(detail?.connectedAppIds ?? loadConnectedAppIds());
       setCustomApps(detail?.customApps ?? loadCustomStoreApps());
     };
-    window.addEventListener('jarvis:agents-updated', onAgentsUpdated);
+    const unsubAgents = subscribeAppEvent('jarvis:agents-updated', onAgentsUpdated);
     window.addEventListener(PACKS_UPDATED_EVENT, onPacksUpdated);
     window.addEventListener(STORE_APPS_UPDATED_EVENT, onStoreAppsUpdated);
     return () => {
-      window.removeEventListener('jarvis:agents-updated', onAgentsUpdated);
+      unsubAgents();
       window.removeEventListener(PACKS_UPDATED_EVENT, onPacksUpdated);
       window.removeEventListener(STORE_APPS_UPDATED_EVENT, onStoreAppsUpdated);
     };
@@ -260,7 +261,7 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
       setFeedback(
         `Pacote "${pack.name}" instalado: ${pack.tabs.length} módulos liberados na barra lateral e ${pack.agents.length} agente(s) provisionado(s) com núcleo próprio.`
       );
-      window.dispatchEvent(new CustomEvent('jarvis:agents-updated'));
+      emitAppEvent("jarvis:agents-updated");
       refreshCatalogSideEffects();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível instalar o pacote.');
@@ -279,7 +280,7 @@ export const PackStoreView: React.FC<PackStoreViewProps> = ({
       setFeedback(
         `Pacote "${pack.name}" removido da barra lateral. Você pode reinstalá-lo a qualquer momento em 1 clique.`
       );
-      window.dispatchEvent(new CustomEvent('jarvis:agents-updated'));
+      emitAppEvent("jarvis:agents-updated");
       refreshCatalogSideEffects();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível remover o pacote.');

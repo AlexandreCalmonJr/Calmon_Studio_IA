@@ -8,6 +8,7 @@ import {
 } from '../api';
 import { ChatMessage } from '../types';
 import { getAccountStorageKey } from '../services/accountScope';
+import { subscribeAppEvent } from '../shared/state/appBus';
 import { notify } from '../shared/common/Toast';
 import { CanvasArtifact } from '../features/chat/ArtifactCanvas';
 import type { StreamRunEventPayload } from '../services/api/chat';
@@ -82,12 +83,9 @@ export function useChatStream(
   const deletedSessionsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    const onDeleted = (ev: Event) => {
-      const sid = (ev as CustomEvent<{ sessionId?: string }>).detail?.sessionId;
-      if (sid) deletedSessionsRef.current.add(sid);
-    };
-    window.addEventListener('jarvis:session-deleted', onDeleted);
-    return () => window.removeEventListener('jarvis:session-deleted', onDeleted);
+    return subscribeAppEvent('jarvis:session-deleted', (detail) => {
+      if (detail?.sessionId) deletedSessionsRef.current.add(detail.sessionId);
+    });
   }, []);
 
   // Persistência automática otimizada (apenas quando inativo para não bloquear a thread em streaming)

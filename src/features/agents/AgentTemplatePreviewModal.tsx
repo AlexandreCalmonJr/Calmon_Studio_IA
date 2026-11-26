@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { emitAppEvent } from '../../shared/state/appBus';
 import {
   Check,
   CheckCircle2,
@@ -73,7 +74,7 @@ export const AgentTemplatePreviewModal: React.FC<AgentTemplatePreviewModalProps>
         `${template.proper_name} instalado com ${selectedSkillIds.length} habilidades prontas!`,
         'success'
       );
-      window.dispatchEvent(new CustomEvent('jarvis:agents-updated'));
+      emitAppEvent("jarvis:agents-updated");
       await onChanged();
       onClose();
       if (onOpenChat && created) {
@@ -95,7 +96,7 @@ export const AgentTemplatePreviewModal: React.FC<AgentTemplatePreviewModalProps>
         `${installedAgent.proper_name || template.proper_name} foi desinstalado da sua equipe.`,
         'info'
       );
-      window.dispatchEvent(new CustomEvent('jarvis:agents-updated'));
+      emitAppEvent("jarvis:agents-updated");
       await onChanged();
       onClose();
     } catch (err: any) {

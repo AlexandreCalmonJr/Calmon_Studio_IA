@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { emitAppEvent } from '../../shared/state/appBus';
 import {
   GitBranch,
   Search,
@@ -170,7 +171,7 @@ export const GitHubImporterView: React.FC<GitHubImporterViewProps> = ({ onNaviga
       notify(res.message, 'success');
 
       if (mode === 'agent' || mode === 'skill') {
-        window.dispatchEvent(new CustomEvent('jarvis:agents-updated'));
+        emitAppEvent("jarvis:agents-updated");
       }
     } catch (err: any) {
       const msg = err?.message || 'Não foi possível concluir a incorporação.';

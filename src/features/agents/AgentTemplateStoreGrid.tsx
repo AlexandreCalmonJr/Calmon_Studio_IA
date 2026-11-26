@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { emitAppEvent } from '../../shared/state/appBus';
 import {
   Eye,
   MessageSquare,
@@ -108,7 +109,7 @@ export const AgentTemplateStoreGrid: React.FC<AgentTemplateStoreGridProps> = ({
       notify(`${pendingUninstall.displayName} desinstalado da sua equipe.`, 'info');
       setPendingUninstall(null);
       await onRefreshAgents();
-      window.dispatchEvent(new CustomEvent('jarvis:agents-updated'));
+      emitAppEvent("jarvis:agents-updated");
     } catch (err: any) {
       notify(err?.message || 'Não foi possível desinstalar o agente.', 'error');
     } finally {

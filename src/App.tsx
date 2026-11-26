@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef, useMemo, Suspense, lazy } from 'rea
 import { AuthGate } from './features/auth/AuthGate';
 import { PrimaryRail } from './shared/navigation/PrimaryRail';
 import { AgentDock } from './shared/navigation/AgentDock';
-import { DynamicIsland } from './shared/navigation/DynamicIsland';
-import { AiOrbButton, VOICE_HUD_STATE_EVENT, VOICE_HUD_TOGGLE_EVENT } from './shared/navigation/AiOrbButton';
+import { AppTopBar } from './shared/layout/AppTopBar';
+import { VOICE_HUD_STATE_EVENT, VOICE_HUD_TOGGLE_EVENT } from './shared/navigation/AiOrbButton';
 import { LaunchpadOverlay } from './shared/navigation/LaunchpadOverlay';
 import { LaunchpadGlyph } from './shared/navigation/NavIcon';
 import { SystemHealth, ApprovalRequestItem, AgentInfo } from './types';
@@ -11,19 +11,13 @@ import { fetchHealth, fetchApprovals, fetchAgents } from './api';
 import { fetchResources, SystemResourceUsage } from './services/api/system';
 import {
   ShieldAlert,
-  Search,
   PanelLeft,
   PanelBottom,
-  CircleHelp,
-  Plus,
   Mic,
   LayoutDashboard,
   MessageSquare,
   Smartphone,
   ShieldCheck,
-  Sun,
-  Moon,
-  Monitor,
 } from 'lucide-react';
 import {
   getNextQuickTheme,
@@ -33,6 +27,7 @@ import {
   type ThemeMode,
 } from './services/themeEngine';
 import { useWakeWordListener } from './hooks/useWakeWordListener';
+import { subscribeAppEvent } from './shared/state/appBus';
 import { SetupWizardModal } from './shared/common/SetupWizardModal';
 import { InitialPasswordChangeModal } from './shared/common/InitialPasswordChangeModal';
 import { GuidedTour } from './shared/common/GuidedTour';
@@ -523,12 +518,12 @@ const DashboardApp: React.FC = () => {
         .catch(() => {});
     };
     syncAgents();
-    window.addEventListener('jarvis:agents-updated', syncAgents);
+    const unsubAgents = subscribeAppEvent('jarvis:agents-updated', syncAgents);
     window.addEventListener('jarvis:dock-updated', syncAgents);
     window.addEventListener(PACKS_UPDATED_EVENT, syncAgents);
     return () => {
       active = false;
-      window.removeEventListener('jarvis:agents-updated', syncAgents);
+      unsubAgents();
       window.removeEventListener('jarvis:dock-updated', syncAgents);
       window.removeEventListener(PACKS_UPDATED_EVENT, syncAgents);
     };
@@ -715,27 +710,25 @@ const DashboardApp: React.FC = () => {
       navigate('brain_server');
     };
 
-    const handleOpenAgentChat = (e: Event) => {
-      const detail = (e as CustomEvent<{ agentId?: string }>).detail;
+    const unsubAndroidPairing = subscribeAppEvent('jarvis:open-android-pairing', handleOpenAndroidPairing);
+    const unsubAgentChat = subscribeAppEvent('jarvis:open-agent-chat', (detail) => {
       if (detail?.agentId) {
         setTargetChatSessionId(`agent_${detail.agentId}`);
         navigate('chat');
       }
-    };
+    });
 
     window.addEventListener('popstate', handlePopState);
     window.addEventListener('keydown', handleGlobalKeyDown);
-    window.addEventListener('jarvis:open-android-pairing', handleOpenAndroidPairing);
     window.addEventListener('jarvis:open-brain-manager', handleOpenBrainManager);
-    window.addEventListener('jarvis:open-agent-chat', handleOpenAgentChat);
     window.addEventListener('jarvis:toggle-launchpad', handleToggleLaunchpadEvent);
     window.addEventListener('jarvis:toggle-sidebar-hidden', handleToggleSidebarHiddenEvent);
     return () => {
       window.removeEventListener('popstate', handlePopState);
       window.removeEventListener('keydown', handleGlobalKeyDown);
-      window.removeEventListener('jarvis:open-android-pairing', handleOpenAndroidPairing);
+      unsubAndroidPairing();
       window.removeEventListener('jarvis:open-brain-manager', handleOpenBrainManager);
-      window.removeEventListener('jarvis:open-agent-chat', handleOpenAgentChat);
+      unsubAgentChat();
       window.removeEventListener('jarvis:toggle-launchpad', handleToggleLaunchpadEvent);
       window.removeEventListener('jarvis:toggle-sidebar-hidden', handleToggleSidebarHiddenEvent);
     };
@@ -928,191 +921,41 @@ const DashboardApp: React.FC = () => {
       >
         {/* Top Bar Global (Contrato SaaS limpo, sem sobreposição) */}
         {!NO_HEADER_TABS.has(activeTab) && (
-          <header className="jarvis-topbar">
-            {/* Esquerda: Toggle Sidebar + Launchpad + Breadcrumb Contextual */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-              <button
-                type="button"
-                onClick={handleToggleSidebar}
-                className={`btn btn-ghost btn-icon ${isSidebarHidden ? 'is-active' : ''}`}
-                title={isSidebarHidden ? 'Mostrar barra lateral (Ctrl+B)' : 'Alternar barra lateral (Ctrl+B)'}
-                aria-label={isSidebarHidden ? 'Mostrar barra lateral' : 'Alternar barra lateral'}
-              >
-                <PanelLeft size={16} />
-              </button>
-
-              {(!isSimpleMode || isSidebarHidden) && (
-                <button
-                  type="button"
-                  onClick={() => setLaunchpadOpen((prev) => !prev)}
-                  className={`btn btn-ghost btn-icon ${launchpadOpen ? 'is-active' : ''}`}
-                  title="Abrir Launchpad de Módulos (Ctrl+Shift+L)"
-                  aria-label="Abrir Launchpad de Módulos"
-                  aria-pressed={launchpadOpen}
-                >
-                  <LaunchpadGlyph size={16} />
-                </button>
-              )}
-
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  fontSize: '0.84rem',
-                  minWidth: 0,
-                }}
-              >
-                <span className="hide-mobile jarvis-topbar-hide-narrow" style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                  {activeMeta.section}
-                </span>
-                <span className="hide-mobile jarvis-topbar-hide-narrow" style={{ color: 'var(--border-hover)' }}>
-                  /
-                </span>
-                <span
-                  style={{
-                    color: 'var(--text-primary)',
-                    fontWeight: 600,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {activeMeta.title}
-                </span>
-              </div>
-            </div>
-
-            {/* Centro: Orb de IA animado com a letra C */}
-            <AiOrbButton
-              assistantName={assistantName}
-              active={showVoiceHud || wakeWord.enabled}
-              centered
-              onClick={() => {
-                setPendingVoiceCommand(null);
-                setShowVoiceHud((prev) => !prev);
-              }}
-            />
-
-            {/* Direita: Telemetria Inline (DynamicIsland), Comando Ctrl+K, Ação Principal, Perfil */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-              {showDynamicIsland && !isSimpleMode && (
-                <div className="hide-mobile jarvis-topbar-hide-tablet">
-                  <DynamicIsland
-                    variant="inline"
-                    activeAgentName="Calmon Studio"
-                    systemStatus={{
-                      cpu: systemResources?.cpu_percent ?? null,
-                      memory: systemResources?.ram_percent ?? null,
-                    }}
-                    onOpenVoice={() => setShowVoiceHud(true)}
-                  />
-                </div>
-              )}
-
-              <button
-                type="button"
-                onClick={() => setShowCommandPalette(true)}
-                className="btn btn-secondary btn-sm"
-                title="Paleta de Comandos (Ctrl+K)"
-                aria-label="Abrir busca rápida e comandos (Ctrl+K)"
-              >
-                <Search size={13} />
-                <span className="hide-mobile jarvis-topbar-hide-narrow">Buscar...</span>
-                <kbd
-                  className="hide-mobile jarvis-topbar-hide-tablet"
-                  style={{
-                    marginLeft: '4px',
-                    backgroundColor: 'var(--bg-secondary)',
-                    border: '1px solid var(--border-color)',
-                    padding: '1px 5px',
-                    borderRadius: '4px',
-                    fontSize: '0.68rem',
-                    color: 'var(--text-muted)',
-                  }}
-                >
-                  Ctrl K
-                </kbd>
-              </button>
-
-              {pendingApprovalsCount > 0 && !isSimpleMode && (
-                <button
-                  type="button"
-                  onClick={() => navigate('approvals')}
-                  className="btn btn-sm badge-warning tabular-nums"
-                  title="Aprovações pendentes"
-                >
-                  <ShieldAlert size={13} />
-                  <span>{pendingApprovalsCount}</span>
-                </button>
-              )}
-
-              <button
-                type="button"
-                className="btn btn-primary btn-sm hide-mobile"
-                title="Novo chat"
-                aria-label="Novo chat"
-                onClick={() => {
-                  setTargetChatSessionId('new_' + Date.now());
-                  navigate('chat');
-                }}
-              >
-                <Plus size={14} />
-                <span className="jarvis-topbar-hide-narrow">Novo chat</span>
-              </button>
-
-              {!isSimpleMode && (
-                <button
-                  type="button"
-                  className={`btn btn-ghost btn-icon hide-mobile ${showAgentDock ? 'is-active' : ''}`}
-                  onClick={handleToggleAgentDock}
-                  title={showAgentDock ? 'Ocultar Dock macOS' : 'Mostrar Dock macOS'}
-                  aria-label={showAgentDock ? 'Ocultar Dock macOS' : 'Mostrar Dock macOS'}
-                  aria-pressed={showAgentDock}
-                >
-                  <PanelBottom size={16} />
-                </button>
-              )}
-
-              <button
-                type="button"
-                className="btn btn-ghost btn-icon"
-                onClick={handleCycleTheme}
-                data-theme-quick-toggle="true"
-                title={themeQuickLabel}
-                aria-label={themeQuickLabel}
-              >
-                {themeMode === 'friendly_light' ? (
-                  <Sun size={16} />
-                ) : themeMode === 'auto' ? (
-                  <Monitor size={16} />
-                ) : (
-                  <Moon size={16} />
-                )}
-              </button>
-
-              <button
-                type="button"
-                className="btn btn-ghost btn-icon"
-                onClick={() => navigate('learning')}
-                title="Ajuda contextual e tutoriais"
-                aria-label="Abrir ajuda contextual"
-              >
-                <CircleHelp size={16} />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowProfileModal(true)}
-                aria-label="Perfil do usuário"
-                className="btn btn-secondary btn-icon"
-                title="Perfil e Configurações"
-              >
-                {userProfile.avatarIcon ||
-                  (userProfile.displayName ? userProfile.displayName.charAt(0).toUpperCase() : 'A')}
-              </button>
-            </div>
-          </header>
+          <AppTopBar
+            isSidebarHidden={isSidebarHidden}
+            onToggleSidebar={handleToggleSidebar}
+            isSimpleMode={isSimpleMode}
+            launchpadOpen={launchpadOpen}
+            onToggleLaunchpad={() => setLaunchpadOpen((prev) => !prev)}
+            activeMeta={activeMeta}
+            assistantName={assistantName}
+            showVoiceHud={showVoiceHud}
+            wakeWordEnabled={wakeWord.enabled}
+            onToggleVoiceHud={() => {
+              setPendingVoiceCommand(null);
+              setShowVoiceHud((prev) => !prev);
+            }}
+            showDynamicIsland={showDynamicIsland}
+            systemResources={systemResources}
+            onOpenVoiceHud={() => setShowVoiceHud(true)}
+            onOpenCommandPalette={() => setShowCommandPalette(true)}
+            pendingApprovalsCount={pendingApprovalsCount}
+            onNavigate={navigate}
+            onNewChat={() => {
+              setTargetChatSessionId('new_' + Date.now());
+              navigate('chat');
+            }}
+            showAgentDock={showAgentDock}
+            onToggleAgentDock={handleToggleAgentDock}
+            themeMode={themeMode}
+            themeQuickLabel={themeQuickLabel}
+            onCycleTheme={handleCycleTheme}
+            avatarText={
+              userProfile.avatarIcon ||
+              (userProfile.displayName ? userProfile.displayName.charAt(0).toUpperCase() : 'A')
+            }
+            onOpenProfileModal={() => setShowProfileModal(true)}
+          />
         )}
 
         {/* Viewport Principal das Telas */}

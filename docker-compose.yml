@@ -110,6 +110,11 @@ services:
     volumes:
       - jarvis_brain_storage:/app/storage
       - jarvis_chroma_data:/app/chroma_data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
 
   jarvis-go-gateway:
     build:

@@ -18,7 +18,14 @@ import {
 test('Acessibilidade & Contraste WCAG AAA em src/index.css', () => {
   const cssPath = path.resolve(process.cwd(), 'src/index.css');
   assert.ok(fs.existsSync(cssPath), 'src/index.css must exist');
-  const css = fs.readFileSync(cssPath, 'utf8');
+  const rootCss = fs.readFileSync(cssPath, 'utf8');
+  const cssDir = path.dirname(cssPath);
+  // Resolve @import './styles/*.css' para validar tokens e classes após modularização (Fase 5)
+  const importedParts = Array.from(rootCss.matchAll(/@import\s+['"](\.[^'"]+)['"]\s*;/g)).map((m) => {
+    const target = path.resolve(cssDir, m[1]);
+    return fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : '';
+  });
+  const css = [rootCss, ...importedParts].join('\n');
 
   // Verify --btn-primary-text token
   assert.match(

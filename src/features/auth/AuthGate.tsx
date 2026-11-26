@@ -1,5 +1,6 @@
 import React, { FormEvent, useEffect, useState } from 'react';
 import QRCode from 'qrcode';
+import { subscribeAppEvent } from '../../shared/state/appBus';
 import {
   Lock,
   X,
@@ -183,12 +184,12 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
     const handleLogout = () => {
       void logout();
     };
-    window.addEventListener('jarvis:open-android-pairing', handleOpenAndroid);
-    window.addEventListener('jarvis:open-access-management', handleOpenAccess);
+    const unsubAndroid = subscribeAppEvent('jarvis:open-android-pairing', handleOpenAndroid);
+    const unsubAccess = subscribeAppEvent('jarvis:open-access-management', handleOpenAccess);
     window.addEventListener('jarvis:logout', handleLogout);
     return () => {
-      window.removeEventListener('jarvis:open-android-pairing', handleOpenAndroid);
-      window.removeEventListener('jarvis:open-access-management', handleOpenAccess);
+      unsubAndroid();
+      unsubAccess();
       window.removeEventListener('jarvis:logout', handleLogout);
     };
   }, []);

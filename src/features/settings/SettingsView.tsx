@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import { emitAppEvent } from '../../shared/state/appBus';
 import QRCode from 'qrcode';
 import {
   Settings,
@@ -1681,7 +1682,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </div>
                   <button
                     type="button"
-                    onClick={() => window.dispatchEvent(new CustomEvent('jarvis:open-android-pairing'))}
+                    onClick={() => emitAppEvent("jarvis:open-android-pairing")}
                     className="btn btn-secondary btn-sm"
                   >
                     Abrir Modal de Dispositivos
@@ -2728,7 +2729,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <div className="jarvis-setting-row__control">
                       <button
                         type="button"
-                        onClick={() => window.dispatchEvent(new CustomEvent('jarvis:open-access-management'))}
+                        onClick={() => emitAppEvent("jarvis:open-access-management")}
                         className="btn btn-secondary btn-sm"
                       >
                         Gerir Acessos

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { emitAppEvent } from '../../shared/state/appBus';
 import { Modal } from '../../shared/common/Modal';
 import { Users, Search, Check, RefreshCw, CheckSquare, Square, X } from 'lucide-react';
 import { SkillInfo, AgentInfo } from '../../types';
@@ -83,7 +84,7 @@ export const SkillAgentModal: React.FC<SkillAgentModalProps> = ({
     try {
       await assignSkillAgents(skill.id, selectedAgents);
       notify(`Agentes vinculados com sucesso à habilidade "${skill.name}"!`, 'success');
-      window.dispatchEvent(new CustomEvent('jarvis:agents-updated'));
+      emitAppEvent("jarvis:agents-updated");
       onSaved();
       onClose();
     } catch (e: any) {

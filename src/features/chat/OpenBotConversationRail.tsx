@@ -13,6 +13,7 @@ import { resolveQuickChatAgents } from '../../services/agentSync';
 import { canDeleteConversationCard, filterOutDeletedSession } from '../../services/sessionHelpers';
 import { ConfirmDialog } from '../../shared/common/ConfirmDialog';
 import { notify } from '../../shared/common/Toast';
+import { emitAppEvent, subscribeAppEvent } from '../../shared/state/appBus';
 
 export type RailAgentsMode = 'auto' | 'always' | 'never';
 
@@ -55,11 +56,9 @@ export const OpenBotConversationRail: React.FC<OpenBotConversationRailProps> = (
 
   useEffect(() => {
     void loadMyAgents();
-    const onUpdated = () => {
+    return subscribeAppEvent('jarvis:agents-updated', () => {
       void loadMyAgents();
-    };
-    window.addEventListener('jarvis:agents-updated', onUpdated);
-    return () => window.removeEventListener('jarvis:agents-updated', onUpdated);
+    });
   }, [loadMyAgents]);
 
   // 3 Modos de exibição de sugestões / especialistas:
@@ -149,7 +148,7 @@ export const OpenBotConversationRail: React.FC<OpenBotConversationRailProps> = (
     setSessionToDelete(null);
 
     try {
-      window.dispatchEvent(new CustomEvent('jarvis:session-deleted', { detail: { sessionId: sid } }));
+      emitAppEvent('jarvis:session-deleted', { sessionId: sid });
       if (activeSessionId === sid) {
         onNewChat();
       }

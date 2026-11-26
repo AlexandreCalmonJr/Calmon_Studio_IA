@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { emitAppEvent, subscribeAppEvent } from '../state/appBus';
 import {
   LayoutDashboard,
   MessageSquare,
@@ -110,14 +111,11 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
   const serverMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const onBrainSwitched = (e: Event) => {
-      const detail = (e as CustomEvent<{ name?: string }>).detail;
+    return subscribeAppEvent('jarvis:brain-switched', (detail) => {
       if (detail?.name) {
         setActiveBrainLabel(detail.name);
       }
-    };
-    window.addEventListener('jarvis:brain-switched', onBrainSwitched);
-    return () => window.removeEventListener('jarvis:brain-switched', onBrainSwitched);
+    });
   }, []);
 
   const DEFAULT_PINNED: Record<string, boolean> = {
@@ -878,7 +876,7 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    window.dispatchEvent(new CustomEvent('jarvis:open-android-pairing'));
+                    emitAppEvent('jarvis:open-android-pairing');
                     setServerMenuOpen(false);
                   }}
                   className="btn btn-ghost btn-sm btn-block btn-start"
@@ -890,7 +888,7 @@ export const PrimaryRail: React.FC<PrimaryRailProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    window.dispatchEvent(new CustomEvent('jarvis:open-access-management'));
+                    emitAppEvent('jarvis:open-access-management');
                     setServerMenuOpen(false);
                   }}
                   className="btn btn-ghost btn-sm btn-block btn-start"

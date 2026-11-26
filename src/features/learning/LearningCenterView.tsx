@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { subscribeAppEvent } from '../../shared/state/appBus';
 import {
   Sparkles,
   BookOpen,
@@ -234,10 +235,10 @@ export const LearningCenterView: React.FC<Props> = ({
         .catch(() => {});
     };
     loadAgents();
-    window.addEventListener('jarvis:agents-updated', loadAgents);
+    const unsubAgents = subscribeAppEvent("jarvis:agents-updated", loadAgents);
     return () => {
       active = false;
-      window.removeEventListener('jarvis:agents-updated', loadAgents);
+      unsubAgents();
     };
   }, []);
 

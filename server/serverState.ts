@@ -1,10 +1,6 @@
 import crypto from 'node:crypto';
-import { execFileSync } from 'node:child_process';
-import fs from 'node:fs';
 import os from 'node:os';
-import path from 'node:path';
-import type { Request, Response, NextFunction } from 'express';
-import { WebSocket } from 'ws';
+import type { Request, Response } from 'express';
 import {
   DEFAULT_HARDWARE_PROFILES,
   NotebookHardwareProfile,
@@ -99,382 +95,64 @@ import {
 } from '../src/services/androidAppEngine.ts';
 import type { LocalSqliteBrainStore } from './brain/sqliteBrainStore.ts';
 
-// ==================== INTERFACES & TYPES ====================
+// Re-exporta tipos e módulos extraídos na Fase 3 (modularização)
+export * from './state/types.ts';
+export * from './state/authSessionManager.ts';
+export { detectRealMachineHardwareProfile } from './state/hardwareDetector.ts';
+export { realtimeClients, broadcastRealtimeEvent, createServerLogEntry } from './state/telemetryLogger.ts';
 
-export interface UserAccount {
-  username: string;
-  display_name: string;
-  role: 'admin' | 'developer' | 'auditor';
-  is_active: boolean;
-  must_change_password: boolean;
-  salt: string;
-  password_hash: string;
-  created_at: string;
-}
-
-export interface SessionRecord {
-  session_id: string;
-  username: string;
-  role: 'admin' | 'developer' | 'auditor';
-  kind: 'human' | 'service';
-  created_at: number;
-}
-
-export interface RealTelemetryRecord {
-  id: string;
-  task_id: string;
-  agent_role: string;
-  model_name: string;
-  provider: string;
-  status: string;
-  duration_ms: number;
-  prompt_tokens: number;
-  completion_tokens: number;
-  cost_usd: number;
-  feedback_rating?: number;
-  created_at: string;
-}
-
-export interface AgentServerRecord {
-  role: string;
-  name: string;
-  proper_name: string;
-  handle: string;
-  category: string;
-  mission: string;
-  preferred_model: string;
-  routing_policy: 'auto_hybrid' | 'local_only' | 'online_only';
-  autonomy_level: 'read_only' | 'ask_approval' | 'autonomous';
-  is_read_only: boolean;
-  strict_focus: boolean;
-  strict_topic: string;
-  delegation_targets: string[];
-  allowed_tools: string[];
-  system_prompt: string;
-  mascot: { id: string; color: string; accessory: string; mood: string };
-  is_custom?: boolean;
-  template_id?: string;
-  installed_skills?: string[];
-  version: number;
-  updated_at: string;
-}
-
-export interface StoredChatSession {
-  session_id: string;
-  title: string;
-  first_prompt: string;
-  first_intent: string;
-  last_activity: string;
-  messages: Array<{
-    id: number;
-    session_id: string;
-    project_id?: string | null;
-    role: 'user' | 'assistant';
-    content: string;
-    created_at: string;
-  }>;
-  tasks: Array<Record<string, unknown>>;
-}
-
-export interface IdeWorkspaceFileServer {
-  path: string;
-  language: string;
-  content: string;
-  protected?: boolean;
-  updated_at: string;
-}
-
-export interface IdeCheckpointServer {
-  id: string;
-  file_path: string;
-  label: string;
-  agent_name: string;
-  previous_content: string;
-  new_content: string;
-  created_at: string;
-}
-
-export interface SentinelIncidentServer {
-  id: string;
-  severity: ThreatSeverity;
-  category: ThreatScanResult['category'];
-  title: string;
-  description: string;
-  source: string;
-  indicators: string[];
-  status: 'open' | 'mitigated' | 'quarantined';
-  playbook_applied?: string;
-  created_at: string;
-}
-
-export interface PushNotificationServerItem {
-  id: string;
-  channel: 'task_completed' | 'assistant_message' | 'sentinel_alert' | 'approval_required';
-  title: string;
-  body: string;
-  delivered_via: string[];
-  created_at: string;
-}
-
-export interface CompanionDeviceServer {
-  id: string;
-  name: string;
-  owner: string;
-  platform: string;
-  status: 'online' | 'standby' | 'offline';
-  cpu_percent: number;
-  ram_percent: number;
-  ram_total_gb: number;
-  gpu_name: string;
-  vram_gb: number;
-  ollama_online: boolean;
-  ollama_models: string[];
-  vault_locked: boolean;
-  last_heartbeat: string;
-}
-
-export interface RemoteCommandServer {
-  id: string;
-  device_id: string;
-  device_name: string;
-  command: string;
-  source: 'mobile_pwa' | 'voice_hud' | 'offline_sync';
-  status: 'pending_approval' | 'executed' | 'rejected';
-  requires_approval: boolean;
-  output?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface MockEndpointRecord {
-  id: string;
-  name: string;
-  method: string;
-  path: string;
-  status_code: number;
-  latency_ms: number;
-  response_body: unknown;
-  enabled: boolean;
-  created_at: string;
-}
+import type {
+  UserAccount,
+  SessionRecord,
+  RealTelemetryRecord,
+  AgentServerRecord,
+  StoredChatSession,
+  IdeWorkspaceFileServer,
+  IdeCheckpointServer,
+  SentinelIncidentServer,
+  PushNotificationServerItem,
+  CompanionDeviceServer,
+  RemoteCommandServer,
+  MockEndpointRecord,
+} from './state/types.ts';
+import {
+  SESSION_COOKIE,
+  VALID_ADMIN_TOKENS,
+  VALID_BOOTSTRAP_TOKENS,
+  hashPassword,
+  verifyPassword,
+  makeAccount,
+  permissionsForRole,
+  users,
+  sessions,
+  userProfiles,
+  learningProgress,
+  bindActiveAuthStore,
+  getSessionFromReq,
+  setSessionCookie,
+  clearSessionCookie,
+  createSessionForUser,
+  requireAuth,
+  requirePackStudioRole,
+} from './state/authSessionManager.ts';
+import { detectRealMachineHardwareProfile } from './state/hardwareDetector.ts';
+import {
+  realtimeClients,
+  broadcastRealtimeEvent,
+  createServerLogEntry,
+} from './state/telemetryLogger.ts';
 
 // ==================== CONSTANTS & BASICS ====================
 
-export const SESSION_COOKIE = 'jarvis_session';
 export const PORT = Number(process.env.PORT || 3000);
 export const BOOT_TIME = Date.now();
 export const VAULT_PIN = '2026';
 export const protectedPaths = ['.env', '.env.local', 'secrets.json', '~/.ssh/id_rsa', 'credentials.json'];
-
-export const VALID_ADMIN_TOKENS = new Set([
-  process.env.JARVIS_ADMIN_TOKEN || 'jarvis-admin-2026',
-]);
-export const VALID_BOOTSTRAP_TOKENS = new Set([
-  process.env.JARVIS_BOOTSTRAP_TOKEN || 'jarvis-bootstrap-2026',
-]);
-
 export const nowIso = () => new Date().toISOString();
-
-export function hashPassword(password: string, salt: string): string {
-  return crypto.scryptSync(password, salt, 64).toString('hex');
-}
-
-export function verifyPassword(password: string, salt: string, storedHash: string): boolean {
-  const candidate = hashPassword(password, salt);
-  const a = Buffer.from(candidate, 'hex');
-  const b = Buffer.from(storedHash, 'hex');
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
-
-export function makeAccount(
-  username: string,
-  display_name: string,
-  password: string,
-  role: 'admin' | 'developer' | 'auditor',
-  must_change_password = false,
-): UserAccount {
-  const salt = crypto.randomBytes(16).toString('hex');
-  return {
-    username,
-    display_name,
-    role,
-    is_active: true,
-    must_change_password,
-    salt,
-    password_hash: hashPassword(password, salt),
-    created_at: new Date().toISOString(),
-  };
-}
-
-export function permissionsForRole(role: 'admin' | 'developer' | 'auditor'): string[] {
-  if (role === 'admin') return ['*'];
-  if (role === 'developer') {
-    return [
-      'chat:read',
-      'chat:write',
-      'system:read',
-      'approvals:read',
-      'approvals:write',
-      'studios:read',
-      'studios:write',
-      'agents:read',
-      'agents:write',
-      'workspace:read',
-      'workspace:write',
-      'models:read',
-      'models:write',
-      'coding:read',
-      'coding:write',
-      'knowledge:read',
-      'knowledge:write',
-      'tasks:read',
-      'tasks:write',
-      'skills:read',
-      'skills:write',
-      'security:read',
-      'profile:read',
-      'profile:write',
-    ];
-  }
-  return [
-    'chat:read',
-    'system:read',
-    'approvals:read',
-    'agents:read',
-    'workspace:read',
-    'models:read',
-    'knowledge:read',
-    'tasks:read',
-    'skills:read',
-    'security:read',
-    'profile:read',
-  ];
-}
-
-// ==================== REALTIME WEBSOCKET ====================
-
-export const realtimeClients = new Set<WebSocket>();
-
-export function broadcastRealtimeEvent(type: string, payload: unknown) {
-  const frame = JSON.stringify({ type, payload, timestamp: new Date().toISOString() });
-  realtimeClients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      try {
-        client.send(frame);
-      } catch {
-        // ignore dropped socket
-      }
-    }
-  });
-}
-
-// ==================== ACCOUNTS & SESSIONS ====================
-
-export const users = new Map<string, UserAccount>([
-  ['admin', makeAccount('admin', 'Administrador', 'Jarvis@2026!Admin', 'admin', false)],
-  ['dev', makeAccount('dev', 'Desenvolvedor', 'Jarvis@2026!Dev', 'developer', false)],
-]);
-
-export const sessions = new Map<string, SessionRecord>();
-
-export const userProfiles = new Map<string, Record<string, string>>([
-  [
-    'admin',
-    {
-      displayName: 'Administrador',
-      avatarIcon: 'J',
-      developerRole: 'Arquiteto de Sistemas & IA',
-      seniorityLevel: 'architect',
-      responseStyle: 'detailed',
-      customInstructions: 'Priorize respostas técnicas claras, objetivas e em português.',
-      assistantName: 'JARVIS',
-      assistantGreeting: '',
-      experienceMode: 'engineering',
-    },
-  ],
-  [
-    'dev',
-    {
-      displayName: 'Desenvolvedor',
-      avatarIcon: 'D',
-      developerRole: 'Engenheiro de Software',
-      seniorityLevel: 'senior',
-      responseStyle: 'detailed',
-      customInstructions: '',
-      assistantName: 'JARVIS',
-      assistantGreeting: '',
-      experienceMode: 'engineering',
-    },
-  ],
-]);
-
-export const learningProgress = new Map<string, { completed_modules: string[]; updated_at: string }>();
 
 // ==================== STATE CONTAINER ====================
 
 const seedUpdatedAt = nowIso();
-
-function detectRealMachineHardwareProfile(): NotebookHardwareProfile {
-  const cpus = os.cpus();
-  const cpuModel = (cpus[0]?.model || os.arch()).replace(/\s+/g, ' ').trim();
-  const cpuLabel = cpus.length > 0 ? `${cpuModel} (${cpus.length} threads)` : cpuModel;
-  const ramGb = Math.max(1, Math.round(os.totalmem() / 1024 ** 3));
-
-  let gpuName = `GPU integrada (${os.platform()} ${os.arch()})`;
-  let vramGb = 0;
-
-  try {
-    const nvidiaOut = execFileSync(
-      'nvidia-smi',
-      ['--query-gpu=name,memory.total', '--format=csv,noheader,nounits'],
-      { encoding: 'utf8', timeout: 1200, stdio: ['ignore', 'pipe', 'ignore'] }
-    ).trim();
-    if (nvidiaOut) {
-      const [namePart, memPart] = nvidiaOut.split('\n')[0].split(',').map((s) => s.trim());
-      if (namePart) gpuName = namePart;
-      const mb = Number(memPart);
-      if (Number.isFinite(mb) && mb > 0) vramGb = Math.max(1, Math.round(mb / 1024));
-    }
-  } catch {
-    if (os.platform() === 'linux') {
-      try {
-        const lspciOut = execFileSync('lspci', [], {
-          encoding: 'utf8',
-          timeout: 1200,
-          stdio: ['ignore', 'pipe', 'ignore'],
-        });
-        const gpuLine = lspciOut
-          .split('\n')
-          .find((l) => /vga compatible controller|3d controller|display controller/i.test(l));
-        if (gpuLine) {
-          const parsed = gpuLine.replace(/^[^:]+:\s*(?:VGA compatible controller|3D controller|Display controller):\s*/i, '').replace(/\s*\(rev [^)]+\)\s*$/i, '').trim();
-          if (parsed) gpuName = parsed;
-        }
-      } catch {
-        // mantém fallback seguro
-      }
-    }
-  }
-
-  let owner = os.hostname() || 'Local';
-  try {
-    owner = os.userInfo().username || owner;
-  } catch {
-    // ignore
-  }
-
-  return {
-    id: 'local_machine_real',
-    label: `Este Computador (${ramGb} GB RAM)`,
-    owner,
-    cpu: cpuLabel,
-    ram_gb: ramGb,
-    gpu_name: gpuName,
-    vram_gb: vramGb,
-    ollama_url: process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434',
-    is_active: true,
-  };
-}
 
 const DETECTED_MACHINE_PROFILE = detectRealMachineHardwareProfile();
 
@@ -1748,13 +1426,7 @@ export function appendServerLog(
   source: string,
   message: string
 ): void {
-  const entry = {
-    id: `log_${Date.now().toString(36)}_${crypto.randomBytes(2).toString('hex')}`,
-    timestamp: nowIso(),
-    level,
-    source,
-    message,
-  };
+  const entry = createServerLogEntry(level, source, message);
   serverState.serverLogs = [entry, ...serverState.serverLogs].slice(0, 250);
   broadcastRealtimeEvent('server_log', entry);
 }
@@ -1786,158 +1458,7 @@ export function detectInvokedAgent(prompt: string, sessionId?: string): AgentSer
   return serverState.agentsList[0];
 }
 
-// ==================== AUTH & COOKIE HELPERS ====================
-
-let activeAuthStore: LocalSqliteBrainStore | null = null;
-
-export function bindActiveAuthStore(store: LocalSqliteBrainStore | null): void {
-  activeAuthStore = store;
-}
-
-export function getSessionFromReq(req: Request): SessionRecord | null {
-  const cookies = parseCookies(req.headers.cookie);
-  const headerToken = String(req.headers['x-jarvis-session'] || '').trim();
-  const authHeader = String(req.headers.authorization || '').trim();
-  const bearerToken = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7).trim() : '';
-  const queryToken = typeof req.query.session_token === 'string' ? req.query.session_token.trim() : '';
-
-  const sid = cookies[SESSION_COOKIE] || headerToken || bearerToken || queryToken;
-  if (!sid) return null;
-  const cached = sessions.get(sid);
-  if (cached) return cached;
-
-  // Fallback resiliente: recupera sessão válida diretamente do SQLite (sobrevive a restarts e F5)
-  if (activeAuthStore) {
-    try {
-      const persisted = activeAuthStore.getAuthSession(sid);
-      if (persisted) {
-        const hydrated: SessionRecord = {
-          session_id: persisted.session_id,
-          username: persisted.username,
-          role: persisted.role,
-          kind: persisted.kind,
-          created_at: persisted.created_at,
-        };
-        sessions.set(sid, hydrated);
-        return hydrated;
-      }
-    } catch {
-      // Banco indisponível ou fechado em teardown de teste
-    }
-  }
-  return null;
-}
-
-const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-
-function isCookieOnlyAuthenticatedRequest(req: Request): boolean {
-  const cookies = parseCookies(req.headers.cookie);
-  const hasCookie = Boolean(cookies[SESSION_COOKIE]);
-  const hasExplicitToken = Boolean(
-    String(req.headers['x-jarvis-session'] || '').trim() ||
-      String(req.headers.authorization || '').trim()
-  );
-  return hasCookie && !hasExplicitToken;
-}
-
-function passesCsrfOriginGuard(req: Request): boolean {
-  if (!WRITE_METHODS.has(req.method.toUpperCase())) return true;
-  if (!isCookieOnlyAuthenticatedRequest(req)) return true;
-
-  // Cabeçalho customizado não-simples bloqueia submissões cross-site sem preflight CORS
-  const requestedWith = String(req.headers['x-requested-with'] || '').trim();
-  if (requestedWith) return true;
-
-  // Fallback para requisições same-origin legítimas do navegador (Origin ou Referer)
-  const host = String(req.headers.host || '').trim().toLowerCase();
-  const originHeader = String(req.headers.origin || req.headers.referer || '').trim();
-  if (!originHeader || !host) return true;
-  try {
-    const parsed = new URL(originHeader);
-    return parsed.host.toLowerCase() === host;
-  } catch {
-    return false;
-  }
-}
-
-export function setSessionCookie(req: Request, res: Response, sessionId: string) {
-  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').toLowerCase();
-  const isHttps = req.secure || forwardedProto.includes('https');
-  const attrs = [
-    `${SESSION_COOKIE}=${encodeURIComponent(sessionId)}`,
-    'Path=/',
-    'HttpOnly',
-    'Max-Age=86400',
-    isHttps ? 'SameSite=None; Secure; Partitioned' : 'SameSite=Lax',
-  ];
-  res.setHeader('Set-Cookie', attrs.join('; '));
-}
-
-export function clearSessionCookie(req: Request, res: Response) {
-  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').toLowerCase();
-  const isHttps = req.secure || forwardedProto.includes('https');
-  const attrs = [
-    `${SESSION_COOKIE}=`,
-    'Path=/',
-    'HttpOnly',
-    'Max-Age=0',
-    isHttps ? 'SameSite=None; Secure; Partitioned' : 'SameSite=Lax',
-  ];
-  res.setHeader('Set-Cookie', attrs.join('; '));
-}
-
-export function createSessionForUser(req: Request, res: Response, user: UserAccount, store?: import('./brain/sqliteBrainStore.ts').LocalSqliteBrainStore): SessionRecord {
-  const session_id = crypto.randomBytes(32).toString('hex');
-  const record: SessionRecord = {
-    session_id,
-    username: user.username,
-    role: user.role,
-    kind: 'human',
-    created_at: Date.now(),
-  };
-  sessions.set(session_id, record);
-  const targetStore = store || activeAuthStore;
-  // Garante usuário na tabela auth_users antes de gravar auth_sessions (evita erro silencioso de FK)
-  try {
-    targetStore?.upsertAuthUser(user);
-    targetStore?.upsertAuthSession(record);
-  } catch { /* não bloqueia */ }
-  setSessionCookie(req, res, session_id);
-  return record;
-}
-
-export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  const session = getSessionFromReq(req);
-  if (!session) {
-    res.status(401).json({ detail: 'Sessão não autenticada. Faça login para continuar.' });
-    return;
-  }
-  if (!passesCsrfOriginGuard(req)) {
-    res.status(403).json({ detail: 'Requisição bloqueada pela verificação de origem da sessão.' });
-    return;
-  }
-  const user = users.get(session.username);
-  if (!user || !user.is_active) {
-    sessions.delete(session.session_id);
-    try { activeAuthStore?.deleteAuthSession(session.session_id); } catch { /* não bloqueia */ }
-    res.status(401).json({ detail: 'Conta inativa ou sessão revogada.' });
-    return;
-  }
-  (req as Request & { jarvisSession?: SessionRecord; jarvisUser?: UserAccount }).jarvisSession = session;
-  (req as Request & { jarvisUser?: UserAccount }).jarvisUser = user;
-  next();
-}
-
-export function requirePackStudioRole(req: Request, res: Response, next: NextFunction) {
-  const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
-  if (!user || (user.role !== 'admin' && user.role !== 'developer')) {
-    res.status(403).json({
-      detail: 'Acesso restrito a administradores e desenvolvedores do Estúdio de Pacotes.',
-    });
-    return;
-  }
-  next();
-}
+// ==================== AUTH & COOKIE HELPERS (delegados para ./state/authSessionManager.ts) ====================
 
 export const isHttpsReq = (req: Request): boolean => {
   const fwd = String(req.headers['x-forwarded-proto'] || '').toLowerCase();
