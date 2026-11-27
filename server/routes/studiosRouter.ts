@@ -116,11 +116,13 @@ export function createStudiosRouter(deps?: StudiosRouterDeps): Router {
   });
 
   router.get('/coding/sessions/:id/messages', requireAuth, (req: Request, res: Response) => {
-    const messages = store ? store.listCodingMessages(req.params.id) : [];
+    const sessionId = String(req.params.id || '');
+    const messages = store ? store.listCodingMessages(sessionId) : [];
     res.json({ messages });
   });
 
   router.post('/coding/sessions/:id/messages', requireAuth, (req: Request, res: Response) => {
+    const sessionId = String(req.params.id || '');
     const content = String(req.body?.content || '').trim();
     if (!content) {
       res.status(400).json({ detail: 'Conteúdo da mensagem de código é obrigatório.' });
@@ -128,7 +130,7 @@ export function createStudiosRouter(deps?: StudiosRouterDeps): Router {
     }
     const saved = store
       ? store.appendCodingMessage({
-          session_id: req.params.id,
+          session_id: sessionId,
           project_id: req.body?.project_id ? String(req.body.project_id) : null,
           role: String(req.body?.role || 'user'),
           content,
@@ -136,12 +138,12 @@ export function createStudiosRouter(deps?: StudiosRouterDeps): Router {
           tool_call_id: req.body?.tool_call_id ? String(req.body.tool_call_id) : null,
           tool_name: req.body?.tool_name ? String(req.body.tool_name) : null,
         })
-      : { id: Date.now(), session_id: req.params.id, role: 'user', content, created_at: nowIso() };
+      : { id: Date.now(), session_id: sessionId, role: 'user', content, created_at: nowIso() };
     res.status(201).json({ status: 'saved', message: saved });
   });
 
   router.delete('/coding/sessions/:id/messages', requireAuth, (req: Request, res: Response) => {
-    const deleted = store ? store.clearCodingMessages(req.params.id) : 0;
+    const deleted = store ? store.clearCodingMessages(String(req.params.id || '')) : 0;
     res.json({ deleted });
   });
 

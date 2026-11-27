@@ -366,13 +366,14 @@ export class McpRuntimeSupervisor {
     if (server.transport === 'http') {
       const validation = validateMcpHttpEndpoint(server.endpoint, { allowLocal: options?.allowLocalHttp });
       if (!validation.ok) {
+        const reason = 'reason' in validation ? validation.reason : 'Bloqueado';
         this.runtimeState.set(server.id, {
           restart_count: prev.restart_count,
           backoff_ms: 0,
           last_heartbeat_at: now,
-          last_error: validation.reason,
+          last_error: reason,
         });
-        return { status: 'blocked', tools: server.tools, detail: validation.reason };
+        return { status: 'blocked', tools: server.tools, detail: reason };
       }
 
       try {
@@ -431,13 +432,14 @@ export class McpRuntimeSupervisor {
     // Transporte stdio externo real via JSON-RPC 2.0
     const cmdCheck = validateMcpStdioCommand(server.endpoint);
     if (!cmdCheck.ok) {
+      const reason = 'reason' in cmdCheck ? cmdCheck.reason : 'Bloqueado';
       this.runtimeState.set(server.id, {
         restart_count: prev.restart_count,
         backoff_ms: 0,
         last_heartbeat_at: now,
-        last_error: cmdCheck.reason,
+        last_error: reason,
       });
-      return { status: 'blocked', tools: server.tools, detail: cmdCheck.reason };
+      return { status: 'blocked', tools: server.tools, detail: reason };
     }
 
     try {
@@ -504,7 +506,7 @@ export class McpRuntimeSupervisor {
     if (server.transport === 'http') {
       const validation = validateMcpHttpEndpoint(server.endpoint, { allowLocal: options?.allowLocalHttp });
       if (!validation.ok) {
-        throw new Error(validation.reason);
+        throw new Error('reason' in validation ? validation.reason : 'Bloqueado');
       }
       const rpcRes = await callHttpMcpJsonRpc(
         validation.url,
@@ -516,7 +518,7 @@ export class McpRuntimeSupervisor {
     } else {
       const cmdCheck = validateMcpStdioCommand(server.endpoint);
       if (!cmdCheck.ok) {
-        throw new Error(cmdCheck.reason);
+        throw new Error('reason' in cmdCheck ? cmdCheck.reason : 'Bloqueado');
       }
       result = await callStdioMcpJsonRpc(
         cmdCheck.command,
@@ -605,11 +607,12 @@ export class McpRuntimeSupervisor {
 
       const cmdCheck = validateMcpStdioCommand(server.endpoint);
       if (!cmdCheck.ok) {
+        const reason = 'reason' in cmdCheck ? cmdCheck.reason : 'Bloqueado';
         const next = {
           restart_count: prev.restart_count,
           backoff_ms: 0,
           last_heartbeat_at: now,
-          last_error: cmdCheck.reason,
+          last_error: reason,
         };
         this.runtimeState.set(server.id, next);
         return {
@@ -623,7 +626,7 @@ export class McpRuntimeSupervisor {
           backoff_ms: 0,
           tools_count: server.tools.length,
           last_heartbeat_at: now,
-          last_error: cmdCheck.reason,
+          last_error: reason,
           protocol_version: 'JSON-RPC 2.0',
         };
       }
@@ -649,11 +652,12 @@ export class McpRuntimeSupervisor {
     // HTTP / SSE MCP Server
     const validation = validateMcpHttpEndpoint(server.endpoint);
     if (!validation.ok) {
+      const reason = 'reason' in validation ? validation.reason : 'Bloqueado';
       const next = {
         restart_count: prev.restart_count,
         backoff_ms: 0,
         last_heartbeat_at: now,
-        last_error: validation.reason,
+        last_error: reason,
       };
       this.runtimeState.set(server.id, next);
       return {
@@ -667,7 +671,7 @@ export class McpRuntimeSupervisor {
         backoff_ms: 0,
         tools_count: server.tools.length,
         last_heartbeat_at: now,
-        last_error: validation.reason,
+        last_error: reason,
         protocol_version: 'JSON-RPC 2.0',
       };
     }

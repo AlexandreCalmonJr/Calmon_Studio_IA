@@ -85,3 +85,17 @@ export function getClientIp(req: { headers: Record<string, string | string[] | u
   if (Array.isArray(forwarded)) return forwarded[0]?.trim() || 'unknown';
   return String(req.socket?.remoteAddress || 'unknown');
 }
+
+export function expressRateLimit(route: string, limit: number, windowMs = 60_000) {
+  return (req: any, res: any, next: () => void) => {
+    const key = getClientIp(req);
+    const result = serverRateLimit(route, key, limit, windowMs);
+    if (!result.allowed) {
+      res.status(429).json({
+        detail: `Limite de requisições atingido em ${route}. Tente novamente em ${Math.ceil(result.retryAfterMs / 1000)}s.`,
+      });
+      return;
+    }
+    next();
+  };
+}

@@ -14,7 +14,7 @@ import {
 import { sendVoiceTurn, synthesizeVoiceAudio, transcribeVoiceAudio } from '../../services/api';
 import { getAccountStorageKey } from '../../services/accountScope';
 import { useAssistantIdentity } from '../../context/AssistantIdentityContext';
-import { useOfflineQueue } from '../../shared/pwa/usePWAInstall';
+import { useOfflineQueue } from '../../shared/network/useOfflineQueue';
 import { notify } from '../../shared/common/Toast';
 import {
   getVoiceAutoSpeakPref,
@@ -674,6 +674,16 @@ export const VoiceLiveHudModal: React.FC<VoiceLiveHudModalProps> = ({
               <MessageSquare size={13} />
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('jarvis:open-voice-calibration'))}
+            className="btn btn-ghost btn-xs"
+            title="Calibrar sua voz gravando 3 vezes (Setup de Wake Word)"
+            aria-label="Calibrar reconhecimento de voz"
+            style={{ fontSize: '0.68rem', padding: '3px 7px' }}
+          >
+            Calibrar
+          </button>
           <button
             type="button"
             onClick={() => setShowLogs((prev) => !prev)}

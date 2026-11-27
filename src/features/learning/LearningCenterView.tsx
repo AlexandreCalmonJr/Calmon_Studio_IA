@@ -39,6 +39,33 @@ type GuideItem = {
 
 const QUICK_GUIDES: GuideItem[] = [
   {
+    id: 'kde_connect_remote',
+    title: 'Parear Android estilo KDE Connect & Controle Remoto',
+    description: 'Use Trackpad WS, scroll de 2 dedos, mídia, clipboard e ações Admin com biometria.',
+    duration: '3 min',
+    category: 'Mobile & Remoto',
+    steps: [
+      'No PC, inicie o servidor com JARVIS_ALLOW_LAN=1 ou abra o app Desktop.',
+      'Instale o APK do Calmon Studio no Android e abra a aba Controle (/remote).',
+      'Toque em "Buscar no Wi-Fi" para localizar o PC via UDP ou informe a URL Tailscale.',
+      'Use o Trackpad com 1 dedo para cursor e 2 dedos para scroll, ou aprove ações Nível 2 por biometria.',
+    ],
+    targetTab: 'remote',
+  },
+  {
+    id: 'mobile_sync_offline_ai',
+    title: 'Sincronização Desktop ⇄ Mobile & IA Local Offline',
+    description: 'Espelhe agentes, conversas e mídias e baixe um modelo .gguf para uso offline.',
+    duration: '3 min',
+    category: 'IA & Sync',
+    steps: [
+      'Na aba Controle (/remote), toque em "Sincronizar PC" para puxar agentes e histórico via /sync/delta.',
+      'Sem modelo local no celular, o app usa automaticamente a IA configurada no seu PC.',
+      'Para usar 100% offline fora de casa, escolha um modelo GGUF (ex.: Qwen 2.5 1.5B) e toque em "Baixar Modelo Offline".',
+    ],
+    targetTab: 'remote',
+  },
+  {
     id: 'voice_handsfree',
     title: 'Voz Mãos-Livres ("Ei Calmon IA" ou nome personalizado)',
     description: 'Chame seu assistente falando o nome escolhido ou clique uma vez para falar na hora.',

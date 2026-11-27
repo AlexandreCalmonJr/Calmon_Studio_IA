@@ -451,5 +451,18 @@ export function createSystemRouter(deps: SystemRouterDeps): Router {
     }
   });
 
+  router.post('/system/client-errors', requireAuth, (req: Request, res: Response) => {
+    const source = String(req.body?.source || 'mobile_client').slice(0, 64);
+    const message = String(req.body?.message || 'Erro desconhecido no cliente').slice(0, 500);
+    serverState.serverLogs.unshift({
+      id: `log_cli_${Date.now().toString(36)}`,
+      timestamp: nowIso(),
+      level: 'ERROR',
+      source,
+      message,
+    });
+    res.status(201).json({ recorded: true });
+  });
+
   return router;
 }

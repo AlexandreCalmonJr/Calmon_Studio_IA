@@ -35,6 +35,7 @@ import { NotebookHardwareProfile } from '../../src/services/hardwareAdvisor.ts';
 import { buildModelsInventoryPayload } from '../services/modelsInventoryService.ts';
 import { setKeyDailyTokenLimit } from '../state/tokenQuotaManager.ts';
 import type { LocalSqliteBrainStore } from '../brain/sqliteBrainStore.ts';
+import { callPythonWorkerJson } from '../brain/pythonWorkerHttpClient.ts';
 
 export interface ModelsRouterDeps {
   store: LocalSqliteBrainStore;
@@ -49,7 +50,11 @@ export function createModelsRouter(deps: ModelsRouterDeps): Router {
   });
 
   router.get('/models/hardware', requireAuth, async (_req: Request, res: Response) => {
-    res.json(await buildHardwareAdvisorPayload());
+    const [advisor, workerHardware] = await Promise.all([
+      buildHardwareAdvisorPayload(),
+      callPythonWorkerJson('/hardware/scan', { timeoutMs: 900 }),
+    ]);
+    res.json(workerHardware ? { ...advisor, worker_hardware: workerHardware } : advisor);
   });
 
   router.put('/models/hardware', requireAuth, async (req: Request, res: Response) => {
@@ -424,7 +429,7 @@ export function createModelsRouter(deps: ModelsRouterDeps): Router {
 
   router.put('/settings/provider-keys/:provider', requireAuth, (req: Request, res: Response) => {
     const ownerUserId = getOwnerUserId(req);
-    const providerId = normalizeProviderId(req.params.provider);
+    const providerId = normalizeProviderId(String(req.params.provider || ''));
     if (!providerId) {
       res.status(400).json({ detail: 'Provedor externo não suportado. Use anthropic, openai, deepseek, groq, openrouter, xai ou custom.' });
       return;
@@ -483,7 +488,7 @@ export function createModelsRouter(deps: ModelsRouterDeps): Router {
 
   router.post('/settings/provider-keys/:provider/test', requireAuth, async (req: Request, res: Response) => {
     const ownerUserId = getOwnerUserId(req);
-    const providerId = normalizeProviderId(req.params.provider);
+    const providerId = normalizeProviderId(String(req.params.provider || ''));
     if (!providerId) {
       res.status(400).json({ detail: 'Provedor externo não suportado.' });
       return;
@@ -610,7 +615,7 @@ export function createModelsRouter(deps: ModelsRouterDeps): Router {
 
   router.delete('/settings/provider-keys/:provider', requireAuth, (req: Request, res: Response) => {
     const ownerUserId = getOwnerUserId(req);
-    const providerId = normalizeProviderId(req.params.provider);
+    const providerId = normalizeProviderId(String(req.params.provider || ''));
     if (!providerId) {
       res.status(400).json({ detail: 'Provedor inválido.' });
       return;
@@ -697,14 +702,14 @@ export function createModelsRouter(deps: ModelsRouterDeps): Router {
 
   router.delete('/models/vault/:keyId', requireAuth, (req: Request, res: Response) => {
     const ownerUserId = getOwnerUserId(req);
-    const deleted = store.deleteProviderVaultKey(ownerUserId, req.params.keyId);
+    const deleted = store.deleteProviderVaultKey(ownerUserId, String(req.params.keyId || ''));
     syncVaultHttpOnlyCookie(req, res, ownerUserId, store);
     res.json({ deleted });
   });
 
   router.post('/models/vault/:keyId/default', requireAuth, (req: Request, res: Response) => {
     const ownerUserId = getOwnerUserId(req);
-    const updated = store.setDefaultProviderVaultKey(ownerUserId, req.params.keyId);
+    const updated = store.setDefaultProviderVaultKey(ownerUserId, String(req.params.keyId || ''));
     if (!updated) {
       res.status(404).json({ detail: 'Credencial não encontrada neste cofre de sessão.' });
       return;
@@ -715,7 +720,7 @@ export function createModelsRouter(deps: ModelsRouterDeps): Router {
 
   router.post('/models/vault/:keyId/test', requireAuth, async (req: Request, res: Response) => {
     const ownerUserId = getOwnerUserId(req);
-    const record = store.getEncryptedProviderVaultRecord(ownerUserId, req.params.keyId);
+    const record = store.getEncryptedProviderVaultRecord(ownerUserId, String(req.params.keyId || ''));
     if (!record) {
       res.status(404).json({ status: 'error', detail: 'Credencial não encontrada no cofre da sessão.' });
       return;

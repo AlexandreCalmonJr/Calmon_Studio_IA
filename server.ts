@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -15,6 +16,9 @@ import {
   type LocalSqliteBrainStore,
 } from './server/brain/sqliteBrainStore.ts';
 import { createBrainRouter } from './server/brain/brainRouter.ts';
+import { startRemoteDiscoveryBeacon } from './server/remoteDiscovery.ts';
+import { createRemoteControlRouter, executeRemoteInput } from './server/routes/remoteControlRouter.ts';
+import { createSyncRouter } from './server/routes/syncRouter.ts';
 import { createHubInfraRegistry } from './server/infra/infraRegistry.ts';
 import {
   PORT,
@@ -112,6 +116,8 @@ export function buildApiRouter(options?: { store?: LocalSqliteBrainStore }) {
   api.use(createVoiceCompanionRouter({ store: localBrainStore }));
   api.use(createStudiosRouter({ store: localBrainStore }));
   api.use(createMediaRouter({ store: localBrainStore }));
+  api.use(createRemoteControlRouter({ store: localBrainStore }));
+  api.use(createSyncRouter({ store: localBrainStore }));
 
   // Roteador dedicado do Segundo Cérebro (Brain)
   api.use(
@@ -133,21 +139,24 @@ export function buildApiRouter(options?: { store?: LocalSqliteBrainStore }) {
       onPackImported: (pack) => {
         for (const a of pack.agents) {
           if (!serverState.agentsList.some((existing) => existing.role === a.role)) {
-            const created = {
+            const created: import('./server/serverState.ts').AgentServerRecord = {
               role: a.role,
               name: a.name,
+              proper_name: a.name,
               handle: a.handle || `@${a.role}`,
+              category: 'specialist',
+              mission: a.description || 'Agente migrado via .jarvis-pack.',
               description: a.description || 'Agente migrado via .jarvis-pack.',
               system_prompt: a.system_prompt || 'Responda sempre em português do Brasil com clareza.',
-              color: '#f97316',
-              avatar_icon: 'bot',
               preferred_model: 'gemini-2.5-flash',
-              autonomy_level: 'confirm',
-              hybrid_policy: {
-                mode: 'hybrid',
-                fallback_to_cloud: true,
-                prefer_local_for_private: true,
-              },
+              routing_policy: 'auto_hybrid',
+              autonomy_level: 'ask_approval',
+              is_read_only: false,
+              strict_focus: false,
+              strict_topic: '',
+              delegation_targets: [],
+              allowed_tools: ['read_file', 'web_search'],
+              mascot: { id: 'custom', color: '#f97316', accessory: 'spark', mood: 'ready' },
               is_custom: true,
               installed_skills: a.installed_skills || [],
               version: 1,
@@ -279,6 +288,49 @@ export async function startServer() {
     } catch {
       // ignore
     }
+    ws.on('message', (raw) => {
+      try {
+        const msg = JSON.parse(raw.toString('utf8')) as { type?: string; payload?: any };
+        if (msg?.type === 'remote_input' && msg.payload) {
+          const sess = (ws as WebSocket & { jarvisSession?: SessionRecord }).jarvisSession;
+          if (!sess && process.env.NODE_ENV === 'production') return;
+          void executeRemoteInput(msg.payload);
+          return;
+        }
+        if (msg?.type === 'terminal_exec' && msg.payload) {
+          const sess = (ws as WebSocket & { jarvisSession?: SessionRecord }).jarvisSession;
+          if (!sess || sess.role !== 'admin') {
+            ws.send(JSON.stringify({ type: 'terminal_error', error: 'Permissão administrativa necessária.' }));
+            return;
+          }
+          const cmd = String(msg.payload.command || '').trim();
+          const args = Array.isArray(msg.payload.args) ? msg.payload.args.map((a: unknown) => String(a)) : [];
+          const allowed = new Set(['git', 'node', 'npm', 'npx', 'python', 'pytest']);
+          if (!allowed.has(cmd)) {
+            ws.send(JSON.stringify({ type: 'terminal_error', error: `Comando não permitido: ${cmd}` }));
+            return;
+          }
+          const proc = spawn(cmd, args, { cwd: process.cwd(), shell: false, windowsHide: true });
+          proc.stdout.on('data', (d) => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'terminal_stdout', chunk: d.toString('utf8') }));
+            }
+          });
+          proc.stderr.on('data', (d) => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'terminal_stderr', chunk: d.toString('utf8') }));
+            }
+          });
+          proc.on('close', (code) => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'terminal_exit', code }));
+            }
+          });
+        }
+      } catch {
+        // ignore non-json frames
+      }
+    });
     ws.on('close', () => {
       realtimeClients.delete(ws);
     });
@@ -295,7 +347,7 @@ export async function startServer() {
         const upgradeCheck = verifyWebSocketUpgrade(request, {
           isProduction: process.env.NODE_ENV === 'production',
           sessionMap: sessions,
-          userMap: users,
+          userMap: users as unknown as Map<string, Record<string, unknown> & { username: string; role: string; is_active: boolean }>,
         });
 
         if (!upgradeCheck.authorized) {
@@ -333,7 +385,8 @@ export async function startServer() {
     }
   });
 
-  const listenHost = process.env.HOST || '0.0.0.0';
+  const listenHost =
+    process.env.HOST || (process.env.JARVIS_ALLOW_LAN === '1' ? '0.0.0.0' : '127.0.0.1');
   const actualPort = await new Promise<number>((resolve) => {
     server.listen(PORT, listenHost, () => {
       const addr = server.address();
@@ -343,11 +396,15 @@ export async function startServer() {
     });
   });
 
+  const discoveryBeacon =
+    process.env.NODE_ENV === 'test' ? null : startRemoteDiscoveryBeacon(actualPort);
+
   return {
     server,
     port: actualPort,
     close: () =>
       new Promise<void>((resolve) => {
+        discoveryBeacon?.close();
         wss.close();
         server.close(() => resolve());
       }),

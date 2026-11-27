@@ -28,6 +28,10 @@ export function safeHref(raw: string): string | null {
 }
 
 export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ content }) => {
+  const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/i);
+  const thinkBody = thinkMatch ? thinkMatch[1].trim() : '';
+  const visibleContent = thinkMatch ? content.replace(thinkMatch[0], '').trim() : content;
+
   // Parser de blocos (código fechado ou em streaming, tabelas GFM, citações, cabeçalhos, listas, parágrafos)
   const renderFormattedText = (text: string) => {
     const segments = splitCodeFenceSegments(text);
@@ -387,8 +391,31 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ con
     return parts;
   };
 
-  const safeContent = sanitizeUserFacingText(content);
-  return <div style={{ wordBreak: 'break-word' }}>{renderFormattedText(safeContent)}</div>;
+  const safeContent = sanitizeUserFacingText(visibleContent);
+  return (
+    <div style={{ wordBreak: 'break-word', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      {thinkBody && (
+        <details
+          style={{
+            padding: '8px 12px',
+            borderRadius: '8px',
+            background: 'rgba(148, 163, 184, 0.08)',
+            border: '1px solid var(--border-color)',
+            fontSize: '0.78rem',
+            color: 'var(--text-secondary)',
+          }}
+        >
+          <summary style={{ cursor: 'pointer', fontWeight: 600, color: '#f97316' }}>
+            Raciocínio do Modelo (Thinking)
+          </summary>
+          <pre style={{ whiteSpace: 'pre-wrap', margin: '8px 0 0', fontFamily: 'var(--font-mono)' }}>
+            {thinkBody}
+          </pre>
+        </details>
+      )}
+      {renderFormattedText(safeContent)}
+    </div>
+  );
 });
 
 // Componente para blocos de código com botão de cópia e realce

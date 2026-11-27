@@ -343,6 +343,7 @@ export class PluggableSandboxRunner {
     const displayCmd = [req.command, ...(req.args || [])].join(' ').trim();
 
     if (!validation.ok) {
+      const reason = 'reason' in validation ? validation.reason : 'Bloqueado';
       const blocked = this.store.recordSandboxSession({
         user_id: req.userId,
         run_id: req.runId || null,
@@ -352,10 +353,10 @@ export class PluggableSandboxRunner {
         status: 'blocked',
         exit_code: null,
         stdout_excerpt: '',
-        stderr_excerpt: validation.reason,
+        stderr_excerpt: reason,
         duration_ms: 0,
       });
-      return { session: blocked, allowed: false, reason: validation.reason };
+      return { session: blocked, allowed: false, reason };
     }
 
     const timeoutMs = Math.max(500, Math.min(this.maxTimeoutMs, Number(req.timeoutMs || 6000)));

@@ -36,6 +36,7 @@ import type { LocalSqliteBrainStore } from '../brain/sqliteBrainStore.ts';
 import { serverRateLimit, RATE_LIMITS, getClientIp } from '../rateLimiter.ts';
 import { DurableRunEngine } from '../durableRunEngine.ts';
 import { createHubInfraRegistry, type HubInfraRegistry } from '../infra/infraRegistry.ts';
+import { scheduleHermesDistill } from '../hermesDaemon.ts';
 import {
   computeRunObservabilityStats,
   executeAutonomousToolLoop,
@@ -116,18 +117,20 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
   });
 
   router.get('/chat/sessions/:id', requireAuth, (req: Request, res: Response) => {
-    const s = serverState.chatSessions.get(req.params.id);
+    const sessionId = String(req.params.id || '');
+    const s = serverState.chatSessions.get(sessionId);
     if (!s) {
-      const dbMessages = store.getChatSessionMessagesRelational(req.params.id);
-      res.json({ session_id: req.params.id, tasks: [], messages: dbMessages });
+      const dbMessages = store.getChatSessionMessagesRelational(sessionId);
+      res.json({ session_id: sessionId, tasks: [], messages: dbMessages });
       return;
     }
     res.json({ session_id: s.session_id, tasks: s.tasks, messages: s.messages });
   });
 
   router.delete('/chat/sessions/:id', requireAuth, (req: Request, res: Response) => {
-    serverState.chatSessions.delete(req.params.id);
-    store.deleteChatSessionRecord(req.params.id);
+    const sessionId = String(req.params.id || '');
+    serverState.chatSessions.delete(sessionId);
+    store.deleteChatSessionRecord(sessionId);
     res.json({ deleted: true });
   });
 
@@ -140,7 +143,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
   });
 
   router.get('/chat/sessions/:id/export', requireAuth, (req: Request, res: Response) => {
-    const s = serverState.chatSessions.get(req.params.id);
+    const s = serverState.chatSessions.get(String(req.params.id || ''));
     const md = s
       ? s.messages.map((m) => `### ${m.role === 'user' ? 'Você' : 'JARVIS'}\n\n${m.content}`).join('\n\n---\n\n')
       : '# Conversa vazia';
@@ -516,7 +519,16 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
         durableRuns,
         sandboxRunner: infra.sandboxRunner,
         mcpSupervisor: infra.mcpSupervisor,
-        onStep: (step) => sendEvent({ type: 'run_step', run_id: durableRun.id, step }),
+        onStep: (step) => {
+          sendEvent({ type: 'run_step', run_id: durableRun.id, step });
+          sendEvent({
+            type: 'tool_output',
+            run_id: durableRun.id,
+            tool: step.title,
+            status: step.status,
+            output: step.output_summary,
+          });
+        },
         onArtifact: (artifact) => sendEvent({ type: 'run_artifact', run_id: durableRun.id, artifact }),
       });
       if (toolLoop.executedCount > 0) {
@@ -539,10 +551,11 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
         for (const spec of secondarySpecs) {
           const specialist = serverState.agentsList.find((a) => a.role === spec.role);
           if (!specialist) continue;
+          const specTask = String((spec as any).task || specialist.mission || specialist.role);
 
           sendEvent({
             type: 'status',
-            message: `Consultando especialista ${specialist.proper_name || specialist.name} (${spec.task})...`,
+            message: `Consultando especialista ${specialist.proper_name || specialist.name} (${specTask})...`,
           });
 
           const specCore = store.getAgentCore(ownerUserId, specialist.role, {
@@ -568,7 +581,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
             explicitChatOverride: requestedModel,
             systemDefaultModel: serverState.hybridConfig.default_model,
             extraNotes: [
-              `Você está contribuindo em colaboração multiagente (${orchestrationPlan.mode}) com seu parecer objetivo sobre: "${spec.task}". Entregue um parecer técnico conciso (máx. 6 linhas) sob sua ótica de especialista.`,
+              `Você está contribuindo em colaboração multiagente (${orchestrationPlan.mode}) com seu parecer objetivo sobre: "${specTask}". Entregue um parecer técnico conciso (máx. 6 linhas) sob sua ótica de especialista.`,
             ],
           });
 
@@ -601,7 +614,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
             agentOutputs.push({
               agent_role: specialist.role,
               agent_name: specialist.proper_name || specialist.name,
-              objective: spec.task,
+              objective: specTask,
               summary: specRes.text,
               requested_model: specRes.requestedModel,
               model_used: specRes.modelUsed,
@@ -616,7 +629,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
             agentOutputs.push({
               agent_role: specialist.role,
               agent_name: specialist.proper_name || specialist.name,
-              objective: spec.task,
+              objective: specTask,
               summary: `Especialista indisponível neste turno: ${specErr instanceof Error ? specErr.message : 'erro de inferência'}`,
               requested_model: specCtx.resolvedModel.requestedModel,
               model_used: 'indisponível',
@@ -679,13 +692,14 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
       if (!streamedAnyChunk && result.text) {
         sendEvent({ type: 'token', chunk: result.text });
       }
+      scheduleHermesDistill(sessionId, prompt, result.text || '');
 
       // Inclui o próprio agente principal em agent_outputs quando houve colaboração multiagente
       if (agentOutputs.length > 0) {
         agentOutputs.unshift({
           agent_role: primaryAgent.role,
           agent_name: primaryAgent.proper_name || primaryAgent.name,
-          objective: orchestrationPlan.invoked_agents[0]?.task || 'Síntese e coordenação principal',
+          objective: (orchestrationPlan.invoked_agents[0] as any)?.task || 'Síntese e coordenação principal',
           summary: result.text.slice(0, 360),
           requested_model: result.requestedModel,
           model_used: result.modelUsed,
@@ -1004,7 +1018,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
   router.get('/chat/runs/:runId', requireAuth, (req: Request, res: Response) => {
     const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
     const ownerUserId = user?.username || 'admin';
-    const detail = durableRuns.getRunDetail(req.params.runId, ownerUserId);
+    const detail = durableRuns.getRunDetail(String(req.params.runId || ''), ownerUserId);
     if (!detail) {
       res.status(404).json({ detail: 'Execução não encontrada ou sem permissão de acesso.' });
       return;
@@ -1015,7 +1029,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
   router.post('/chat/runs/:runId/sandbox', requireAuth, async (req: Request, res: Response) => {
     const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
     const ownerUserId = user?.username || 'admin';
-    const existing = durableRuns.getRunDetail(req.params.runId, ownerUserId);
+    const existing = durableRuns.getRunDetail(String(req.params.runId || ''), ownerUserId);
     if (!existing) {
       res.status(404).json({ detail: 'Execução não encontrada ou sem permissão de acesso.' });
       return;
@@ -1076,7 +1090,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
       typeof req.body?.from_step_index === 'number' ? req.body.from_step_index : undefined;
 
     const detail = await durableRuns.resumeRunFromCheckpoint(
-      req.params.runId,
+      String(req.params.runId || ''),
       ownerUserId,
       fromStepIndex,
       {
@@ -1096,7 +1110,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
             .filter(Boolean)
             .join('\n\n');
 
-          const requestedModel = run.model_used || serverState.defaultOnlineModel || 'gemini-4-hydrogen';
+          const requestedModel = run.model_used || serverState.hybridConfig?.default_model || 'gemini-4-hydrogen';
           const externalProvider = resolveExternalCredentialForRequest(
             req,
             store,
@@ -1121,7 +1135,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
               prompt: continuationPrompt,
               systemInstruction: `Você é ${run.agent_name} (@${run.agent_role}) retomando uma execução interrompida a partir de um checkpoint persistido no banco do Calmon Studio.`,
               requestedModel,
-              routingPolicy: serverState.aiRoutingPolicy,
+              routingPolicy: 'auto_hybrid',
               ollamaBaseUrl,
               ollamaConnected,
               geminiConnected: geminiReady,
@@ -1155,7 +1169,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
   router.get('/chat/runs/:runId/artifacts/:artifactId/download', requireAuth, async (req: Request, res: Response) => {
     const user = (req as Request & { jarvisUser?: UserAccount }).jarvisUser;
     const ownerUserId = user?.username || 'admin';
-    const detail = durableRuns.getRunDetail(req.params.runId, ownerUserId);
+    const detail = durableRuns.getRunDetail(String(req.params.runId || ''), ownerUserId);
     if (!detail) {
       res.status(404).json({ detail: 'Execução não encontrada.' });
       return;
@@ -1195,7 +1209,7 @@ export function createChatRouter(deps: ChatRouterDeps): Router {
   );
 
   router.delete('/tasks/:id', requireAuth, (req: Request, res: Response) => {
-    const id = req.params.id;
+    const id = String(req.params.id || '');
     const before = serverState.tasksList.length;
     serverState.tasksList = serverState.tasksList.filter(
       (t) => t.task_id !== id && t.id !== id

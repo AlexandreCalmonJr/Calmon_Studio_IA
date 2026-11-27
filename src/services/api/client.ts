@@ -1,4 +1,11 @@
-export const API_BASE = '/api/v1';
+import { getPairedHostUrl } from '../localMobileAi';
+
+export function getApiBase(): string {
+  const pairedHost = typeof window !== 'undefined' ? getPairedHostUrl() : '';
+  return pairedHost ? `${pairedHost}/api/v1` : '/api/v1';
+}
+
+export const API_BASE = getApiBase();
 
 export async function handleApiResponse<T>(res: Response, defaultErrorMsg: string): Promise<T> {
   if (!res.ok) {

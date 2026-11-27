@@ -29,8 +29,10 @@ function stripDiacritics(input: string): string {
 }
 
 /**
- * Detecta palavra de ativação dinâmica ("Ei Calmon IA", "Hey Maria", "Oi João", etc.)
+ * Detecta palavra de ativação dinâmica ("Ei Calmon IA", "Ei JARVIS", "Hey Maria", "Oi João", etc.)
  * e extrai o comando falado logo após a saudação.
+ * Suporta pontuação natural (ex: "Ei, JARVIS!"), variações fonéticas do Web Speech API em PT-BR
+ * e comandos emitidos com ou sem pausa.
  */
 export function detectWakeWord(transcript: string, assistantName: string): WakeWordDetectionResult {
   const raw = (transcript || '').trim();
@@ -40,17 +42,28 @@ export function detectWakeWord(transcript: string, assistantName: string): WakeW
 
   const displayAssistant = (assistantName || 'Calmon IA').trim() || 'Calmon IA';
   const cleanAssistant = stripDiacritics(displayAssistant);
-  const escapedName = cleanAssistant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const compactAssistant = cleanAssistant.replace(/[^a-z0-9]/g, '');
+  const isJarvis = compactAssistant === 'jarvis';
+  const isCalmon = compactAssistant === 'calmonia' || compactAssistant === 'calmon';
+
+  // Variações e transcrições fonéticas comuns do Web Speech API em PT-BR
+  const namePattern = isJarvis
+    ? '(?:jarvis|jarves|jarbas|iarvis|iarves|jervis|jarvys|gervis|gerbis|jarbis|jarviz|djarvis|jarve|joao|j\\.?a\\.?r\\.?v\\.?i\\.?s\\.?)'
+    : isCalmon
+      ? '(?:calmon\\s+ia|calmon|calmom|calman|kalmon|carol\\s+ia|calmon\\s+ai)'
+      : cleanAssistant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
   const norm = stripDiacritics(raw);
 
-  // Aceita prefixos naturais em português e inglês: ei, hey, oi, olá, ok, fala, chama
-  // Também detecta quando a frase de ativação surge após ruído ou conversa ambiente.
-  const wakeRegex = new RegExp(`(?:^|\\s)(?:ei|hey|oi|ola|ok|fala|chama(?:\\s+[oa])?)\\s+${escapedName}\\b[,!?:;\\s-]*`, 'i');
+  // Aceita prefixos naturais em português e inglês com pontuações naturais
+  const prefixPattern =
+    '(?:ei|hey|oi|oie|ola|ok|fala(?:\\s+(?:ai|tu))?|diga(?:\\s+(?:ai|la))?|chama(?:\\s+[oa])?|e\\s*ai|eae|eai|bom\\s+dia|boa\\s+tarde|boa\\s+noite|beleza|blz|opa|alo|salve|o|ai|ae|ow|e|acorda|ajuda)';
+  const wakeRegex = new RegExp(`(?:^|[\\s,!?:;.-]+)${prefixPattern}[\\s,!?:;.-]+${namePattern}\\b[\\s,!?:;.-]*`, 'i');
   const match = norm.match(wakeRegex);
 
   if (match && typeof match.index === 'number') {
     const endIndex = match.index + match[0].length;
-    const command = raw.slice(endIndex).replace(/^[,!?:;\s-]+/, '').trim();
+    const command = raw.slice(endIndex).replace(/^[\s,!?:;.-]+/, '').trim();
     return {
       detected: true,
       triggerPhrase: `Ei ${displayAssistant}`,
@@ -58,11 +71,12 @@ export function detectWakeWord(transcript: string, assistantName: string): WakeW
     };
   }
 
-  // Também detecta menção direta isolada ou no início ("JARVIS" ou "JARVIS, ...")
-  const directRegex = new RegExp(`^${escapedName}(?:$|\\s*[,!?:]\\s*)`, 'i');
+  // Também detecta menção direta isolada ou após fronteira de frase ("JARVIS, me ajude", "Calmon, ...")
+  const directRegex = new RegExp(`(?:^|[!?:;.-]+|,[\\s]*)${namePattern}\\b[\\s,!?:;.-]*`, 'i');
   const directMatch = norm.match(directRegex);
-  if (directMatch) {
-    const command = raw.slice(directMatch[0].length).replace(/^[,!?:;\s-]+/, '').trim();
+  if (directMatch && typeof directMatch.index === 'number') {
+    const endIndex = directMatch.index + directMatch[0].length;
+    const command = raw.slice(endIndex).replace(/^[\s,!?:;.-]+/, '').trim();
     return {
       detected: true,
       triggerPhrase: displayAssistant,

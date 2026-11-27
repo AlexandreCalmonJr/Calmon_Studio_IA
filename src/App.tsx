@@ -29,7 +29,8 @@ import {
   resolveDockFavoriteItems,
   resolveVisibleNavModules,
 } from './services/navigationShell';
-import { OfflineIndicator } from './shared/pwa/PWAInstallButton';
+import { OfflineIndicator } from './shared/network/OfflineIndicator';
+import { UpdateBanner } from './shared/common/UpdateBanner';
 import { ErrorBanner } from './shared/layout/StateFeedback';
 import { pathForTab, tabFromLocation } from './router';
 import { API_BASE } from './services/api/client';
@@ -69,6 +70,11 @@ const CommandPalette = lazy(() =>
 );
 const VoiceLiveHudModal = lazy(() =>
   import('./features/companion/VoiceLiveHudModal').then((m) => ({ default: m.VoiceLiveHudModal }))
+);
+const VoiceCalibrationModal = lazy(() =>
+  import('./features/companion/VoiceCalibrationModal').then((m) => ({
+    default: m.VoiceCalibrationModal,
+  }))
 );
 const UserProfileModal = lazy(() =>
   import('./shared/common/UserProfileModal').then((m) => ({ default: m.UserProfileModal }))
@@ -154,6 +160,9 @@ const UsageAnalyticsView = lazy(() =>
 );
 const CompanionHubView = lazy(() =>
   import('./features/companion/CompanionHubView').then((m) => ({ default: m.CompanionHubView }))
+);
+const RemoteControlView = lazy(() =>
+  import('./features/remote/RemoteControlView').then((m) => ({ default: m.RemoteControlView }))
 );
 const CreativeMediaStudioView = lazy(() =>
   import('./features/studio/CreativeMediaStudioView').then((m) => ({
@@ -342,6 +351,7 @@ const DashboardApp: React.FC = () => {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showVoiceHud, setShowVoiceHud] = useState(false);
+  const [showVoiceCalibration, setShowVoiceCalibration] = useState(false);
   const [pendingVoiceCommand, setPendingVoiceCommand] = useState<string | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfileData>(getUserProfile);
   const [launchpadOpen, setLaunchpadOpen] = useState(false);
@@ -367,7 +377,7 @@ const DashboardApp: React.FC = () => {
 
   const wakeWord = useWakeWordListener({
     assistantName,
-    paused: showVoiceHud,
+    paused: showVoiceHud || showVoiceCalibration,
     onWakeDetected: ({ command }) => {
       setPendingVoiceCommand(command || null);
       setShowVoiceHud(true);
@@ -379,8 +389,16 @@ const DashboardApp: React.FC = () => {
       setPendingVoiceCommand(null);
       setShowVoiceHud((prev) => !prev);
     };
+    const handleOpenCalibration = () => {
+      setShowVoiceHud(false);
+      setShowVoiceCalibration(true);
+    };
     window.addEventListener(VOICE_HUD_TOGGLE_EVENT, handleToggle);
-    return () => window.removeEventListener(VOICE_HUD_TOGGLE_EVENT, handleToggle);
+    window.addEventListener('jarvis:open-voice-calibration', handleOpenCalibration);
+    return () => {
+      window.removeEventListener(VOICE_HUD_TOGGLE_EVENT, handleToggle);
+      window.removeEventListener('jarvis:open-voice-calibration', handleOpenCalibration);
+    };
   }, []);
 
   useEffect(() => {
@@ -708,6 +726,7 @@ const DashboardApp: React.FC = () => {
           position: 'relative',
         }}
       >
+        <UpdateBanner />
         {/* Top Bar Global (Contrato SaaS limpo, sem sobreposição) */}
         {!NO_HEADER_TABS.has(activeTab) && (
           <AppTopBar
@@ -985,6 +1004,7 @@ const DashboardApp: React.FC = () => {
                       onNavigate={navigate}
                     />
                   )}
+                  {activeTab === 'remote' && <RemoteControlView />}
                   {activeTab === 'creative_studio' && <CreativeMediaStudioView />}
                   {activeTab === 'app_builder' && <AppBuilderView />}
                   {activeTab === 'github_import' && <GitHubImporterView onNavigate={navigate} />}
@@ -1216,6 +1236,20 @@ const DashboardApp: React.FC = () => {
         </Suspense>
       )}
 
+      {showVoiceCalibration && (
+        <Suspense fallback={null}>
+          <VoiceCalibrationModal
+            isOpen={showVoiceCalibration}
+            onClose={() => setShowVoiceCalibration(false)}
+            assistantName={assistantName}
+            onCalibrationComplete={() => {
+              setShowVoiceCalibration(false);
+              wakeWord.setEnabled(true);
+            }}
+          />
+        </Suspense>
+      )}
+
       {/* Navegação Inferior Mobile PWA (visível apenas abaixo de 768px) */}
       <nav className="jarvis-mobile-bottom-nav" aria-label="Navegação mobile rápida">
         <button
@@ -1245,11 +1279,11 @@ const DashboardApp: React.FC = () => {
         </button>
         <button
           type="button"
-          onClick={() => navigate('companion')}
-          className={`jarvis-mobile-bottom-nav__btn ${activeTab === 'companion' ? 'is-active' : ''}`}
+          onClick={() => navigate('remote')}
+          className={`jarvis-mobile-bottom-nav__btn ${activeTab === 'remote' ? 'is-active' : ''}`}
         >
           <Smartphone size={17} />
-          <span>PC/PWA</span>
+          <span>Controle</span>
         </button>
         <button
           type="button"

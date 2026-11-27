@@ -16,6 +16,7 @@ import {
 } from '../serverState.ts';
 import { resolveSafeProjectFilePath } from '../serverHardening.ts';
 import type { LocalSqliteBrainStore } from '../brain/sqliteBrainStore.ts';
+import { callPythonWorkerJson } from '../brain/pythonWorkerHttpClient.ts';
 import { analyzeProjectArchitecture } from '../architectureAnalyzer.ts';
 import { runHybridInference } from '../hybridAiEngine.ts';
 import {
@@ -227,14 +228,15 @@ export function createWorkspaceRouter(deps?: WorkspaceRouterDeps): Router {
   });
 
   router.get('/workspace/projects/:id/memory', requireAuth, (req: Request, res: Response) => {
-    res.json(serverState.projectMemories.get(req.params.id) || []);
+    res.json(serverState.projectMemories.get(String(req.params.id || '')) || []);
   });
 
   router.post('/workspace/projects/:id/memory', requireAuth, (req: Request, res: Response) => {
-    const list = serverState.projectMemories.get(req.params.id) || [];
+    const projectId = String(req.params.id || '');
+    const list = serverState.projectMemories.get(projectId) || [];
     const entry = { id: `pm_${Date.now()}`, ...req.body, created_at: nowIso() };
     list.unshift(entry);
-    serverState.projectMemories.set(req.params.id, list);
+    serverState.projectMemories.set(projectId, list);
     persistWorkspace();
     res.status(201).json(entry);
   });
@@ -575,6 +577,21 @@ ${original}
     persistWorkspace();
     broadcastRealtimeEvent('ide_checkpoint_created', { checkpoint: revertCheckpoint, file_path: file.path });
     res.json({ restored: true, file, checkpoint: revertCheckpoint });
+  });
+
+  router.post('/workspace/symbols', requireAuth, async (req: Request, res: Response) => {
+    const projectPath = String(req.body?.project_path || process.cwd()).trim();
+    const maxFiles = Math.max(10, Math.min(2000, Number(req.body?.max_files) || 300));
+    const workerRes = await callPythonWorkerJson('/code/symbols', {
+      method: 'POST',
+      body: { project_path: projectPath, max_files: maxFiles },
+      timeoutMs: 4000,
+    });
+    if (!workerRes) {
+      res.json({ ok: false, worker_online: false, count: 0, symbols: [] });
+      return;
+    }
+    res.json({ ...workerRes, worker_online: true });
   });
 
   return router;

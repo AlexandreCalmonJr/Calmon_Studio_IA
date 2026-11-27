@@ -1,6 +1,8 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type { AgentServerRecord } from './serverState.ts';
-import type { AgentCoreRecord } from '../src/services/agentCoreEngine.ts';
-import type { BrainMemorySearchHit } from '../src/services/secondBrain.ts';
+import type { AgentCoreConfig as AgentCoreRecord } from '../src/services/agentCoreEngine.ts';
+import type { BrainSearchHit as BrainMemorySearchHit } from '../src/services/secondBrain.ts';
 import type { ContextSetRecord } from '../src/services/integrationsCatalog.ts';
 
 export interface ChatHistoryTurn {
@@ -235,13 +237,28 @@ export function buildAgentRuntimeContext(input: BuildAgentRuntimeContextInput): 
   if (soulMd) {
     sections.push(`Núcleo de Identidade (SOUL.md):\n${soulMd.slice(0, 1400)}`);
   }
-  const directives = String(agentCore?.system_directives || '').trim();
+  const directives = String((agentCore as Record<string, unknown>)?.system_directives || '').trim();
   if (directives) {
     sections.push(`Diretivas Operacionais do Núcleo:\n${directives.slice(0, 900)}`);
   }
   const coreMemoryMd = String(agentCore?.memory_markdown || '').trim();
   if (coreMemoryMd) {
     sections.push(`Memória Persistente do Agente (MEMORY.md):\n${coreMemoryMd.slice(0, 1200)}`);
+  }
+
+  for (const ruleFile of ['.calmonrules', 'CLAUDE.md']) {
+    try {
+      const full = path.join(process.cwd(), ruleFile);
+      if (fs.existsSync(full)) {
+        const content = fs.readFileSync(full, 'utf8').trim();
+        if (content) {
+          sections.push(`Regras do Projeto (${ruleFile}):\n${content.slice(0, 1400)}`);
+          break;
+        }
+      }
+    } catch {
+      // ignora erro de leitura opcional
+    }
   }
 
   // 3. Habilidades Ativas Vinculadas

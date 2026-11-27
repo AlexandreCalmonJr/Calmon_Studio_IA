@@ -12,17 +12,21 @@ from pydantic import BaseModel, Field
 
 from . import __version__
 from .config import settings
+from .hardware_scanner import scan_hardware
 from .rag_graph import OpenClawRagGraph, extract_hermes_facts
+from .symbol_indexer import index_workspace_symbols
 from .vector_store import OpenClawVectorStore
+from .voice_transcribe import LocalSTTAdapter
 
 app = FastAPI(
-    title="JARVIS Python 3.11 RAG Worker",
+    title="JARVIS Python 3.11 RAG & Compute Worker",
     version=__version__,
-    description="Serviço FastAPI + LangChain/LangGraph + ChromaDB + SQLAlchemy compatível com OpenClaw.",
+    description="Serviço FastAPI + LangChain/LangGraph + ChromaDB + Hardware/Voice/AST Worker.",
 )
 
 store = OpenClawVectorStore()
 rag_graph = OpenClawRagGraph(store)
+stt_adapter = LocalSTTAdapter()
 STARTED_AT = time.time()
 
 
@@ -106,3 +110,28 @@ def rag_extract_facts(payload: ExtractFactsRequest) -> dict[str, Any]:
 @app.post("/openclaw/sync", dependencies=[Depends(verify_internal_token)])
 def openclaw_sync(payload: OpenClawSyncRequest) -> dict[str, Any]:
     return store.sync_openclaw_markdown_dir(payload.workspace_slug, settings.openclaw_memory_dir)
+
+
+class VoiceTranscribeRequest(BaseModel):
+    audio_base64: str = Field(default="")
+    language: str = Field(default="pt", min_length=2, max_length=12)
+
+
+class SymbolIndexRequest(BaseModel):
+    project_path: str = Field(min_length=1, max_length=512)
+    max_files: int = Field(default=300, ge=10, le=2000)
+
+
+@app.get("/hardware/scan", dependencies=[Depends(verify_internal_token)])
+def hardware_scan() -> dict[str, Any]:
+    return scan_hardware()
+
+
+@app.post("/voice/transcribe", dependencies=[Depends(verify_internal_token)])
+def voice_transcribe(payload: VoiceTranscribeRequest) -> dict[str, Any]:
+    return stt_adapter.transcribe_base64(payload.audio_base64, language=payload.language)
+
+
+@app.post("/code/symbols", dependencies=[Depends(verify_internal_token)])
+def code_symbols(payload: SymbolIndexRequest) -> dict[str, Any]:
+    return index_workspace_symbols(payload.project_path, max_files=payload.max_files)

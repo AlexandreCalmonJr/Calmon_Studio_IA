@@ -44,6 +44,7 @@ export interface AgentServerRecord {
   handle: string;
   category: string;
   mission: string;
+  description?: string;
   preferred_model: string;
   routing_policy: 'auto_hybrid' | 'local_only' | 'online_only';
   autonomy_level: 'read_only' | 'ask_approval' | 'autonomous';

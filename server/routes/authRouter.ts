@@ -313,7 +313,7 @@ export function createAuthRouter(deps?: AuthRouterDeps): Router {
       res.status(403).json({ detail: 'Apenas administradores podem redefinir senhas.' });
       return;
     }
-    const target = users.get(req.params.username.toLowerCase());
+    const target = users.get(String(req.params.username || '').toLowerCase());
     const password = String(req.body?.password || '');
     if (!target) {
       res.status(404).json({ detail: 'Utilizador não encontrado.' });
@@ -342,7 +342,7 @@ export function createAuthRouter(deps?: AuthRouterDeps): Router {
       res.status(403).json({ detail: 'Apenas administradores podem alterar estados de contas.' });
       return;
     }
-    const target = users.get(req.params.username.toLowerCase());
+    const target = users.get(String(req.params.username || '').toLowerCase());
     if (!target) {
       res.status(404).json({ detail: 'Utilizador não encontrado.' });
       return;

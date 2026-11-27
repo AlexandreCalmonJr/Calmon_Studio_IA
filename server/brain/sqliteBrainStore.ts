@@ -156,6 +156,63 @@ export class LocalSqliteBrainStore {
     );
   }
 
+  private static applyVersionedMigrations(db: DatabaseSync): void {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        applied_at TEXT NOT NULL
+      );
+    `);
+
+    const applied = new Set<number>(
+      (db.prepare('SELECT version FROM schema_migrations').all() as Array<{ version: number }>).map(
+        (r) => Number(r.version)
+      )
+    );
+
+    const migrations: Array<{ version: number; name: string; run: () => void }> = [
+      {
+        version: 1,
+        name: '001_composite_indices',
+        run: () => {
+          for (const stmt of [
+            'CREATE INDEX IF NOT EXISTS idx_chat_messages_session_created ON chat_messages(session_id, created_at);',
+            'CREATE INDEX IF NOT EXISTS idx_memories_layer_created ON memories(layer, created_at);',
+            'CREATE INDEX IF NOT EXISTS idx_durable_runs_owner_created ON agent_runs(owner_user_id, created_at);',
+          ]) {
+            try {
+              db.exec(stmt);
+            } catch {
+              // Ignora se tabela opcional ainda não existir
+            }
+          }
+        },
+      },
+      {
+        version: 2,
+        name: '002_retention_cleanup_90d',
+        run: () => {
+          const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+          try {
+            db.prepare('DELETE FROM auth_sessions WHERE expires_at IS NOT NULL AND expires_at < ?').run(cutoff);
+          } catch {
+            // Ignora se coluna não existir
+          }
+        },
+      },
+    ];
+
+    const insertMig = db.prepare(
+      'INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)'
+    );
+    for (const mig of migrations) {
+      if (applied.has(mig.version)) continue;
+      mig.run();
+      insertMig.run(mig.version, mig.name, nowIso());
+    }
+  }
+
   private quarantineFiles(paths: string[], label: string): void {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     for (const filePath of paths) {
@@ -185,6 +242,7 @@ export class LocalSqliteBrainStore {
           });
         }
         db.exec(SQLITE_SCHEMA_DDL);
+        LocalSqliteBrainStore.applyVersionedMigrations(db);
         return db;
       } catch (err) {
         try {
@@ -692,7 +750,8 @@ export class LocalSqliteBrainStore {
       role: string;
       name: string;
       handle: string;
-      description: string;
+      description?: string;
+      mission?: string;
       system_prompt: string;
       preferred_model?: string;
       autonomy_level?: string;
@@ -1780,6 +1839,11 @@ export class LocalSqliteBrainStore {
       ws.close();
     }
     this.workspaceStores.clear();
+    try {
+      this.db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+    } catch {
+      // ignora se já estiver fechado
+    }
     this.db.close();
   }
 

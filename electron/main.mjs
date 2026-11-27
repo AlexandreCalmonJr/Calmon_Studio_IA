@@ -8,18 +8,62 @@
  *  - Exibir splash de carregamento enquanto o servidor sobe
  *  - Fornecer System Tray (bandeja) e encerramento limpo do SQLite WAL
  */
+import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { app, BrowserWindow, Menu, Tray, nativeImage, shell } from 'electron';
+import { app, BrowserWindow, Menu, Notification, Tray, dialog, globalShortcut, nativeImage, shell } from 'electron';
+import pkg from 'electron-updater';
+
+const { autoUpdater } = pkg;
 
 const APP_NAME = 'Calmon Studio';
 let mainWindow = null;
+let spotlightWindow = null;
 let tray = null;
 let serverHandle = null;
+let pythonWorkerProc = null;
 let isQuitting = false;
+
+function startOptionalPythonWorker(appRoot) {
+  if (process.env.CALMON_ENABLE_PYTHON_WORKER === '0') return;
+  const workerDir = path.join(appRoot, 'services', 'python-worker');
+  if (!fs.existsSync(path.join(workerDir, 'app', 'main.py'))) return;
+
+  const venvPy =
+    process.platform === 'win32'
+      ? path.join(appRoot, '.venv', 'Scripts', 'python.exe')
+      : path.join(appRoot, '.venv', 'bin', 'python3');
+  const pythonBin =
+    process.env.PYTHON_BIN ||
+    (fs.existsSync(venvPy) ? venvPy : process.platform === 'win32' ? 'python' : 'python3');
+
+  try {
+    const child = spawn(
+      pythonBin,
+      ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8001'],
+      {
+        cwd: workerDir,
+        shell: false,
+        stdio: 'ignore',
+        windowsHide: true,
+        env: { ...process.env, PYTHONUNBUFFERED: '1' },
+      }
+    );
+    child.on('error', () => {
+      pythonWorkerProc = null;
+    });
+    child.on('exit', () => {
+      if (pythonWorkerProc === child) pythonWorkerProc = null;
+    });
+    pythonWorkerProc = child;
+    process.env.PYTHON_WORKER_URL = process.env.PYTHON_WORKER_URL || 'http://127.0.0.1:8001';
+  } catch {
+    pythonWorkerProc = null;
+  }
+}
 
 function findAvailablePort(preferredPort = 3000) {
   return new Promise((resolve, reject) => {
@@ -73,10 +117,12 @@ function createTrayIcon() {
   return nativeImage.createFromDataURL(dataUrl);
 }
 
-function setupTray() {
+function setupTray(port) {
   if (tray) return;
   tray = new Tray(createTrayIcon());
-  tray.setToolTip(APP_NAME);
+  tray.setToolTip(`${APP_NAME} · Controle & IA`);
+
+  const loginSettings = app.getLoginItemSettings ? app.getLoginItemSettings() : { openAtLogin: false };
   const contextMenu = Menu.buildFromTemplate([
     {
       label: `Abrir ${APP_NAME}`,
@@ -86,6 +132,33 @@ function setupTray() {
           mainWindow.focus();
         }
       },
+    },
+    {
+      label: 'Abrir Controle Remoto (KDE Connect)',
+      click: () => {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+          void mainWindow.loadURL(`http://127.0.0.1:${port}/remote`);
+        }
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Iniciar com o Sistema',
+      type: 'checkbox',
+      checked: Boolean(loginSettings.openAtLogin),
+      click: (item) => {
+        try {
+          app.setLoginItemSettings({ openAtLogin: item.checked });
+        } catch {
+          // ignorado em plataformas sem suporte
+        }
+      },
+    },
+    {
+      label: `Modo Rede LAN (${process.env.JARVIS_ALLOW_LAN === '1' ? 'Visível no Wi-Fi' : 'Somente Local'})`,
+      enabled: false,
     },
     { type: 'separator' },
     {
@@ -103,6 +176,23 @@ function setupTray() {
       mainWindow.focus();
     }
   });
+}
+
+function showDesktopNotification(title, body) {
+  try {
+    if (Notification.isSupported()) {
+      const notif = new Notification({ title, body });
+      notif.on('click', () => {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      });
+      notif.show();
+    }
+  } catch {
+    // ignorado se o SO bloquear notificações
+  }
 }
 
 function buildSplashDataUrl() {
@@ -171,12 +261,74 @@ async function bootDesktopApp() {
 
   await mainWindow.loadURL(buildSplashDataUrl());
   mainWindow.show();
-  setupTray();
+  setupTray(port);
 
+  startOptionalPythonWorker(appRoot);
   const serverModule = await import(pathToFileURL(serverBundlePath).href);
   serverHandle = await serverModule.startServer();
 
   await mainWindow.loadURL(`http://127.0.0.1:${port}/`);
+  showDesktopNotification(APP_NAME, 'Pronto na bandeja para Controle Remoto e IA.');
+
+  try {
+    globalShortcut.register('CommandOrControl+Shift+Space', () => {
+      if (spotlightWindow && !spotlightWindow.isDestroyed()) {
+        if (spotlightWindow.isVisible()) {
+          spotlightWindow.hide();
+        } else {
+          spotlightWindow.show();
+          spotlightWindow.focus();
+        }
+        return;
+      }
+      spotlightWindow = new BrowserWindow({
+        width: 720,
+        height: 480,
+        frame: false,
+        alwaysOnTop: true,
+        resizable: true,
+        backgroundColor: '#0b0d12',
+        webPreferences: {
+          preload: path.join(appRoot, 'electron', 'preload.cjs'),
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+        },
+      });
+      spotlightWindow.on('blur', () => {
+        if (spotlightWindow && !spotlightWindow.isDestroyed()) spotlightWindow.hide();
+      });
+      void spotlightWindow.loadURL(`http://127.0.0.1:${port}/chat`);
+    });
+  } catch {
+    // atalho global indisponível
+  }
+
+  try {
+    autoUpdater.autoDownload = true;
+    autoUpdater.autoInstallOnAppQuit = true;
+    autoUpdater.on('update-downloaded', (info) => {
+      showDesktopNotification('Atualização Pronta', `Versão ${info?.version || ''} baixada. Clique para reiniciar.`);
+      void dialog
+        .showMessageBox(mainWindow, {
+          type: 'info',
+          buttons: ['Reiniciar e Atualizar', 'Depois'],
+          defaultId: 0,
+          title: 'Calmon Studio · Atualização Disponível',
+          message: `A versão ${info?.version || 'mais recente'} foi baixada e está pronta para instalar.`,
+        })
+        .then((res) => {
+          if (res.response === 0) {
+            isQuitting = true;
+            autoUpdater.quitAndInstall();
+          }
+        });
+    });
+    void autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+    setInterval(() => void autoUpdater.checkForUpdatesAndNotify().catch(() => {}), 6 * 60 * 60 * 1000);
+  } catch {
+    // auto-updater ignorado em dev sem publish
+  }
 }
 
 const gotSingleLock = app.requestSingleInstanceLock();
@@ -201,6 +353,10 @@ if (!gotSingleLock) {
   app.on('before-quit', async () => {
     isQuitting = true;
     try {
+      if (pythonWorkerProc && !pythonWorkerProc.killed) {
+        pythonWorkerProc.kill();
+        pythonWorkerProc = null;
+      }
       if (serverHandle?.close) {
         await serverHandle.close();
       }

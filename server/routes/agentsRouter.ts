@@ -446,8 +446,9 @@ export function createAgentsRouter(deps: AgentsRouterDeps): Router {
       });
       return;
     }
-    serverState.agentsList = serverState.agentsList.filter((a) => a.role !== req.params.role);
-    serverState.agentVersions.delete(req.params.role);
+    const roleParam = String(req.params.role || '');
+    serverState.agentsList = serverState.agentsList.filter((a) => a.role !== roleParam);
+    serverState.agentVersions.delete(roleParam);
     for (const sk of serverState.skillsList) {
       if (sk.assigned_agents.includes(target.role)) {
         sk.assigned_agents = sk.assigned_agents.filter((r: string) => r !== target.role);
@@ -459,17 +460,18 @@ export function createAgentsRouter(deps: AgentsRouterDeps): Router {
   });
 
   router.get('/agents/:role/versions', requireAuth, (req: Request, res: Response) => {
-    res.json(serverState.agentVersions.get(req.params.role) || []);
+    res.json(serverState.agentVersions.get(String(req.params.role || '')) || []);
   });
 
   router.post('/agents/:role/rollback', requireAuth, (req: Request, res: Response) => {
-    const idx = serverState.agentsList.findIndex((a) => a.role === req.params.role);
+    const roleParam = String(req.params.role || '');
+    const idx = serverState.agentsList.findIndex((a) => a.role === roleParam);
     if (idx === -1) {
       res.status(404).json({ detail: 'Especialista não encontrado.' });
       return;
     }
     const targetVersion = Number(req.body?.version);
-    const history = serverState.agentVersions.get(req.params.role) || [];
+    const history = serverState.agentVersions.get(roleParam) || [];
     const match = history.find((item) => item.version === targetVersion);
     if (!match) {
       res.status(404).json({ detail: 'Versão solicitada não encontrada no histórico.' });
@@ -491,7 +493,7 @@ export function createAgentsRouter(deps: AgentsRouterDeps): Router {
 
   router.get('/agent-routes', requireAuth, (_req: Request, res: Response) => res.json({ routes: serverState.agentRoutes }));
   router.put('/agent-routes/:role', requireAuth, (req: Request, res: Response) => {
-    const role = req.params.role;
+    const role = String(req.params.role || '');
     const targetModel = String(req.body?.model || serverState.hybridConfig.default_model).trim();
     const detectedProvider =
       inferExternalProviderFromModel(targetModel) || (isGeminiModelId(targetModel) ? 'gemini' : 'ollama');
@@ -515,25 +517,28 @@ export function createAgentsRouter(deps: AgentsRouterDeps): Router {
   });
 
   router.get('/agents/:role/memories', requireAuth, (req: Request, res: Response) => {
-    res.json(serverState.agentMemories.get(req.params.role) || []);
+    res.json(serverState.agentMemories.get(String(req.params.role || '')) || []);
   });
   router.post('/agents/:role/memories', requireAuth, (req: Request, res: Response) => {
-    const list = serverState.agentMemories.get(req.params.role) || [];
+    const roleParam = String(req.params.role || '');
+    const list = serverState.agentMemories.get(roleParam) || [];
     const item = {
       id: `mem_${Date.now()}`,
-      agent_role: req.params.role,
+      agent_role: roleParam,
       ...req.body,
       created_at: nowIso(),
       updated_at: nowIso(),
     };
     list.unshift(item);
-    serverState.agentMemories.set(req.params.role, list);
+    serverState.agentMemories.set(roleParam, list);
     persistStateNamespace(store, 'agent_memories', Array.from(serverState.agentMemories.entries()));
     res.status(201).json(item);
   });
   router.delete('/agents/:role/memories/:memoryId', requireAuth, (req: Request, res: Response) => {
-    const list = (serverState.agentMemories.get(req.params.role) || []).filter((m) => m.id !== req.params.memoryId);
-    serverState.agentMemories.set(req.params.role, list);
+    const roleParam = String(req.params.role || '');
+    const memoryId = String(req.params.memoryId || '');
+    const list = (serverState.agentMemories.get(roleParam) || []).filter((m) => m.id !== memoryId);
+    serverState.agentMemories.set(roleParam, list);
     persistStateNamespace(store, 'agent_memories', Array.from(serverState.agentMemories.entries()));
     res.json({ deleted: true });
   });
@@ -801,9 +806,10 @@ export function createAgentsRouter(deps: AgentsRouterDeps): Router {
   });
 
   router.get('/agents/:role/history', requireAuth, (req: Request, res: Response) => {
+    const roleParam = String(req.params.role || '');
     const sessionId = String(req.query.session_id || 'default');
-    const messages = store.listAgentHistoryMessages(req.params.role, sessionId);
-    res.json({ agent_role: req.params.role, session_id: sessionId, messages });
+    const messages = store.listAgentHistoryMessages(roleParam, sessionId);
+    res.json({ agent_role: roleParam, session_id: sessionId, messages });
   });
 
   router.get('/tools', requireAuth, (_req: Request, res: Response) => {

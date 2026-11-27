@@ -1,22 +1,25 @@
 import React from 'react';
+import { PageHeader } from './PageHeader';
 
-export interface PageShellProps {
-  mode?: 'standard' | 'fluid';
-  className?: string;
-  style?: React.CSSProperties;
+interface PageShellProps {
+  title: string;
+  subtitle?: string;
+  icon?: React.ReactNode;
+  actions?: React.ReactNode;
   children: React.ReactNode;
 }
 
 export const PageShell: React.FC<PageShellProps> = ({
-  mode = 'standard',
-  className = '',
-  style,
+  title,
+  subtitle,
+  icon,
+  actions,
   children,
 }) => {
-  const baseClass = mode === 'fluid' ? 'jarvis-page-shell--fluid' : 'jarvis-page-shell';
   return (
-    <div className={`${baseClass}${className ? ` ${className}` : ''}`} style={style}>
-      {children}
+    <div className="calmon-page-shell">
+      <PageHeader title={title} subtitle={subtitle} icon={icon} actions={actions} />
+      <div className="calmon-page-shell__body">{children}</div>
     </div>
   );
 };

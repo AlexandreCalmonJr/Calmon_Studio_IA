@@ -35,10 +35,10 @@ import {
 } from '../../services/api';
 import { useAssistantIdentity } from '../../context/AssistantIdentityContext';
 import { PageHeader } from '../../shared/layout/PageHeader';
-import { useOfflineQueue, usePWAInstall } from '../../shared/pwa/usePWAInstall';
+import { useOfflineQueue } from '../../shared/network/useOfflineQueue';
 import { notify } from '../../shared/common/Toast';
 
-type CompanionTab = 'companion' | 'voice' | 'push' | 'pwa';
+type CompanionTab = 'companion' | 'voice' | 'push' | 'offline';
 
 interface CompanionHubViewProps {
   onOpenVoiceHud: () => void;
@@ -50,7 +50,6 @@ export const CompanionHubView: React.FC<CompanionHubViewProps> = ({
   onNavigate,
 }) => {
   const { assistantName } = useAssistantIdentity();
-  const { isInstalled, swReady } = usePWAInstall();
   const { isOnline, queue, syncing, addCommand, removeCommand, syncNow } = useOfflineQueue();
 
   const [activeTab, setActiveTab] = useState<CompanionTab>('companion');
@@ -303,9 +302,9 @@ export const CompanionHubView: React.FC<CompanionHubViewProps> = ({
               <button
                 type="button"
                 role="tab"
-                aria-selected={activeTab === 'pwa'}
-                onClick={() => setActiveTab('pwa')}
-                className={`jarvis-segmented-btn ${activeTab === 'pwa' ? 'is-active' : ''}`}
+                aria-selected={activeTab === 'offline'}
+                onClick={() => setActiveTab('offline')}
+                className={`jarvis-segmented-btn ${activeTab === 'offline' ? 'is-active' : ''}`}
               >
                 PWA & Instalar App
               </button>
@@ -806,7 +805,7 @@ export const CompanionHubView: React.FC<CompanionHubViewProps> = ({
           )}
 
           {/* TAB 4: PWA & ADMINISTRAÇÃO MOBILE */}
-          {activeTab === 'pwa' && (
+          {activeTab === 'offline' && (
             <div style={s.twoColGrid}>
               <section style={s.card}>
                 <h2 style={s.sectionTitle}>
@@ -814,15 +813,15 @@ export const CompanionHubView: React.FC<CompanionHubViewProps> = ({
                   <span>Aplicativo Instalável (PWA) & Conformidade Mobile</span>
                 </h2>
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
-                  Instale o Calmon Studio na tela inicial do Android, iPhone ou Desktop para abrir em modo tela cheia (standalone), com cache offline e atalhos de voz.
+                  Modo PWA desativado em favor do aplicativo Android nativo (`.apk`) com todas as 28 rotas do Calmon Studio, Controle Remoto estilo KDE Connect e fila offline local.
                 </p>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                   {[
-                    { label: 'Web App Manifest', status: 'Ativo (Standalone)', ok: true },
-                    { label: 'Service Worker Cache', status: swReady ? 'Registrado' : 'Pronto (AutoUpdate)', ok: true },
-                    { label: 'Ícones PNG 192/512 + Maskable', status: 'Conformidade Total', ok: true },
-                    { label: 'iOS Apple Touch Icon (180px)', status: isInstalled ? 'Instalado' : 'Pronto p/ Safari', ok: true },
+                    { label: 'App Mobile Nativo', status: 'Android APK (Capacitor)', ok: true },
+                    { label: 'Modo PWA / Service Worker', status: 'Desativado', ok: true },
+                    { label: 'Fila de Comandos Offline', status: `${queue.length} na fila`, ok: true },
+                    { label: 'Controle Remoto & Admin', status: 'Integrado via WS', ok: true },
                   ].map((item) => (
                     <div key={item.label} style={s.metricBox}>
                       <span style={s.metricLabel}>{item.label}</span>

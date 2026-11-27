@@ -37,6 +37,8 @@ import {
   resolveAndroidMobileConfig,
 } from '../androidAppServer.ts';
 import type { LocalSqliteBrainStore } from '../brain/sqliteBrainStore.ts';
+import { callPythonWorkerJson } from '../brain/pythonWorkerHttpClient.ts';
+import { expressRateLimit, RATE_LIMITS } from '../rateLimiter.ts';
 
 function makePairingCode(): string {
   const seg = () => crypto.randomBytes(2).toString('hex').toUpperCase();
@@ -309,7 +311,11 @@ export function createVoiceCompanionRouter(deps?: { store?: LocalSqliteBrainStor
   });
 
   // --- TRANSCRIÇÃO DE ÁUDIO VIA BACKEND (FALLBACK PARA CHROMIUM / DESKTOP) ---
-  router.post('/voice/transcribe', requireAuth, async (req: Request, res: Response) => {
+  router.post(
+    '/voice/transcribe',
+    requireAuth,
+    expressRateLimit('voice/transcribe', RATE_LIMITS.voiceTranscribe.limit, RATE_LIMITS.voiceTranscribe.windowMs),
+    async (req: Request, res: Response) => {
     const providedTranscript = String(req.body?.text || req.body?.transcript || '').trim();
     if (providedTranscript) {
       res.json({ text: providedTranscript, transcript: providedTranscript, engine: 'client_bridge' });
@@ -406,9 +412,22 @@ export function createVoiceCompanionRouter(deps?: { store?: LocalSqliteBrainStor
         }
       }
 
+      const workerRes = await callPythonWorkerJson<{ ok?: boolean; text?: string; available?: boolean }>(
+        '/voice/transcribe',
+        {
+          method: 'POST',
+          body: { audio_base64: rawBase64, language },
+          timeoutMs: 12000,
+        }
+      );
+      if (workerRes?.ok && workerRes.text) {
+        res.json({ transcript: workerRes.text, provider: 'python_worker_whisper', model: 'faster-whisper' });
+        return;
+      }
+
       res.status(422).json({
         detail:
-          'Nenhum provedor de transcrição (Groq, OpenAI ou Gemini) configurado no Cofre de Chaves. Adicione uma chave em Configurações → Modelos & Provedores.',
+          'Nenhum provedor de transcrição (Groq, OpenAI, Gemini ou Whisper local) disponível. Adicione uma chave em Configurações → Modelos & Provedores.',
       });
     } catch (err: any) {
       res.status(502).json({ detail: err?.message || 'Falha ao transcrever áudio no servidor.' });
